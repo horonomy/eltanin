@@ -206,7 +206,88 @@ dependency), out of scope for HORO-834. Carried forward honestly rather
 than overclaimed, following the same pattern as HORO-832's
 ancestry-truncation gap above.
 
+## Compute Lease (F-M1-005, HORO-836) — `eltanin_core::lease`
+
+`ComputeLease` is the authorization-capability lifecycle artifact an
+ALLOW `PolicyDecision` becomes — never a permanent privilege. The only
+way to obtain one is `LeaseIssuer::issue(&PolicySet, ProvenanceRecord,
+MonotonicTime, Duration)`, which **re-evaluates** the policy over the
+exact `ProvenanceRecord` being bound — `issue` never accepts a
+pre-computed `PolicyDecision`, so "issued for context A, bound to
+context B" is unexpressable, the same structural trick
+`PolicySet::evaluate` and `eltanin-linux`'s pid-only collectors use.
+
+| Type | Purpose |
+|---|---|
+| `MonotonicTime` | Opaque `u64` nanosecond count, injected at issue and validate — `eltanin-core` never reads a clock. |
+| `IssuerInstanceId` | Opaque tag for one live `LeaseIssuer` — its restart epoch; must derive from the agent's own kernel-observed pid/`ProcessStartToken`. |
+| `LeaseId` | `{issuer, sequence}` — a correlation identifier, not a capability; carries no entropy. |
+| `ComputeLease` | Private fields, no public constructor outside `issue`, `Serialize`-only (never `Deserialize`). |
+| `LeaseError` | `Denied`/`NonPositiveTtl`/`TtlExceedsMaximum`/`ExpiryOverflow` — issuance failure. |
+| `RevocationOutcome` | `Revoked`/`AlreadyRevoked`/`NotIssued`/`ForeignIssuer`. |
+| `LeaseValidity` | `Valid{remaining}`/`ForeignIssuer`/`Revoked`/`ResourceMismatch`/`ActionMismatch`/`WorkloadMismatch`/`WorkloadIndeterminate`/`Expired` — a rich enum, not a bool, following `IdentityComparison`/`DecisionReason`. |
+| `LeaseIssuer` | Issues, validates, and revokes leases for one live process instance; `max_ttl` required at construction. |
+
+**Time is injected, never read.** `SystemTime` is wrong here — wall
+clock can move backward (NTP, manual change, suspend/resume), which
+could un-expire a lease. `Instant` is wrong here — not constructible at
+a chosen value or serializable, making deterministic tests impossible.
+`MonotonicTime` readings are only meaningful compared within one
+`IssuerInstanceId`; the `Instant -> MonotonicTime` adapter belongs to
+whichever crate owns a real clock (F-M1-006's agent), not this pure
+domain crate.
+
+**Validation check order** (load-bearing, not incidental): issuer
+identity → revocation → resource → action → workload identity (via
+`WorkloadIdentity::compare_process`, reusing HORO-831's semantics rather
+than inventing new ones) → executable identity (via
+`WorkloadIdentity::compare_executable`, added by independent review —
+`compare_process` alone cannot detect a process staying alive but
+`execve()`-ing into a different binary, since neither `pid` nor
+`ProcessStartToken` changes across `execve()`) → expiry. Binding checks
+precede expiry so a cross-workload/cross-resource replay attempt is
+reported as a mismatch, not downgraded into a routine `Expired` audit
+line.
+
+**Scope narrowing is structural**: `ComputeLease::narrow_expiry(self,
+not_after)` computes `min(current, not_after)` and consumes `self` —
+there is no widening counterpart and no `renew`/`extend` anywhere in
+this module. Renewal is a fresh `issue` over freshly observed context,
+a new authorization act, never an extension.
+
+**Restart/replay semantics** (three cases, three mechanisms):
+
+| Case | Mechanism | Result |
+|---|---|---|
+| Workload restarts / PID reused | `compare_process` on pid + `ProcessStartToken` | `WorkloadMismatch`, or `WorkloadIndeterminate` when evidence is insufficient |
+| Process stays alive, `execve()`s into a different binary | `compare_executable` on hash (falling back to path) | `ExecutableMismatch`, or `WorkloadIndeterminate` when evidence is insufficient |
+| Agent/issuer restarts | New `LeaseIssuer` → new `IssuerInstanceId` | Any lease from the old instance → `ForeignIssuer` |
+| Serialized lease replayed | No `Deserialize`, no public constructor | Bytes cannot become a `ComputeLease` at all |
+
+Agent restart therefore drops all outstanding leases, fail-closed — the
+correct default per ADR 0003 / North Star invariant 5 ("renewal is a new
+authorization act, not extension"), confirmed during HORO-836 design
+rather than silently assumed.
+
+**Known limitation, a contract on F-M1-006, not a property of this crate
+alone**: `LeaseIssuer::validate`'s `presented`/`now` parameters are
+caller-supplied and both types are `Deserialize`. The invariant
+"possession of lease data alone must not prove identity" therefore
+depends on F-M1-006's agent sourcing `presented` from its own collector
+and `now` from its own clock, never from anything a client sends over
+IPC — named explicitly here since it is the item most likely to be
+silently dropped by a future ticket.
+
+**Known limitation**: `narrow_expiry` preserves `LeaseId`, so two
+`ComputeLease` values can share an id with different `expires_at` — an
+audit trail (F-M1-009) cannot attribute a compute event to one
+specifically. Accepted for MVP 1.0 (narrowing restricts one existing
+authorization; revoking the id invalidates every value sharing it),
+documented rather than silently left unaddressed.
+
 ## Not yet implemented
 
-Lease domain types (F-M1-005, HORO-836) — tracked in
-`docs/development/campaign-state.md`.
+Nothing in `eltanin-core`'s currently-scoped domain — F-M1-001/003/004/005
+are all implemented. Remaining Features (F-M1-006 agent/IPC, F-M1-007
+enforcement, F-M1-008 CLI, F-M1-009 audit) live in other crates —
+tracked in `docs/development/campaign-state.md`.
