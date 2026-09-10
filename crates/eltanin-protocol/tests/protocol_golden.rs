@@ -83,7 +83,7 @@ fn release_lease_matches_fixture() {
 fn agent_status_request_matches_fixture() {
     let value: Request = Versioned::current(RequestBody {
         request_id: RequestId(3),
-        body: ClientRequest::AgentStatus,
+        body: ClientRequest::AgentStatus {},
     });
     assert_golden(&value, include_str!("fixtures/agent_status_request.json"));
 }

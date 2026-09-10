@@ -41,6 +41,18 @@ fn unknown_field_in_a_request_body_fails_closed_as_malformed() {
 }
 
 #[test]
+fn unknown_field_alongside_a_unit_variant_operation_fails_closed_as_malformed() {
+    // Regression: a unit variant like AgentStatus has no struct of its
+    // own to carry #[serde(deny_unknown_fields)], so this must be
+    // enforced at the ClientRequest enum level instead — found by
+    // independent review, which demonstrated this exact input decoding
+    // successfully before the enum-level attribute was added.
+    let body =
+        br#"{"version":1,"payload":{"request_id":1,"body":{"op":"agent_status","sneaky":"data"}}}"#;
+    assert_eq!(decode_request(body).unwrap_err(), ProtocolError::Malformed);
+}
+
+#[test]
 fn a_non_object_payload_fails_closed_as_malformed() {
     let body = br#"{"version":1,"payload":42}"#;
     assert_eq!(decode_request(body).unwrap_err(), ProtocolError::Malformed);
