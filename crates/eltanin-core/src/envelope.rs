@@ -20,7 +20,10 @@ pub struct Versioned<T> {
 impl<T> Versioned<T> {
     /// Wrap `payload` at the current schema version.
     pub fn current(payload: T) -> Self {
-        Self { version: DOMAIN_SCHEMA_VERSION, payload }
+        Self {
+            version: DOMAIN_SCHEMA_VERSION,
+            payload,
+        }
     }
 }
 
@@ -38,11 +41,19 @@ impl<T> Versioned<T> {
     /// this build supports. MVP 1.0 supports exactly one version — there
     /// is no migration path yet, and pretending otherwise would be a
     /// silent compatibility promise this codebase doesn't keep.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnsupportedVersion`] if `self.version` is not
+    /// [`DOMAIN_SCHEMA_VERSION`].
     pub fn into_current(self) -> Result<T, UnsupportedVersion> {
         if self.version == DOMAIN_SCHEMA_VERSION {
             Ok(self.payload)
         } else {
-            Err(UnsupportedVersion { found: self.version, expected: DOMAIN_SCHEMA_VERSION })
+            Err(UnsupportedVersion {
+                found: self.version,
+                expected: DOMAIN_SCHEMA_VERSION,
+            })
         }
     }
 }
