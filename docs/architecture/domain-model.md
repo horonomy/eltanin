@@ -288,9 +288,60 @@ specifically. Accepted for MVP 1.0 (narrowing restricts one existing
 authorization; revoking the id invalidates every value sharing it),
 documented rather than silently left unaddressed.
 
+## Local IPC protocol (F-M1-006, HORO-838)
+
+`crates/eltanin-protocol` defines the canonical, platform-neutral wire
+types for the local authorization agent's IPC channel — the type
+definitions and framing rules only; the actual Unix Domain Socket
+listener, peer-credential collection, and agent runtime are HORO-839,
+and their integration with policy/lease/backend is HORO-840.
+
+| Type | Purpose |
+|---|---|
+| `RequestId` | Client-chosen correlation id (`u64`, bounded by construction). No authority. |
+| `ClientRequest` | `RequestLease(LeaseRequest) \| ReleaseLease(ReleaseRequest) \| AgentStatus` — exactly three MVP 1.0 operations, no `#[serde(other)]` catch-all. |
+| `RequestBody` / `Request` | `{ request_id, body }`, wrapped in `eltanin_core::envelope::Versioned<T>`. |
+| `AgentResponse` | `LeaseGranted \| LeaseDenied \| LeaseReleased \| Status \| Error` — derives `Deserialize`, which is the enforcement mechanism (see below). |
+| `LeaseView` | Client-facing view of a granted lease: `lease_id` + `remaining: Duration`, never the lease's own `MonotonicTime` fields (meaningless outside the issuing agent). |
+| `DenialReason` | A deliberately lossy 3-variant projection of `DecisionReason` — rule ids stay in the audit trail, not on the wire. |
+| `ReleaseOutcome` | A deliberately coarser 2-variant projection of `RevocationOutcome` — see the named obligation below. |
+| `ErrorCode` | Closed error enum, no free-text field — detail goes to the agent's log, never to the client. |
+| `ResponseBody` / `Response` | `{ request_id: Option<RequestId>, body }`, wrapped in `Versioned<T>`. `request_id` is `Option` because correlation is recoverable for a garbage request *body* but not for a non-object request *payload*. |
+
+**Versioning**: reuses `eltanin_core::envelope::Versioned<T>` and
+`DOMAIN_SCHEMA_VERSION` rather than minting a separate IPC protocol
+version — MVP 1.0 ships one release with one schema version, and a
+second version number would be an unearned compatibility promise (same
+reasoning as `envelope.rs`'s own docs). No version handshake:
+`AgentStatus` is the liveness/version probe, and an unsupported version
+fails closed with `ErrorCode::UnsupportedVersion { found, expected }`.
+
+**Framing**: a 4-byte big-endian `u32` length prefix + UTF-8 JSON,
+bounded by `MAX_FRAME_BYTES` (64 KiB). `decode_request` checks the
+length *before* attempting deserialization. **Named obligation on
+HORO-839** (a contract on the transport, not a property this crate
+alone can enforce): the transport must call `decode_frame_len` on the
+4-byte header and reject before allocating a read buffer for the body —
+a check applied only after reading the full body still permits an
+unbounded allocation driven by an attacker-chosen length prefix.
+
+**Trust boundary**: zero identity/evidence fields in any wire type. See
+`docs/product/SECURITY_MODEL.md`'s "Local IPC trust boundary" section
+for the full derived-vs-client mapping and the `AgentResponse`-derives-
+`Deserialize` enforcement argument.
+
+**Known limitation, flagged during design, not yet resolved**: the
+`eltanin run` launch model (fork+exec vs. exec-in-place) is undecided,
+and both plausible paths currently fail lease validation differently —
+fork+exec produces a new pid (`WorkloadMismatch`), exec-in-place
+preserves pid/start-token but changes the binary (`ExecutableMismatch`,
+per HORO-836's `compare_executable`). Must be resolved by HORO-839/840
+before transport work assumes either.
+
 ## Not yet implemented
 
-Nothing in `eltanin-core`'s currently-scoped domain — F-M1-001/003/004/005
-are all implemented. Remaining Features (F-M1-006 agent/IPC, F-M1-007
-enforcement, F-M1-008 CLI, F-M1-009 audit) live in other crates —
-tracked in `docs/development/campaign-state.md`.
+F-M1-001/003/004/005 (`eltanin-core`) and the protocol type layer of
+F-M1-006 (`eltanin-protocol`, HORO-838) are implemented. Remaining work:
+F-M1-006's agent runtime/transport (HORO-839) and its integration with
+policy/lease/backend (HORO-840), F-M1-007 enforcement, F-M1-008 CLI,
+F-M1-009 audit — tracked in `docs/development/campaign-state.md`.
