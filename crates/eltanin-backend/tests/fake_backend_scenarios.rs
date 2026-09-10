@@ -89,9 +89,10 @@ fn enforcement_succeeds_when_capability_present_and_no_override() {
 }
 
 #[test]
-fn enforcement_fails_when_scripted_denied() {
+fn unauthorized_request_reports_scripted_denial() {
     // Simulates a policy decision (F-M1-004, not yet implemented) that
-    // already decided DENY before the backend was ever asked to enforce.
+    // already decided DENY before the backend was ever asked to enforce
+    // — i.e. an unauthorized request reaching an otherwise-capable backend.
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
@@ -153,18 +154,43 @@ fn resource_disappears_mid_session() {
 fn lease_expiry_scenario_via_scripted_denial() {
     // F-M1-005 (Compute Lease) doesn't exist yet; this scripts the
     // outcome a real lease-expiry check would produce, so downstream
-    // Feature tests have a fixture to build on now.
+    // Feature tests have a fixture to build on now. Uses a distinct
+    // resource from unauthorized_request_reports_scripted_denial so a
+    // future EnforcementResult::Denied refinement (e.g. a structured
+    // reason code instead of a free-text string) can tell them apart.
     let backend = FakeBackend::new();
     backend.insert(resource_with(
-        "gpu-0",
+        "gpu-1",
         [Capability::Discover, Capability::Enforce],
     ));
     backend.script_enforcement(
-        identity("gpu-0"),
+        identity("gpu-1"),
         EnforcementResult::Denied {
             reason: "lease expired".into(),
         },
     );
+
+    let request = ComputeRequest {
+        resource: identity("gpu-1"),
+        action: Action::Compute,
+    };
+    let result = backend.enforce(&request).unwrap();
+    assert_eq!(
+        result,
+        EnforcementResult::Denied {
+            reason: "lease expired".into()
+        }
+    );
+}
+
+#[test]
+fn scripted_allowed_cannot_mask_a_capability_downgrade() {
+    // A script must never be able to make enforce() report Allowed for a
+    // resource that structurally lacks Capability::Enforce — capability
+    // is checked before any scripted override is consulted.
+    let backend = FakeBackend::new();
+    backend.insert(resource_with("gpu-0", [Capability::Discover]));
+    backend.script_enforcement(identity("gpu-0"), EnforcementResult::Allowed);
 
     let request = ComputeRequest {
         resource: identity("gpu-0"),
@@ -173,8 +199,8 @@ fn lease_expiry_scenario_via_scripted_denial() {
     let result = backend.enforce(&request).unwrap();
     assert_eq!(
         result,
-        EnforcementResult::Denied {
-            reason: "lease expired".into()
+        EnforcementResult::Unsupported {
+            capability: Capability::Enforce
         }
     );
 }
