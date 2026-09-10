@@ -71,12 +71,25 @@ pub struct ReleaseRequest {
 /// lease it already holds, and enforcement of a lease is agent-side
 /// (F-M1-007), not something a client-driven validate call gates. Adding
 /// it later is additive and version-visible.
+///
+/// `AgentStatus` is a zero-field **struct** variant, not a unit variant,
+/// specifically so `#[serde(deny_unknown_fields)]` has real field-set
+/// checking to attach to. A unit variant has no fields for serde's
+/// internally-tagged-enum deserialization to check at all, so it
+/// silently ignores any sibling JSON alongside the tag regardless of
+/// where `deny_unknown_fields` is placed — found by independent review,
+/// which demonstrated `{"op":"agent_status","sneaky":"data"}` decoding
+/// successfully as a unit variant even with the attribute on the enum
+/// itself. `AgentStatus {}` closes the gap: extra fields alongside the
+/// tag now have a real (empty) field set to be checked against, and the
+/// wire shape is unchanged (`{"op":"agent_status"}`, no `{}` needed on
+/// the wire).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "op")]
+#[serde(rename_all = "snake_case", tag = "op", deny_unknown_fields)]
 pub enum ClientRequest {
     RequestLease(LeaseRequest),
     ReleaseLease(ReleaseRequest),
-    AgentStatus,
+    AgentStatus {},
 }
 
 /// One versioned, correlated request body.
