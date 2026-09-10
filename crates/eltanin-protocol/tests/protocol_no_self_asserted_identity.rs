@@ -55,7 +55,14 @@ fn strip_use_lines(source: &str) -> String {
 /// a general-purpose Rust parser — relies on `provenance_for` being the
 /// only function whose signature spans the `fn` keyword to its opening
 /// `{` without any nested `{`/`}` in between, which is true for its
-/// current one-line signature.
+/// current one-line signature. Also relies on `provenance_for` having no
+/// inline (`// ...`) comment containing a brace character in its body,
+/// and on it remaining the **last item in `request.rs`** — brace
+/// counting is not comment/string-literal aware, so an unbalanced brace
+/// inside an inline comment could under- or over-strip (flagged by
+/// independent review as fragile, though not currently exploitable: as
+/// of this writing `provenance_for` is the last item in the file and
+/// its body contains no comments).
 fn strip_provenance_for(source: &str) -> String {
     let Some(start) = source.find("pub fn provenance_for") else {
         return source.to_string();
