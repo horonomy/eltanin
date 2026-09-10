@@ -27,18 +27,33 @@ silently reinterpreting bytes from a schema this build doesn't
 understand. `DOMAIN_SCHEMA_VERSION` is bumped whenever a wrapped type's
 wire shape changes incompatibly.
 
+## Backend contract (F-M1-001, HORO-826) — `eltanin_backend::contract`
+
+| Type | Purpose |
+|---|---|
+| `ComputeBackend` | The trait every backend implements: `discover`, `observe`, `enforce`, `revoke`. Fake (`eltanin_backend::fake`, HORO-827) and, later, the real NVIDIA backend (`crates/eltanin-nvidia`, F-M1-002) both target exactly this trait — no backend-specific method exists outside it. Not a promise of a stable dynamic Rust ABI: if externalized to a separate process, the wire contract is `eltanin-protocol`'s versioned protocol (ADR 0004), not this trait's vtable. |
+| `BackendError` | Typed operation failure distinct from `EnforcementResult` (which describes an enforcement *outcome*, not why an attempt couldn't be made): `Unsupported{capability}` (structural — never retry), `Unavailable{resource}`, `PermissionDenied`, `Transient{message}` (retryable), `Invariant{message}` (a bug, not a runtime condition). |
+
+`ComputeBackend::enforce` does not decide authorization (F-M1-004 already
+did) — it only reports whether the backend could carry out or verify the
+already-decided action. A backend lacking `Capability::Enforce` returns
+`Ok(EnforcementResult::Unsupported{..})`, never `Ok(Allowed)`.
+
 ## Architecture enforcement
 
-`crates/eltanin-core/tests/architecture_no_vendor_leak.rs` scans all
-non-comment source lines in the crate for vendor/platform terms
-(`nvidia`, `cuda`, `cgroup`, `nvml`, ...) and fails CI if any appear —
-this is HORO-825's "architecture test/review rule catches vendor-specific
+`crates/eltanin-core/tests/architecture_no_vendor_leak.rs` and
+`crates/eltanin-backend/tests/architecture_no_vendor_leak.rs` scan all
+non-comment source lines in their crate for vendor/platform terms
+(`nvidia`, `cuda`, `cgroup`, `nvml`, ...) and fail CI if any appear — this
+is HORO-825/826's "architecture test/review rule catches vendor-specific
 concepts leaking into core" acceptance criterion, enforced mechanically
-rather than by review discipline alone.
+rather than by review discipline alone. The backend crate's test also
+asserts `eltanin-core` never depends back on `eltanin-backend`, enforcing
+HORO-826's required dependency direction (vendor backend → `eltanin-backend`
+→ `eltanin-core`).
 
 ## Not yet implemented
 
-Backend capability trait contract (F-M1-001/HORO-826), Fake Compute
-Backend (F-M1-001/HORO-827), identity/policy/lease/provenance domain
-types (F-M1-003/004/005, HORO-831/834/836) — tracked in
+Fake Compute Backend (F-M1-001/HORO-827), identity/policy/lease/provenance
+domain types (F-M1-003/004/005, HORO-831/834/836) — tracked in
 `docs/development/campaign-state.md`.
