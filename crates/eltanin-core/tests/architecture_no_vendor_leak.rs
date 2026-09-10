@@ -15,14 +15,14 @@
 use std::fs;
 use std::path::Path;
 
-const FORBIDDEN: &[&str] = &[
-    "nvidia",
-    "cuda",
-    "cgroup",
-    "/dev/nvidia",
-    "nvml",
-    "bpf_prog_type",
-];
+const FORBIDDEN: &[&str] = &["nvidia", "cuda", "/dev/nvidia", "nvml", "bpf_prog_type"];
+// Deliberately NOT forbidden: the bare word "cgroup". It was originally
+// listed here, but that banned a legitimate field HORO-831 requires
+// (ExecutionContext::cgroup_path) — cgroup membership is workload
+// *context* the domain model needs to describe, not a leak of the
+// cgroup-v2-device-BPF *enforcement mechanism* (F-M1-007/ADR 0001),
+// which is what this list actually needs to keep out of eltanin-core.
+// The enforcement-mechanism-specific term ("bpf_prog_type") stays banned.
 
 fn strip_comment_lines(source: &str) -> String {
     source
