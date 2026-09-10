@@ -39,6 +39,12 @@ dependencies = [
 [[package]]
 name = "eltanin-protocol"
 version = "0.1.0"
+dependencies = [
+ "eltanin-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "itoa"

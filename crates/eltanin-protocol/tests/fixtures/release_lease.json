@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": 2,
+    "body": {
+      "op": "release_lease",
+      "lease_id": {
+        "issuer": "issuer-a",
+        "sequence": 7
+      }
+    }
+  }
+}

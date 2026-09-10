@@ -63,6 +63,41 @@ hardware evidence.
   its actual source, and PID reuse has defined semantics
   (`WorkloadIdentity::compare_process`) rather than an implicit assumption.
 
+## Local IPC trust boundary (F-M1-006, HORO-838)
+
+The unprivileged client talking to the local authorization agent over
+IPC is **never** trusted to assert its own identity or authorization
+state. `crates/eltanin-protocol`'s wire types carry zero identity or
+evidence fields — no request or response names a `WorkloadIdentity`,
+`ExecutionContext`, or `Evidence<T>` — so there is no wire shape a client
+could populate to claim a UID, executable path, or process ancestry
+that overrides what the agent observes about the connecting peer itself
+(via OS peer credentials and `eltanin-linux`'s collector, both HORO-839
+concerns). A client can name a `resource`/`action` (a request parameter
+default-deny policy can only narrow, never widen) and a `lease_id` (a
+lookup key, not a capability), and nothing else.
+
+`AgentResponse` derives `Deserialize`, which structurally forbids
+embedding `ComputeLease`, `PolicyDecision`, `DecisionReason`, or
+`LeaseValidity` in any response — all four are `Serialize`-only by
+construction elsewhere in this codebase. A client that fabricates a
+`LeaseGranted`-shaped value has fabricated a display string; real
+enforcement happens agent-side (cgroup device-BPF, F-M1-007), never by a
+client presenting a response it holds. This closes the "no permanent
+plaintext local bearer credential merely for convenience" requirement by
+construction rather than by convention.
+
+**Named obligation on HORO-840**: `ReleaseLease` is a wire operation
+naming another lease by id. `eltanin-core`'s `LeaseIssuer::revoke` alone
+only checks issuer identity and sequence range — sequence numbers are
+enumerable, so nothing in `eltanin-core` stops a client from naming a
+lease it doesn't own. HORO-840's release handler must additionally
+compare the stored lease's workload identity against the freshly derived
+peer identity (`compare_process` and `compare_executable`, both
+reporting `Same`) before calling `revoke`, and report every other case
+as a client-facing `Refused` — never a distinction that would let a
+client enumerate other clients' leases.
+
 ## Enforcement mechanism (validated, not assumed)
 
 Linux cgroup v2 device-BPF (`BPF_PROG_TYPE_CGROUP_DEVICE` /
