@@ -110,6 +110,17 @@ unbounded-cost operation this collector does not implement); ancestry
 walks are bounded (`MAX_ANCESTRY_DEPTH`) and cycle-guarded against a
 corrupted `/proc` parent chain.
 
+**Known scope gap**: an ancestry walk that stops early because an
+ancestor's `/proc` entry couldn't be read (e.g. permission denied on a
+process owned by another UID) is indistinguishable, from the returned
+list alone, from genuinely reaching the top of the process tree —
+`ProcessAncestor`/`ExecutionContext` have no field to carry "walk
+truncated early: evidence unavailable." Closing this needs a contract
+change in `eltanin-core`, out of scope for HORO-832. Bounded impact:
+ancestry is a contextual signal only, never an authorization basis
+(North Star invariant 4), so a short ancestor list can only degrade the
+audit trail, never a security decision.
+
 On any non-Linux `target_os`, both functions return `Evidence::Unsupported`
 for every field — a documented fallback, not a compile failure — so this
 crate builds and unit-tests on any dev machine while the real

@@ -164,6 +164,24 @@ mod imp {
         }
     }
 
+    /// Walk `start_pid`'s parent chain via repeated `/proc/<pid>/stat`
+    /// reads.
+    ///
+    /// Known scope gap: `parent_pid` discards *why* a read failed
+    /// (permission denied on an ancestor owned by another UID is the
+    /// realistic case for a non-root collector walking toward PID 1) and
+    /// this loop simply stops there. The returned `Vec<ProcessAncestor>`
+    /// therefore cannot be distinguished from "genuinely reached the top
+    /// of the tree" by its length alone. `ProcessAncestor`/
+    /// `ExecutionContext` (`eltanin_core::identity`) have no field to
+    /// carry "ancestry walk stopped early: evidence unavailable" —
+    /// closing this gap needs a contract change in `eltanin-core`, out
+    /// of scope for this collector-only ticket (HORO-832). Ancestry is a
+    /// contextual signal only, never an authorization basis (North Star
+    /// invariant 4), which bounds the impact: a short ancestor list can
+    /// never be *upgraded* into a false-negative security decision, only
+    /// into a less useful audit trail. Tracked for a follow-up rather
+    /// than fixed silently here.
     fn ancestry(start_pid: u32) -> Vec<ProcessAncestor> {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -294,11 +312,16 @@ mod imp {
         #[test]
         fn collects_own_execution_context_cgroup_path() {
             let ctx = collect_execution_context(std::process::id());
-            // A cgroup path is expected on any Linux CI/container host;
-            // if genuinely unavailable this collector must say so
-            // explicitly rather than fabricate a path.
+            // Every Linux CI/container host has a `/proc/self/cgroup`
+            // for the running test process, so this must be `Present`,
+            // not merely "not a panic" — a weaker assertion here would
+            // pass even if `cgroup_path()` always returned `Missing`.
+            let Evidence::Present { value, .. } = &ctx.cgroup_path else {
+                panic!("expected a present cgroup path, got {:?}", ctx.cgroup_path);
+            };
             assert!(
-                ctx.cgroup_path.is_present() || matches!(ctx.cgroup_path, Evidence::Missing { .. })
+                value.starts_with('/'),
+                "cgroup path should be absolute: {value:?}"
             );
         }
 
