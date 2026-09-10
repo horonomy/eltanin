@@ -9,3 +9,8 @@ description = "Eltanin vendor-neutral domain core: resource, identity, policy, l
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
