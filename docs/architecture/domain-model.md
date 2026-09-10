@@ -69,7 +69,31 @@ disappearance, a lease-expiry stand-in, revoke with/without capability,
 and determinism across repeated runs (same script, same result, every
 time — no hidden state or ordering dependency).
 
+## Workload identity (F-M1-003, HORO-831) — `eltanin_core::identity`
+
+| Type | Purpose |
+|---|---|
+| `EvidenceSource` | How a signal was obtained: `KernelObserved` (unforgeable by the observed process), `BestEffort` (unforgeable by the caller, but a narrow TOCTOU race is possible), `SelfAsserted` (the process's own claim, never an authorization basis). |
+| `Evidence<T>` | `Present{value, source}` / `Missing{reason}` / `Unsupported` — every field a caller must handle explicitly; there is no default/fallback state, so missing evidence can never be silently treated as present-and-trusted. |
+| `ProcessStartToken` | Opaque value paired with a PID to detect PID reuse. |
+| `ProcessAncestor` | One entry in a process's parent chain — a contextual signal, never authority. |
+| `WorkloadIdentity` | pid, process_start, uid, gid, executable_path/hash, ancestry — all as `Evidence<T>`. |
+| `ExecutionContext` | `WorkloadIdentity` + cgroup_path/namespace_hint/container_hint/session_origin, all `Evidence<T>`. |
+
+`WorkloadIdentity::compare_process` defines PID-reuse/restart semantics
+(HORO-831 AC) via a three-way `IdentityComparison` result — `Same`,
+`Different`, or `Indeterminate` — deliberately not a `bool`: collapsing
+"confirmed different" and "insufficient evidence" into one `false` would
+let a caller mistake missing evidence for a confirmed answer. `Same`
+requires `pid` to match **and** both `process_start` tokens to be
+`Present` and equal; either side missing/unsupported is `Indeterminate`,
+never silently treated as `Different` or `Same`. This is what keeps
+`uid == owner`, `name == trusted`, `path == trusted`, `parent == trusted`
+from ever becoming unconditional authorization (North Star invariant 4).
+
 ## Not yet implemented
 
-Identity/policy/lease/provenance domain types (F-M1-003/004/005,
-HORO-831/834/836) — tracked in `docs/development/campaign-state.md`.
+Policy/lease/provenance domain types (F-M1-004/005, HORO-834/836), and
+the Linux collector that actually populates `WorkloadIdentity`/
+`ExecutionContext` from observed process state (F-M1-003, HORO-832) —
+tracked in `docs/development/campaign-state.md`.

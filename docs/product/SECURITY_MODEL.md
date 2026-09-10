@@ -56,7 +56,12 @@ hardware evidence.
   technically open.
 - **Process metadata (PID, path, parent, UID) is a signal into workload
   identity/provenance (F-M1-003), never a bypass of policy evaluation
-  (F-M1-004).**
+  (F-M1-004).** Implemented as `eltanin_core::identity::Evidence<T>`
+  (HORO-831): every field carries an explicit source (kernel-observed /
+  best-effort / self-asserted) and can be `Missing`/`Unsupported` — there
+  is no type-level way to treat a field as "trusted" without inspecting
+  its actual source, and PID reuse has defined semantics
+  (`WorkloadIdentity::compare_process`) rather than an implicit assumption.
 
 ## Enforcement mechanism (validated, not assumed)
 
