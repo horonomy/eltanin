@@ -199,3 +199,40 @@ fn missing_evidence_never_reports_present_or_yields_a_value() {
     assert!(!unsupported.is_present());
     assert_eq!(unsupported.value(), None);
 }
+
+/// **Scenario** (found by independent review of an earlier revision of
+/// this PR): an attacker-controlled process self-reports a
+/// `process_start` value that happens to match the real, kernel-observed
+/// value for the PID it wants to impersonate. Before this test existed,
+/// `compare_process` compared only `value`, so a matching `SelfAsserted`
+/// claim was indistinguishable from a genuine `KernelObserved` reading
+/// at the one place that actually decides identity continuity — this
+/// pins that `compare_process` now rejects a `SelfAsserted` start token
+/// on either side as `Indeterminate`, never `Same`, even when the
+/// claimed value is numerically identical to the trusted side's.
+#[test]
+fn self_asserted_start_token_matching_the_real_value_is_not_reported_same() {
+    let trusted = identity_with(
+        4242,
+        present(1_000),
+        EvidenceSource::KernelObserved,
+        "/usr/bin/trusted-tool",
+    );
+    let mut attacker_claim = identity_with(
+        4242,
+        present(1_000),
+        EvidenceSource::KernelObserved,
+        "/usr/bin/trusted-tool",
+    );
+    attacker_claim.process_start = Evidence::Present {
+        value: ProcessStartToken(1_000),
+        source: EvidenceSource::SelfAsserted,
+    };
+    let result = trusted.compare_process(&attacker_claim);
+    assert_eq!(
+        result,
+        IdentityComparison::Indeterminate,
+        "a self-asserted start token must never be trusted enough to confirm Same, even if its value matches"
+    );
+    assert_ne!(result, IdentityComparison::Same);
+}
