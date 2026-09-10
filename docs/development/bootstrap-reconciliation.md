@@ -44,13 +44,36 @@ repo) was executed directly.
 
 ## 2. Jira archaeology — verdict: campaign planning is internally consistent, no stale/duplicate work found
 
-Inventoried all `HORO-772..850` plus `HVDL-25` (94 issues) via JQL. All
-MVP 1.0 in-scope tickets (Epic, 5 governance Tasks, 9 Features, ~30
-Subtasks) were in Jira-native `To Do`, freshly created 2026-09-08, with no
-prior implementation history, no linked stale duplicates, and no
-conflicting architecture decisions recorded elsewhere. `HORO-773..779`
-(MVP 2.0 through Stage 8 Epics) and `HORO-791..818` (post-MVP-1.0 Stories/
-Tasks) are correctly out of MVP 1.0 scope and were left untouched.
+Inventoried all `HORO-772..850` (79 issues) plus `HVDL-25` (80 issues
+total) via JQL. All MVP 1.0 in-scope tickets (Epic, 5 governance Tasks, 9
+Features, ~30 Subtasks) were in Jira-native `To Do`, freshly created
+2026-09-08, with no prior implementation history, no linked stale
+duplicates, and no conflicting architecture decisions recorded elsewhere.
+Explicit classification of every ticket named in HORO-821's own required
+minimum:
+
+- **HVDL-25** — canonical discovery idea (status `Researching`), correctly
+  connected to HORO-772 via a "Discovery - Connected" link. Current/
+  canonical; nothing to reconcile.
+- **HORO-772..790** — Epic + MVP 1.0 governance Tasks + all 9 F-M1-*
+  Features + the MVP 1.0 READY gate. All current, freshly created, no
+  stale metadata. `HORO-773..779` (MVP 2.0 through Stage 8 Epics) are
+  future-stage — correctly out of MVP 1.0 scope, left untouched.
+- **HORO-810** (QA/Security test plans), **HORO-811** (business E2E
+  automation), **HORO-814** (Claude Code project config) — all current,
+  in-scope MVP 1.0 governance Tasks, `To Do`, no prior work to reconcile.
+- **HORO-819** (feature-level QA/DoD) and **HORO-820** (docs architecture/
+  Docs Impact governance) — both current, in-scope MVP 1.0 governance
+  Tasks, `To Do`, no prior work to reconcile. (Not covered by any range
+  mentioned elsewhere in this document — called out explicitly here per
+  HORO-821's own named minimum.)
+- **HORO-791..809, 812, 813, 815..818** — MVP 2.0 / v0.0.1 / v0.1.0 /
+  later-stage Stories and Tasks. Correctly out of MVP 1.0 scope, left
+  untouched.
+- **HORO-821..850** — this reconciliation task itself, plus F-M1-005/008/
+  009 Features and all Feature subtasks. All current, freshly created,
+  `To Do` (HORO-821 `In Progress` as the active task), no prior work to
+  reconcile.
 
 **Verdict:** no ticket migration, superseding, or duplicate-linking was
 required. The only reconciliation action needed was metadata bootstrap
@@ -66,7 +89,7 @@ concepts were found outside this campaign's own new work.
 
 ## 4. Actions taken in this reconciliation pass
 
-### Jira (HORO-780 scope, executed here since it gates nothing else)
+### Jira (HORO-780 scope — executed in an earlier session of this same campaign, prior to this PR; reported here as evidence, not performed by this PR)
 
 - Fix Version **`Eltanin MVP 1.0 — Authorization Happy Path`** created
   (id `10192`; start 2026-09-08; target 2026-10-06; `released: false`),
@@ -86,7 +109,7 @@ concepts were found outside this campaign's own new work.
   recommended, and not attempted. Continuing in `HORO` is the correct
   default absent a concrete reason to move.
 
-### Repository (HORO-781 scope)
+### Repository (HORO-781 scope — also executed in an earlier session of this same campaign, prior to this PR)
 
 - Created `horonomy/eltanin`, public, under the existing Horonomy GitHub
   organization (no standalone Eltanin org, per spec).
@@ -103,8 +126,10 @@ concepts were found outside this campaign's own new work.
   this point forward goes through worktree → branch → PR → merge commit,
   demonstrated by PR #1 (`.github/PULL_REQUEST_TEMPLATE.md`, merged
   `e9ab11f`).
-- Starting `main` SHA after this reconciliation PR merges will be recorded
-  in `docs/development/campaign-state.md` (added alongside this file).
+- Starting `main` SHA for MVP 1.0 implementation work (i.e. `main` HEAD
+  immediately before this reconciliation PR merges) is `e9ab11f8bc954c1
+  614602ad41d9ed994be22e1db`, recorded in `docs/development/
+  campaign-state.md`.
 
 ## 5. Feature mapping — F-M1-001..009
 
