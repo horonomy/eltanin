@@ -1,0 +1,15 @@
+[package]
+name = "eltanin-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Eltanin CLI (MVP 1.0 scaffold — populated by F-M1-008, HORO-823/845/846)."
+
+[[bin]]
+name = "eltanin"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]

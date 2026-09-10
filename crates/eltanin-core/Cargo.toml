@@ -1,0 +1,11 @@
+[package]
+name = "eltanin-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Eltanin vendor-neutral domain core: resource, identity, policy, lease, provenance (MVP 1.0 scaffold)."
+
+[lints]
+workspace = true
+
+[dependencies]

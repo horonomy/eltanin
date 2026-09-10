@@ -1,0 +1,11 @@
+[package]
+name = "eltanin-agent"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Eltanin privileged local authorization agent (MVP 1.0 scaffold, F-M1-006 / HORO-788)."
+
+[lints]
+workspace = true
+
+[dependencies]

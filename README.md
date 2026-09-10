@@ -35,9 +35,15 @@ installer. See the Epic (HORO-772) for the full non-goal list.
 ## Repository layout
 
 ```text
-crates/          Rust workspace: domain, backend, agent, protocol, CLI
-platform/linux/  Linux-specific integration (agent, eBPF)
-docs/            Product constitution, architecture, ADRs, QA
+crates/eltanin-core/       Vendor-neutral domain: resource, identity, policy, lease, provenance
+crates/eltanin-backend/    Backend trait contract + deterministic fake backend
+crates/eltanin-protocol/   Versioned local IPC protocol
+crates/eltanin-agent/      Privileged local authorization agent
+crates/eltanin-cli/        `eltanin` CLI
+crates/eltanin-nvidia/     NVIDIA backend adapter (added by F-M1-002)
+crates/eltanin-linux/      Linux platform integration (added by F-M1-003/007)
+ebpf/eltanin-device-guard/ cgroup v2 device-BPF guard (added by F-M1-007)
+docs/                      Product constitution, architecture, ADRs, QA
 ```
 
 ## Contributing
