@@ -111,20 +111,55 @@ fn lease_serializes_to_the_expected_shape() {
 /// since a negative trait bound ("`ComputeLease` does not implement
 /// `Deserialize`") is not otherwise expressible without an additional
 /// compile-fail-testing dependency.
+///
+/// Deliberately checks *every* `#[derive(...)]` attribute stacked
+/// directly above the struct, not just the nearest one — Rust allows
+/// stacking multiple derive attributes on one item, all of which apply,
+/// so a check that only inspected the single nearest line could be
+/// defeated by splitting `Deserialize` into a second `#[derive(...)]`
+/// line (found by independent review). Also guards against a
+/// hand-written `impl Deserialize for ComputeLease` that bypasses derive
+/// entirely.
 #[test]
 fn compute_lease_source_never_derives_deserialize() {
     let source = include_str!("../src/lease.rs");
     let struct_offset = source
         .find("pub struct ComputeLease")
         .expect("ComputeLease struct definition must exist in lease.rs");
-    let last_derive = source[..struct_offset]
-        .lines()
-        .rev()
-        .find(|line| line.trim_start().starts_with("#[derive("))
-        .expect("ComputeLease must have a derive attribute directly above it");
+
+    let mut derives_above = Vec::new();
+    for line in source[..struct_offset].lines().rev() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#[derive(") {
+            derives_above.push(trimmed);
+        } else if trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.is_empty() {
+            // Other attributes, doc comments, or blank lines between the
+            // previous item and this one — keep walking up.
+        } else {
+            break; // reached the previous item's code
+        }
+    }
     assert!(
-        !last_derive.contains("Deserialize"),
-        "ComputeLease must never derive Deserialize — see lease.rs module docs \
-         on 'No reusable plaintext bearer-token shortcut'. Found: {last_derive:?}"
+        !derives_above.is_empty(),
+        "ComputeLease must have at least one #[derive(...)] attribute above it"
     );
+    for derive in &derives_above {
+        assert!(
+            !derive.contains("Deserialize"),
+            "ComputeLease must never derive Deserialize — see lease.rs module docs \
+             on 'No reusable plaintext bearer-token shortcut'. Found: {derive:?}"
+        );
+    }
+
+    for forbidden in [
+        "Deserialize for ComputeLease",
+        "Deserialize<'de> for ComputeLease",
+        "de::Deserialize for ComputeLease",
+        "de::Deserialize<'de> for ComputeLease",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "found a hand-written Deserialize impl for ComputeLease bypassing derive: {forbidden:?}"
+        );
+    }
 }
