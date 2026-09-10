@@ -128,7 +128,61 @@ crate builds and unit-tests on any dev machine while the real
 only on Linux (this repo's `ubuntu-latest` CI runner validates it; local
 macOS development cannot).
 
+## Authorization policy (F-M1-004, HORO-834) — `eltanin_core::policy`
+
+`PolicySet` is built only by validating a `PolicyDocument`
+(`PolicySet::from_document`/`from_versioned`) — an invalid document
+never becomes a `PolicySet`, so it can never deny or allow anything.
+`PolicySet::evaluate(&ExecutionContext, &ComputeRequest) -> PolicyDecision`
+is a pure function with no caller-supplied override parameter, so
+"caller-supplied identity fields must not override observed context"
+(HORO-787) is unexpressable, not merely disallowed — the same structural
+trick HORO-832's pid-only collector API uses.
+
+| Type | Purpose |
+|---|---|
+| `PolicyId`/`RuleId` | Opaque string identities, same pattern as `ResourceVendor`. |
+| `Effect` | `Allow`/`Deny`. |
+| `TrustFloor` | `KernelObserved`/`BestEffort` — deliberately excludes `SelfAsserted`; a rule that trusts a workload's own claim about itself is unrepresentable. |
+| `EvidenceMatch<T>` | `expected` value + `min_trust`; matches only `Evidence::Present` clearing the floor. `Missing`/`Unsupported` never match — there is no "field is missing" matcher. |
+| `Condition` | `Uid`/`Gid`/`ExecutablePath`/`ExecutableHash`/`CgroupPath`. `pid`, `ancestry`, and the never-populated `namespace_hint`/`container_hint`/`session_origin` are deliberately unmatchable. |
+| `Rule` | Exact `resource`+`action` match, AND-only `conditions` (non-empty, one per field — validated). |
+| `PolicyDocument` | Authored, not-yet-validated: `id`, author `revision`, `rules`. |
+| `PolicyError` | Six variants; validation failure = construction failure, no bypass. |
+| `PolicyProvenance` | `policy_id` + `policy_revision` + `schema_version` (from `Versioned<T>`'s `DOMAIN_SCHEMA_VERSION`). |
+| `DecisionReason` | `NoMatchingRule` / `ExplicitAllow{matched_rules}` / `ExplicitDeny{matched_rules, overridden_allow_rules}` — `BTreeSet<RuleId>` so the explanation is canonical regardless of authoring order. |
+| `PolicyDecision` | Private fields, no public constructor outside `evaluate`, `Serialize`-only (not `Deserialize` — nothing should reconstruct an authority-bearing decision from bytes by default). |
+
+**Evaluation semantics**: every rule is always evaluated (no first-match
+short circuit) — deny-overrides. If any deny rule matches, the decision
+is `Deny` regardless of how many allow rules also matched; `Allow`
+requires a non-empty matched-allow set and zero matched deny rules; no
+match at all denies. This makes default-deny structural: `Effect::Allow`
+is reachable only via `DecisionReason::ExplicitAllow`, and an empty
+policy (zero rules) is valid and denies everything.
+
+**Two design decisions made explicitly, not silently**:
+1. No `Principal`/role/group type exists in this domain model (MVP 1.0
+   is single-host/single-session per `SECURITY_MODEL.md`) — "principal
+   matching" maps onto `uid`/`gid`/`executable_path`/`executable_hash`
+   conditions, not a new abstraction.
+2. A single-condition rule (e.g. uid-only) is permitted. HORO-787's
+   "process... UID... alone cannot imply ALLOW" is read as forbidding
+   the *system* inferring trust from context, not forbidding an
+   operator-authored explicit rule keyed on uid — requiring ≥2
+   conditions would make legitimate policies unwritable.
+
+**Known limitation**: "replayable" (HORO-834 AC) is only partially
+delivered. `PolicyProvenance` names a policy by `policy_id` + `revision`,
+but nothing enforces that a given `(id, revision)` pair's content is
+immutable — an author could edit a policy without bumping `revision`,
+and a later replay would then evaluate different rules under the same
+provenance. Closing this needs a content digest (a new hashing
+dependency), out of scope for HORO-834. Carried forward honestly rather
+than overclaimed, following the same pattern as HORO-832's
+ancestry-truncation gap above.
+
 ## Not yet implemented
 
-Policy/lease/provenance domain types (F-M1-004/005, HORO-834/836) —
-tracked in `docs/development/campaign-state.md`.
+Lease domain types (F-M1-005, HORO-836) — tracked in
+`docs/development/campaign-state.md`.
