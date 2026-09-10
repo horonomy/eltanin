@@ -9,3 +9,9 @@ description = "Eltanin protected-resource backend trait contract + deterministic
 workspace = true
 
 [dependencies]
+eltanin-core = { path = "../eltanin-core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
