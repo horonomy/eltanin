@@ -192,6 +192,59 @@ fn lease_rejects_a_different_workload_pid_and_start_token() {
 }
 
 #[test]
+fn lease_rejects_a_different_pid_with_the_same_start_token() {
+    // Isolates the pid half of compare_process's `pid == pid && a == b`
+    // conjunction from the start-token half — a matching start token
+    // alone must not be enough.
+    let mut issuer = issuer();
+    let policy = allow_all_policy();
+    let request = ComputeRequest {
+        resource: resource("gpu-0"),
+        action: Action::Compute,
+    };
+    let origin = ProvenanceRecord::new(context(42, 100, 1000), request.clone());
+    let now = MonotonicTime::from_nanos(0);
+    let lease = issuer
+        .issue(&policy, origin, now, std::time::Duration::from_secs(30))
+        .unwrap();
+
+    let presented = ProvenanceRecord::new(context(999, 100, 1000), request);
+    assert_eq!(
+        issuer.validate(&lease, &presented, now),
+        LeaseValidity::WorkloadMismatch
+    );
+}
+
+#[test]
+fn lease_rejects_an_in_place_execve_into_a_different_binary() {
+    // pid and process_start survive execve() unchanged — compare_process
+    // alone would report Same here. compare_executable is what catches
+    // this substitution.
+    let mut issuer = issuer();
+    let policy = allow_all_policy();
+    let request = ComputeRequest {
+        resource: resource("gpu-0"),
+        action: Action::Compute,
+    };
+    let origin = ProvenanceRecord::new(context(42, 100, 1000), request.clone());
+    let now = MonotonicTime::from_nanos(0);
+    let lease = issuer
+        .issue(&policy, origin, now, std::time::Duration::from_secs(30))
+        .unwrap();
+
+    let mut swapped = context(42, 100, 1000);
+    swapped.workload.executable_path = Evidence::Present {
+        value: "/usr/bin/a-different-tool".into(),
+        source: EvidenceSource::KernelObserved,
+    };
+    let presented = ProvenanceRecord::new(swapped, request);
+    assert_eq!(
+        issuer.validate(&lease, &presented, now),
+        LeaseValidity::ExecutableMismatch
+    );
+}
+
+#[test]
 fn lease_issue_fails_when_policy_denies() {
     let mut issuer = issuer();
     let policy = allow_all_policy();
