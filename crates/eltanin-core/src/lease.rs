@@ -53,6 +53,7 @@
 //! | Case | Mechanism | Result |
 //! |---|---|---|
 //! | Workload process restarts, or its PID is reused | [`crate::identity::WorkloadIdentity::compare_process`] on `pid` + `ProcessStartToken` | [`LeaseValidity::WorkloadMismatch`], or [`LeaseValidity::WorkloadIndeterminate`] when evidence is insufficient — never silently `Valid` |
+//! | Process stays alive but `execve()`s into a different binary (pid + start token unchanged) | [`crate::identity::WorkloadIdentity::compare_executable`] on executable hash/path | [`LeaseValidity::ExecutableMismatch`], or `WorkloadIndeterminate` when evidence is insufficient — `compare_process` alone cannot see this, since neither field it checks changes across `execve()` |
 //! | Agent/issuer restarts | Leases are in-memory only (no `Deserialize`); a new [`LeaseIssuer`] carries a new [`IssuerInstanceId`] | Any lease naming the old instance is [`LeaseValidity::ForeignIssuer`]. Re-authorization is a fresh `issue` |
 //! | A serialized lease is replayed from disk or a log | No `Deserialize`, no public constructor | The bytes cannot become a [`ComputeLease`] at all — they are evidence, not authority |
 //!
@@ -298,6 +299,12 @@ pub enum LeaseValidity {
     /// `policy`'s `IndeterminateEvidence` does — never `Valid`, never
     /// `WorkloadMismatch`.
     WorkloadIndeterminate,
+    /// [`crate::identity::WorkloadIdentity::compare_executable`] reports
+    /// [`IdentityComparison::Different`] — the pid/start token still
+    /// match, but the executable image does not, i.e. an in-place
+    /// `execve()` swap. `compare_process` alone cannot see this, since
+    /// neither `pid` nor `ProcessStartToken` changes across `execve()`.
+    ExecutableMismatch,
     Expired {
         expired_at: MonotonicTime,
     },
@@ -455,6 +462,20 @@ impl LeaseIssuer {
             .compare_process(&presented.context.workload)
         {
             IdentityComparison::Different => return LeaseValidity::WorkloadMismatch,
+            IdentityComparison::Indeterminate => return LeaseValidity::WorkloadIndeterminate,
+            IdentityComparison::Same => {}
+        }
+        // `compare_process` alone cannot see an in-place `execve()` swap
+        // (pid and process_start survive execve unchanged) — checked
+        // separately so the two substitution attacks stay distinguishable
+        // in an audit trail.
+        match lease
+            .origin
+            .context
+            .workload
+            .compare_executable(&presented.context.workload)
+        {
+            IdentityComparison::Different => return LeaseValidity::ExecutableMismatch,
             IdentityComparison::Indeterminate => return LeaseValidity::WorkloadIndeterminate,
             IdentityComparison::Same => {}
         }
