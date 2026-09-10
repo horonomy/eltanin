@@ -5,7 +5,9 @@ use std::time::Duration;
 use eltanin_core::identity::{
     Evidence, EvidenceSource, ExecutionContext, ProcessStartToken, WorkloadIdentity,
 };
-use eltanin_core::lease::{IssuerInstanceId, LeaseIssuer, LeaseValidity, MonotonicTime};
+use eltanin_core::lease::{
+    IssuerInstanceId, LeaseError, LeaseIssuer, LeaseValidity, MonotonicTime,
+};
 use eltanin_core::policy::{
     Condition, Effect, EvidenceMatch, PolicyDocument, PolicyId, PolicySet, Rule, RuleId, TrustFloor,
 };
@@ -165,6 +167,36 @@ fn issue_rejects_ttl_exceeding_issuer_maximum() {
         Duration::from_secs(11),
     );
     assert!(result.is_err());
+}
+
+#[test]
+fn issue_accepts_ttl_exactly_at_the_issuer_maximum() {
+    // The boundary itself: issue() rejects `ttl > max_ttl`, so `ttl ==
+    // max_ttl` must succeed. Pins the boundary against an off-by-one
+    // (e.g. `>=` instead of `>`) that the exceeds-maximum test alone
+    // cannot catch.
+    let mut issuer = LeaseIssuer::new(IssuerInstanceId::new("issuer-a"), Duration::from_secs(10));
+    let policy = allow_all_policy();
+    let result = issuer.issue(
+        &policy,
+        origin(),
+        MonotonicTime::from_nanos(0),
+        Duration::from_secs(10),
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn issue_rejects_an_expiry_that_would_overflow_monotonic_time() {
+    let mut issuer = issuer();
+    let policy = allow_all_policy();
+    let result = issuer.issue(
+        &policy,
+        origin(),
+        MonotonicTime::from_nanos(u64::MAX),
+        Duration::from_nanos(1),
+    );
+    assert_eq!(result, Err(LeaseError::ExpiryOverflow));
 }
 
 #[test]
