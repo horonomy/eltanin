@@ -166,6 +166,58 @@ impl WorkloadIdentity {
             _ => IdentityComparison::Indeterminate,
         }
     }
+
+    /// Compare `self` and `other` for whether they name the same
+    /// executable image, using the strongest evidence [`Evidence::Present`]
+    /// on **both** sides (hash first, falling back to path). Neither
+    /// `pid` nor [`ProcessStartToken`] changes across an in-place
+    /// `execve()` — a process can restart into a completely different
+    /// binary while [`WorkloadIdentity::compare_process`] alone still
+    /// reports [`IdentityComparison::Same`]. Callers that bind an
+    /// authorization to a specific executable (e.g. [`crate::lease`])
+    /// must check this in addition to `compare_process`, not instead of
+    /// it — the two guard different substitution attacks.
+    #[must_use]
+    pub fn compare_executable(&self, other: &WorkloadIdentity) -> IdentityComparison {
+        if let Some(comparison) =
+            Self::compare_evidence(&self.executable_hash, &other.executable_hash)
+        {
+            return comparison;
+        }
+        if let Some(comparison) =
+            Self::compare_evidence(&self.executable_path, &other.executable_path)
+        {
+            return comparison;
+        }
+        IdentityComparison::Indeterminate
+    }
+
+    fn compare_evidence<T: PartialEq>(
+        a: &Evidence<T>,
+        b: &Evidence<T>,
+    ) -> Option<IdentityComparison> {
+        match (a, b) {
+            (
+                Evidence::Present {
+                    value: x,
+                    source: source_x,
+                },
+                Evidence::Present {
+                    value: y,
+                    source: source_y,
+                },
+            ) if *source_x != EvidenceSource::SelfAsserted
+                && *source_y != EvidenceSource::SelfAsserted =>
+            {
+                Some(if x == y {
+                    IdentityComparison::Same
+                } else {
+                    IdentityComparison::Different
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// The execution environment around a [`WorkloadIdentity`] at the moment
