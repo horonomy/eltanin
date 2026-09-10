@@ -172,29 +172,47 @@ fn both_signals_trusted_but_wrong_values_denies() {
 }
 
 #[test]
-fn spoofed_uid_matching_a_deny_rule_still_denies_regardless_of_trust() {
-    // Deny rules exist precisely to block dangerous cases even under
-    // uncertain evidence (see policy_decision.rs's IndeterminateEvidence
-    // coverage for the missing-evidence case) — this confirms a
-    // self-asserted claim of a dangerous value doesn't accidentally
-    // grant safety by being untrusted. The deny-on-uid-0 rule requires
-    // KernelObserved, so a SelfAsserted uid=0 claim does NOT trigger the
-    // deny rule (it's simply unusable evidence for that rule) but MUST
-    // NOT be treated as OK to allow either, since no allow rule exists
-    // for uid=0.
+fn spoofed_uid_matching_a_deny_rule_still_denies_via_no_matching_rule_not_by_luck() {
+    // A self-asserted claim of a dangerous value (uid 0) must not
+    // accidentally grant safety just because it's untrusted. The
+    // deny-on-uid-0 rule requires KernelObserved, so a SelfAsserted
+    // uid=0 claim is Present-but-below-floor evidence — definitively
+    // ConditionOutcome::NotMatched, not Indeterminate (Indeterminate is
+    // reserved for genuinely Missing/Unsupported evidence — see
+    // policy.rs's ConditionOutcome). That distinction is what this test
+    // actually pins: asserting only effect() == Deny here would pass
+    // even if the implementation were broken in a way that still
+    // produced Deny for an unrelated reason (the original version of
+    // this test, flagged by independent review, did exactly that — the
+    // policy had zero allow rules, so it could only ever produce Deny
+    // regardless of whether any matching logic ran at all). Adding an
+    // unrelated allow rule and asserting the specific reason closes
+    // that gap.
     let policy = PolicySet::from_document(PolicyDocument {
         id: PolicyId::new("with-deny"),
         revision: 1,
-        rules: vec![Rule {
-            id: RuleId::new("deny-root"),
-            effect: Effect::Deny,
-            resource: resource(),
-            action: Action::Compute,
-            conditions: vec![Condition::Uid(EvidenceMatch {
-                expected: 0,
-                min_trust: TrustFloor::KernelObserved,
-            })],
-        }],
+        rules: vec![
+            Rule {
+                id: RuleId::new("deny-root"),
+                effect: Effect::Deny,
+                resource: resource(),
+                action: Action::Compute,
+                conditions: vec![Condition::Uid(EvidenceMatch {
+                    expected: 0,
+                    min_trust: TrustFloor::KernelObserved,
+                })],
+            },
+            Rule {
+                id: RuleId::new("allow-unrelated-uid"),
+                effect: Effect::Allow,
+                resource: resource(),
+                action: Action::Compute,
+                conditions: vec![Condition::Uid(EvidenceMatch {
+                    expected: 5000,
+                    min_trust: TrustFloor::KernelObserved,
+                })],
+            },
+        ],
     })
     .unwrap();
 
@@ -205,8 +223,12 @@ fn spoofed_uid_matching_a_deny_rule_still_denies_regardless_of_trust() {
         EvidenceSource::KernelObserved,
     );
     let decision = policy.evaluate(&context, &request());
-    // No allow rule exists in this policy at all, so regardless of
-    // whether the deny rule's untrusted uid=0 claim "counts," the
-    // outcome must be Deny by default — never Allow.
     assert_eq!(decision.effect(), Effect::Deny);
+    // Neither rule matches: deny-root's uid condition is definitively
+    // NotMatched (Present, below floor — not unobserved), and
+    // allow-unrelated-uid's condition doesn't match either. The result
+    // must be plain NoMatchingRule, not IndeterminateEvidence — proving
+    // the untrusted claim was correctly treated as "doesn't satisfy
+    // this condition," not "we don't know."
+    assert_eq!(decision.reason(), &DecisionReason::NoMatchingRule);
 }

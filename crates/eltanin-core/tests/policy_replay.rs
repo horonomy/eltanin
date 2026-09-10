@@ -3,12 +3,15 @@
 //! the remaining "replay a serialized document" and "reject malformed
 //! wire content" scenarios HORO-835's AC calls for.
 
+use std::collections::BTreeSet;
+
 use eltanin_core::envelope::Versioned;
 use eltanin_core::identity::{
     Evidence, EvidenceSource, ExecutionContext, ProcessStartToken, WorkloadIdentity,
 };
 use eltanin_core::policy::{
-    Condition, Effect, EvidenceMatch, PolicyDocument, PolicyId, PolicySet, Rule, RuleId, TrustFloor,
+    Condition, DecisionReason, Effect, EvidenceMatch, PolicyDocument, PolicyId, PolicySet, Rule,
+    RuleId, TrustFloor,
 };
 use eltanin_core::resource::{
     Action, ComputeRequest, ResourceIdentity, ResourceKind, ResourceVendor,
@@ -171,8 +174,13 @@ fn example_policy_from_the_docs_matches_the_committed_fixture() {
     let wire = include_str!("fixtures/example_policy.json");
     let envelope: Versioned<PolicyDocument> =
         serde_json::from_str(wire).expect("docs example must be valid JSON matching the schema");
-    let policy = PolicySet::from_document(envelope.payload.clone())
-        .expect("docs example must be a valid policy");
+    // from_versioned, not from_document directly: this is the one
+    // document meant to be a validated, publishable example, so it must
+    // go through the same schema-version check every other consumer of
+    // a wire-format policy would (see
+    // document_with_unsupported_schema_version_is_never_evaluable_even_with_valid_rules
+    // above for what from_document alone would silently skip).
+    let policy = PolicySet::from_versioned(envelope).expect("docs example must be a valid policy");
 
     let example_resource = ResourceIdentity {
         vendor: ResourceVendor::fake(),
@@ -185,26 +193,41 @@ fn example_policy_from_the_docs_matches_the_committed_fixture() {
     };
 
     // Alice (uid 1000) running the trusted tool, both KernelObserved:
-    // ALLOW, per the doc.
+    // ALLOW via the specific rule the doc names, not merely "some allow
+    // path or other."
     let mut alice_context = context(1000);
     alice_context.workload.executable_path = Evidence::Present {
         value: "/usr/bin/trusted-tool".to_string(),
         source: EvidenceSource::KernelObserved,
     };
+    let alice_decision = policy.evaluate(&alice_context, &example_request);
+    assert_eq!(alice_decision.effect(), Effect::Allow);
     assert_eq!(
-        policy.evaluate(&alice_context, &example_request).effect(),
-        Effect::Allow
+        alice_decision.reason(),
+        &DecisionReason::ExplicitAllow {
+            matched_rules: BTreeSet::from([RuleId::new("allow-alice-trusted-tool")])
+        }
     );
 
-    // root (uid 0): DENY, per the doc, regardless of executable path.
+    // root (uid 0): DENY via deny-root specifically, per the doc's claim
+    // that root is "denied outright" — not merely denied because no
+    // allow rule happens to match. Asserting only effect() == Deny here
+    // could not distinguish "the deny rule fired" from "the deny rule
+    // doesn't exist and default-deny covered it," which was the actual
+    // gap review found in an earlier revision of this test.
     let mut root_context = context(0);
     root_context.workload.executable_path = Evidence::Present {
         value: "/usr/bin/trusted-tool".to_string(),
         source: EvidenceSource::KernelObserved,
     };
+    let root_decision = policy.evaluate(&root_context, &example_request);
+    assert_eq!(root_decision.effect(), Effect::Deny);
     assert_eq!(
-        policy.evaluate(&root_context, &example_request).effect(),
-        Effect::Deny
+        root_decision.reason(),
+        &DecisionReason::ExplicitDeny {
+            matched_rules: BTreeSet::from([RuleId::new("deny-root")]),
+            overridden_allow_rules: BTreeSet::new(),
+        }
     );
 
     // An unrelated uid running an unrelated tool: DENY (default deny).
@@ -216,10 +239,33 @@ fn example_policy_from_the_docs_matches_the_committed_fixture() {
         };
         ctx
     };
+    let stranger_decision = policy.evaluate(&stranger_context, &example_request);
+    assert_eq!(stranger_decision.effect(), Effect::Deny);
+    assert_eq!(stranger_decision.reason(), &DecisionReason::NoMatchingRule);
+}
+
+/// Finding from independent review: the previous version of
+/// `example_policy_from_the_docs_matches_the_committed_fixture` only
+/// checked the *fixture file*, never `docs/product/POLICY_EXAMPLES.md`
+/// itself — so an edit to the Markdown alone (leaving the fixture
+/// untouched) would silently rot the published doc without failing CI.
+/// This test closes that gap by asserting the doc's fenced JSON block
+/// is present verbatim in the fixture file's content.
+#[test]
+fn docs_policy_example_is_byte_identical_to_the_committed_fixture() {
+    let doc = include_str!("../../../docs/product/POLICY_EXAMPLES.md");
+    let fixture = include_str!("fixtures/example_policy.json");
+
+    let fenced_json = doc
+        .split("```json\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n```").next())
+        .expect("docs/product/POLICY_EXAMPLES.md must contain a ```json fenced block");
+
     assert_eq!(
-        policy
-            .evaluate(&stranger_context, &example_request)
-            .effect(),
-        Effect::Deny
+        fenced_json.trim_end(),
+        fixture.trim_end(),
+        "docs/product/POLICY_EXAMPLES.md's example has drifted from \
+         crates/eltanin-core/tests/fixtures/example_policy.json — keep them byte-identical"
     );
 }
