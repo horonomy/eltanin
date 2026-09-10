@@ -63,7 +63,10 @@ fn protected_resource_roundtrips_through_versioned_envelope() {
 
 #[test]
 fn unsupported_schema_version_fails_explicitly() {
-    let envelope = Versioned { version: DOMAIN_SCHEMA_VERSION + 1, payload: sample_resource() };
+    let envelope = Versioned {
+        version: DOMAIN_SCHEMA_VERSION + 1,
+        payload: sample_resource(),
+    };
     let err = envelope.into_current().unwrap_err();
     assert_eq!(err.found, DOMAIN_SCHEMA_VERSION + 1);
     assert_eq!(err.expected, DOMAIN_SCHEMA_VERSION);
@@ -85,7 +88,9 @@ fn capability_check_reflects_actual_support_not_assumption() {
 
 #[test]
 fn enforcement_result_unsupported_is_distinct_from_allowed() {
-    let downgraded = EnforcementResult::Unsupported { capability: Capability::Enforce };
+    let downgraded = EnforcementResult::Unsupported {
+        capability: Capability::Enforce,
+    };
     let json = serde_json::to_string(&downgraded).unwrap();
     assert_eq!(json, r#"{"outcome":"unsupported","capability":"enforce"}"#);
     assert_ne!(downgraded, EnforcementResult::Allowed);
