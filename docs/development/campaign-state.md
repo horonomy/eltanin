@@ -39,14 +39,15 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-834 | F-M1-004: `PolicySet`/`PolicyDecision` default-deny policy engine, review-driven `IndeterminateEvidence` fail-closed fix | #13 | `42dfbf7` |
 | HORO-835 | F-M1-004: replay/malformed-policy/multi-vector spoof regression coverage, docs-synced policy example, second Feature Verification Record, 4 review-driven test fixes | #14 | `5e99896` |
 | HORO-836 | F-M1-005: `ComputeLease`/`LeaseIssuer` scoped expiring authorization artifact (`crates/eltanin-core/src/lease.rs`), review-driven `compare_executable`/`ExecutableMismatch` fix | #15 | `e822bfd` |
-| HORO-837 | F-M1-005: renewal-boundary regression coverage, third Feature Verification Record | in progress | — |
+| HORO-837 | F-M1-005: renewal-boundary regression coverage, third Feature Verification Record | #16 | `f0457ae` |
+| HORO-838 | F-M1-006: versioned local IPC protocol types (`crates/eltanin-protocol`) — `RequestId`/`ClientRequest`/`AgentResponse`/framing, opus-architect-designed | in progress | — |
 
-Current `main` HEAD: `e822bfd`. F-M1-001, F-M1-003, F-M1-004 are done.
+Current `main` HEAD: `f0457ae`. F-M1-001, F-M1-003, F-M1-004, F-M1-005 are done.
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-837-lease_regression` (branch
-  `mvp-1.0/HORO-837/lease_regression`), off `e822bfd`, in progress.
+- `eltanin-mvp-1.0-HORO-838-ipc_protocol` (branch
+  `mvp-1.0/HORO-838/ipc_protocol`), off `f0457ae`, in progress.
 
 ## Dependency blockers
 
@@ -99,8 +100,12 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001, F-M1-003, F-M1-004 are done. Currently in progress: HORO-837
-(F-M1-005's last subtask — renewal-boundary regression coverage +
-Feature Verification Record; HORO-836 already merged). Next after
-HORO-837 merges and HORO-822 transitions to Done: F-M1-006 (HORO-788,
-Local Agent & IPC), subtasks HORO-838/839/840.
+F-M1-001, F-M1-003, F-M1-004, F-M1-005 are done. Currently in progress:
+HORO-838 (F-M1-006's first subtask — versioned local IPC protocol type
+layer in `crates/eltanin-protocol`). Next after HORO-838 merges:
+HORO-839 (privileged local agent lifecycle + authenticated Unix-socket
+handling), then HORO-840 (integrate agent with workload identity,
+policy, lease, backend lifecycle) — both flagged by HORO-838's design
+as needing to resolve the `eltanin run` launch-model question
+(fork+exec vs. exec-in-place) and the `ReleaseLease` cross-client
+revocation-check obligation before/while implementing.
