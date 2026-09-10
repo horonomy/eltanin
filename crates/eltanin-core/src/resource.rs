@@ -5,38 +5,63 @@
 //!
 //! Nothing here may name NVIDIA, CUDA, a Linux device node, or a cgroup —
 //! see `docs/product/PRODUCT_CONSTITUTION.md`'s vendor-neutral-core rule.
-//! `ResourceVendor`/`ResourceKind` are open enums (`#[serde(other)]`) so a
-//! future vendor is additive, not a breaking schema change.
+//! `ResourceVendor`/`ResourceKind` are opaque string-backed tags rather
+//! than closed enums: the set of real-world vendors/kinds is owned by
+//! whichever adapter crate defines a concrete one (e.g. `eltanin-nvidia`),
+//! never by this crate, and an arbitrary/unrecognized tag round-trips
+//! through serialization without being collapsed into a lossy `Unknown`
+//! placeholder — a real requirement for audit evidence (F-M1-009) to
+//! actually preserve what was observed.
 
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-/// The vendor that owns a protected resource. Not a vendor-specific type
-/// itself — it's an opaque tag the vendor-neutral domain can compare and
-/// route on without knowing anything about that vendor's APIs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResourceVendor {
-    Nvidia,
-    /// The deterministic Fake Compute Backend (HORO-827).
-    Fake,
-    /// A vendor this build doesn't recognize. Kept explicit rather than
-    /// failing deserialization outright, so an envelope carrying a newer
-    /// vendor can still be inspected/audited even if it can't be acted on.
-    #[serde(other)]
-    Unknown,
+/// The vendor that owns a protected resource, as an opaque tag. This
+/// crate never matches on a specific vendor's value — see the module
+/// docs above for why it isn't a closed enum naming real vendors.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ResourceVendor(String);
+
+impl ResourceVendor {
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self(tag.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Tag used by the deterministic Fake Compute Backend (HORO-827).
+    #[must_use]
+    pub fn fake() -> Self {
+        Self("fake".to_string())
+    }
 }
 
-/// The class of protected resource. MVP 1.0 only ever produces `Gpu`;
-/// `Unknown` exists for the same forward-compatibility reason as
-/// [`ResourceVendor::Unknown`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResourceKind {
-    Gpu,
-    #[serde(other)]
-    Unknown,
+/// The class of protected resource, as an opaque tag. MVP 1.0 only ever
+/// produces [`ResourceKind::gpu`]; see [`ResourceVendor`] for why this is
+/// a string tag rather than a closed enum.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ResourceKind(String);
+
+impl ResourceKind {
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self(tag.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn gpu() -> Self {
+        Self("gpu".to_string())
+    }
 }
 
 /// Stable identity for one protected resource instance.

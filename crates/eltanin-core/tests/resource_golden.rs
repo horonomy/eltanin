@@ -13,8 +13,8 @@ use eltanin_core::resource::{
 fn sample_resource() -> ProtectedResource {
     ProtectedResource {
         identity: ResourceIdentity {
-            vendor: ResourceVendor::Fake,
-            kind: ResourceKind::Gpu,
+            vendor: ResourceVendor::fake(),
+            kind: ResourceKind::gpu(),
             local_id: "fake-gpu-0".to_string(),
         },
         capabilities: ResourceCapabilities::new([
@@ -73,10 +73,20 @@ fn unsupported_schema_version_fails_explicitly() {
 }
 
 #[test]
-fn unknown_vendor_deserializes_explicitly_rather_than_failing_closed() {
-    let json = r#"{"vendor":"amd","kind":"gpu","local_id":"x"}"#;
+fn arbitrary_vendor_tag_round_trips_without_data_loss() {
+    // eltanin-core has no closed vendor enum, so a vendor it has never
+    // heard of (this crate must never name a real vendor — see the
+    // module docs) decodes as-is rather than collapsing into a lossy
+    // "unknown" placeholder. This is what makes audit evidence (F-M1-009)
+    // able to actually preserve what was observed.
+    let json = r#"{"vendor":"some-future-vendor","kind":"tpu","local_id":"x"}"#;
     let identity: ResourceIdentity = serde_json::from_str(json).unwrap();
-    assert_eq!(identity.vendor, ResourceVendor::Unknown);
+    assert_eq!(identity.vendor.as_str(), "some-future-vendor");
+    assert_eq!(identity.kind.as_str(), "tpu");
+    // Round-trip must reproduce the exact tag, not a placeholder.
+    let reencoded = serde_json::to_string(&identity).unwrap();
+    let redecoded: ResourceIdentity = serde_json::from_str(&reencoded).unwrap();
+    assert_eq!(redecoded, identity);
 }
 
 #[test]

@@ -9,8 +9,8 @@ field-level detail.
 
 | Type | Purpose |
 |---|---|
-| `ResourceVendor` | Open enum tagging which vendor owns a resource (`Nvidia`, `Fake`, `Unknown`). Opaque to the domain — never used to branch into vendor-specific logic here. |
-| `ResourceKind` | Open enum for the resource class (`Gpu`, `Unknown`). |
+| `ResourceVendor` | Opaque string-backed tag for which vendor owns a resource (e.g. `"fake"`; a real vendor's tag is defined by that vendor's own adapter crate, never named here). Round-trips any tag without data loss — no lossy `Unknown` placeholder. |
+| `ResourceKind` | Opaque string-backed tag for the resource class (e.g. `"gpu"`), same round-trip guarantee as `ResourceVendor`. |
 | `ResourceIdentity` | Stable identity: vendor + kind + opaque `local_id`. |
 | `Capability` | One of DISCOVER/OBSERVE/ATTRIBUTE/AUTHORIZE/ENFORCE/REVOKE/ATTEST. |
 | `ResourceCapabilities` | The capability set a backend actually supports for a resource — a value type so downgrade is checkable data, not an assumption. |
