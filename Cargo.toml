@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/eltanin-core",
     "crates/eltanin-backend",
+    "crates/eltanin-linux",
     "crates/eltanin-protocol",
     "crates/eltanin-agent",
     "crates/eltanin-cli",
@@ -13,9 +14,10 @@ members = [
 # eltanin-protocol, eltanin-agent, eltanin-cli, ebpf/eltanin-device-guard),
 # not HORO-781's original finer-grained proposal — reconciled per ADR 0002.
 #
-# crates/eltanin-nvidia, crates/eltanin-linux, and ebpf/eltanin-device-guard
-# are added to this workspace by the Feature ticket that first needs them
-# (F-M1-002/006/007), not here — see docs/development/campaign-state.md.
+# crates/eltanin-nvidia and ebpf/eltanin-device-guard are added to this
+# workspace by the Feature ticket that first needs them (F-M1-002/007),
+# not here — see docs/development/campaign-state.md.
+# crates/eltanin-linux was added by F-M1-003/HORO-832.
 
 [workspace.package]
 version = "0.1.0"
