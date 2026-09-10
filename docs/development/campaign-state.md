@@ -6,6 +6,8 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 ## Canonical facts
 
 - Canonical repo: `horonomy/eltanin` (public), created 2026-09-10.
+- Starting `main` SHA for MVP 1.0 implementation (HEAD immediately before
+  the HORO-821 reconciliation PR merges): `e9ab11f8bc954c1614602ad41d9ed994be22e1db`.
 - Canonical branch: `main`, PR-only (branch protection enabled, 1 required
   approval, no force-push/delete).
 - Jira: continuing in project `HORO` (no dedicated `ELTN` project — see
