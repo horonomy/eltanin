@@ -67,10 +67,15 @@ impl FakeBackend {
             .remove(identity);
     }
 
-    /// Pin what `enforce` returns for `identity`, overriding the default
-    /// capability-based behavior. Used to script an already-decided
+    /// Pin what `enforce` returns for `identity` when it also has
+    /// [`Capability::Enforce`]. Used to script an already-decided
     /// ALLOW/DENY (F-M1-004's job in the real system) or a lease-expiry
     /// outcome (F-M1-005's job) without depending on those Features.
+    ///
+    /// A script can never produce `Allowed` for a resource that lacks
+    /// `Capability::Enforce` — `enforce` checks capability first and
+    /// ignores the script entirely in that case, so this can't be used
+    /// to accidentally mask a capability downgrade.
     ///
     /// # Panics
     ///
@@ -108,6 +113,18 @@ impl ComputeBackend for FakeBackend {
     fn enforce(&self, request: &ComputeRequest) -> Result<EnforcementResult, BackendError> {
         let resource = self.observe(&request.resource)?;
 
+        // Capability is checked first, before any scripted override. A
+        // script may stand in for a policy/lease decision (ALLOW/DENY),
+        // but it must never be able to mask a real capability downgrade
+        // by scripting `Allowed` on a resource that structurally cannot
+        // be enforced on — that's exactly what EnforcementResult's own
+        // docs forbid (a downgrade must never masquerade as enforcement).
+        if !resource.capabilities.supports(Capability::Enforce) {
+            return Ok(EnforcementResult::Unsupported {
+                capability: Capability::Enforce,
+            });
+        }
+
         if let Some(scripted) = self
             .scripted_enforcement
             .read()
@@ -115,12 +132,6 @@ impl ComputeBackend for FakeBackend {
             .get(&request.resource)
         {
             return Ok(scripted.clone());
-        }
-
-        if !resource.capabilities.supports(Capability::Enforce) {
-            return Ok(EnforcementResult::Unsupported {
-                capability: Capability::Enforce,
-            });
         }
 
         Ok(EnforcementResult::Allowed)
