@@ -21,6 +21,14 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+[licenses.private]
+# Eltanin's own workspace crates (publish = false) have no `license` field
+# yet — the project's own license is an open founder decision (HORO-781),
+# tracked separately from third-party dependency licensing. Don't fail CI
+# on our own unpublished crates for a decision that hasn't been made yet;
+# this only exempts crates with publish = false, never third-party deps.
+ignore = true
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
