@@ -2,8 +2,8 @@
 //!
 //! Modules are populated by their owning Feature ticket (see
 //! docs/development/campaign-state.md): `resource` (F-M1-001, HORO-825),
-//! `identity`/`provenance` (F-M1-003, HORO-831), `policy` (F-M1-004,
-//! HORO-834), `lease` (F-M1-005, HORO-836).
+//! `identity` (F-M1-003, HORO-831), `provenance` (F-M1-003, HORO-833),
+//! `policy` (F-M1-004, HORO-834), `lease` (F-M1-005, HORO-836).
 #![forbid(unsafe_code)]
 
 pub mod envelope;

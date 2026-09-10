@@ -6,7 +6,6 @@
 //! validates the documented `Unsupported` fallback instead, so the test
 //! still compiles and passes on a macOS/Windows dev machine.
 
-#[cfg(not(target_os = "linux"))]
 use eltanin_core::identity::Evidence;
 use eltanin_linux::{collect_execution_context, collect_workload_identity};
 
@@ -57,4 +56,37 @@ fn two_collections_of_same_process_compare_as_same() {
         first.compare_process(&second),
         IdentityComparison::Indeterminate
     );
+}
+
+/// HORO-833 AC: "PID reuse/exit races fail safely." Spawns a real child
+/// process, waits for it to fully exit and be reaped, then collects on
+/// its now-stale PID. Must never panic and must never fabricate a live
+/// identity for a process that is actually gone.
+#[cfg(target_os = "linux")]
+#[test]
+fn exited_child_process_reports_missing_or_a_genuinely_different_process() {
+    use std::process::Command;
+
+    let mut child = Command::new("/bin/true")
+        .spawn()
+        .expect("spawning a short-lived child process must succeed on Linux CI");
+    let pid = child.id();
+    child.wait().expect("reaping the child must succeed");
+
+    // The child has fully exited and been reaped. Collecting on its old
+    // PID must never panic. Either the PID is now unoccupied (Missing,
+    // the expected outcome) or the kernel has already reused it for an
+    // unrelated real process (Present) — both are safe, non-fabricated
+    // answers; only a panic or a value that impersonates the exited
+    // child would be unsafe.
+    let identity = collect_workload_identity(pid);
+    match &identity.process_start {
+        Evidence::Missing { reason } => assert!(!reason.is_empty()),
+        Evidence::Present { .. } => {
+            // PID already reused by a different real process — the
+            // collector is reporting that real occupant, not the
+            // exited child, which is exactly the safe behavior.
+        }
+        Evidence::Unsupported => panic!("a Linux build must never report Unsupported"),
+    }
 }

@@ -122,19 +122,41 @@ impl WorkloadIdentity {
     ///
     /// Defined PID-reuse/restart semantics: [`IdentityComparison::Same`]
     /// only when `pid` matches **and** both `process_start` tokens are
-    /// [`Evidence::Present`] and equal. If either side's start token is
-    /// missing or unsupported, the result is
-    /// [`IdentityComparison::Indeterminate`] — **not** `Different`. This
-    /// is a three-way result rather than a `bool` on purpose: collapsing
-    /// "confirmed different process" and "insufficient evidence to tell"
-    /// into a single `false` would let a caller treat `!comparison` as
-    /// proof of a new process when it might only mean the evidence was
-    /// missing — exactly the kind of implicit-trust shortcut North Star
-    /// invariant 4 forbids.
+    /// [`Evidence::Present`], equal, **and** neither side's token has
+    /// `source: EvidenceSource::SelfAsserted`. If either side's start
+    /// token is missing, unsupported, or self-asserted, the result is
+    /// [`IdentityComparison::Indeterminate`] — **not** `Different` and
+    /// **not** `Same`. This is a three-way result rather than a `bool`
+    /// on purpose: collapsing "confirmed different process" and
+    /// "insufficient evidence to tell" into a single `false` would let a
+    /// caller treat `!comparison` as proof of a new process when it
+    /// might only mean the evidence was missing — exactly the kind of
+    /// implicit-trust shortcut North Star invariant 4 forbids.
+    ///
+    /// The `SelfAsserted` exclusion closes a real gap (found by
+    /// independent review, HORO-833): comparing only `value` would let
+    /// an attacker-controlled, self-reported start-token claim that
+    /// happens to match a real value be indistinguishable from a
+    /// genuine kernel-observed one at the one place that actually
+    /// decides identity continuity — this crate's own collectors never
+    /// produce `SelfAsserted` process-start evidence today, but the type
+    /// is `Deserialize` and must not silently trust it if a future
+    /// caller ever does.
     #[must_use]
     pub fn compare_process(&self, other: &WorkloadIdentity) -> IdentityComparison {
         match (&self.process_start, &other.process_start) {
-            (Evidence::Present { value: a, .. }, Evidence::Present { value: b, .. }) => {
+            (
+                Evidence::Present {
+                    value: a,
+                    source: source_a,
+                },
+                Evidence::Present {
+                    value: b,
+                    source: source_b,
+                },
+            ) if *source_a != EvidenceSource::SelfAsserted
+                && *source_b != EvidenceSource::SelfAsserted =>
+            {
                 if self.pid == other.pid && a == b {
                     IdentityComparison::Same
                 } else {

@@ -34,16 +34,17 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-826 | F-M1-001: `ComputeBackend` trait contract + `BackendError` | #8 | `ea3214c` |
 | HORO-827 | F-M1-001: `FakeBackend` deterministic test double | #9 | `856461f` |
 | HORO-831 | F-M1-003: `WorkloadIdentity`/`ExecutionContext` trust contract (`Evidence<T>`, `IdentityComparison`) | #10 | `f2f3fd8` |
-| HORO-832 | F-M1-003: Linux `/proc`-based workload context collection (`crates/eltanin-linux`) | in progress | — |
+| HORO-832 | F-M1-003: Linux `/proc`-based workload context collection (`crates/eltanin-linux`) | #11 | `e190a1b` |
+| HORO-833 | F-M1-003: spoof/PID-reuse/exit-race regression coverage, `ProvenanceRecord`, first Feature Verification Record | in progress | — |
 
-Current `main` HEAD: `f2f3fd8`. F-M1-001 (HORO-784/HORO-825/826/827) is
+Current `main` HEAD: `e190a1b`. F-M1-001 (HORO-784/HORO-825/826/827) is
 functionally complete pending a formal HORO-784 Done transition once
 F-M1-001's own DoD is checked against HORO-819 (not yet established).
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-832-linux_context_collection` (branch
-  `mvp-1.0/HORO-832/linux_context_collection`), off `f2f3fd8`, in
+- `eltanin-mvp-1.0-HORO-833-workload_identity_regression` (branch
+  `mvp-1.0/HORO-833/workload_identity_regression`), off `e190a1b`, in
   progress.
 
 ## Dependency blockers
@@ -57,9 +58,12 @@ formally raised as its own escalation beyond the note in
 
 ## Feature QA states
 
-All F-M1-001..009 — not yet started. No Feature Verification Records
-exist yet. Governance/foundation work (HORO-780/781/782/783/821) is done;
-this is what F-M1-001 (HORO-784) now builds on.
+F-M1-003 (HORO-786): first Feature Verification Record in progress —
+`docs/qa/feature-verification/F-M1-003.md` (HORO-833). All other
+F-M1-001..002/004..009 — no Feature Verification Record yet.
+Governance/foundation work (HORO-780/781/782/783/821) is done; F-M1-001
+(HORO-784/825/826/827) is functionally complete but has no formal record
+yet either.
 
 ## Required human decisions outstanding
 
@@ -93,10 +97,9 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001 (HORO-784) is functionally done (825/826/827 merged). Currently
-in progress: F-M1-003 (HORO-786), subtask HORO-832 (Linux `/proc`
-workload-context collector in `crates/eltanin-linux`), following HORO-831
-(trust contract, merged in PR #10). Next after HORO-832 merges: HORO-833
-(spoof/PID-reuse/provenance regression coverage), then F-M1-003 is done
-and F-M1-004 (HORO-787, Authorization Policy Decision) becomes the next
-unblocked Feature.
+F-M1-001 (HORO-784) is functionally done (825/826/827 merged). F-M1-003
+(HORO-786)'s collector work (HORO-831/832) is merged; currently in
+progress: HORO-833 (spoof/PID-reuse/exit-race regression coverage,
+`ProvenanceRecord`, first Feature Verification Record). Once HORO-833
+merges, F-M1-003 is done and F-M1-004 (HORO-787, Authorization Policy
+Decision, subtasks HORO-834/835) becomes the next unblocked Feature.
