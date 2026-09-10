@@ -86,13 +86,27 @@ pub struct ProcessAncestor {
     pub executable_path: Evidence<String>,
 }
 
+/// Result of [`WorkloadIdentity::compare_process`]. Deliberately three
+/// states, not a `bool`: "insufficient evidence to tell" must never be
+/// representable as, or confusable with, "confirmed different process."
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityComparison {
+    Same,
+    Different,
+    /// One or both sides lacked a usable `process_start` token. Callers
+    /// must treat this as its own case — never as `Same` and never as
+    /// `Different`.
+    Indeterminate,
+}
+
 /// Stable identity for one observed workload process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkloadIdentity {
     pub pid: u32,
     /// Paired with `pid` to distinguish a genuinely long-running process
     /// from PID reuse by a later, unrelated process. See
-    /// [`WorkloadIdentity::same_process`] for the defined comparison
+    /// [`WorkloadIdentity::compare_process`] for the defined comparison
     /// semantics.
     pub process_start: Evidence<ProcessStartToken>,
     pub uid: Evidence<u32>,
@@ -103,23 +117,31 @@ pub struct WorkloadIdentity {
 }
 
 impl WorkloadIdentity {
-    /// Whether `self` and `other` observe the same running process.
+    /// Compare `self` and `other` for whether they observe the same
+    /// running process.
     ///
-    /// Defined PID-reuse/restart semantics: two identities are the same
-    /// process **only if** `pid` matches **and** both `process_start`
-    /// tokens are [`Evidence::Present`] and equal. If either side's start
-    /// token is missing or unsupported, this returns `false` —
-    /// indeterminate evidence is never assumed to mean "same process."
-    /// This is what lets a PID-reuse or process-restart case be told
-    /// apart from a still-running one instead of silently conflating
-    /// them.
+    /// Defined PID-reuse/restart semantics: [`IdentityComparison::Same`]
+    /// only when `pid` matches **and** both `process_start` tokens are
+    /// [`Evidence::Present`] and equal. If either side's start token is
+    /// missing or unsupported, the result is
+    /// [`IdentityComparison::Indeterminate`] — **not** `Different`. This
+    /// is a three-way result rather than a `bool` on purpose: collapsing
+    /// "confirmed different process" and "insufficient evidence to tell"
+    /// into a single `false` would let a caller treat `!comparison` as
+    /// proof of a new process when it might only mean the evidence was
+    /// missing — exactly the kind of implicit-trust shortcut North Star
+    /// invariant 4 forbids.
     #[must_use]
-    pub fn same_process(&self, other: &WorkloadIdentity) -> bool {
+    pub fn compare_process(&self, other: &WorkloadIdentity) -> IdentityComparison {
         match (&self.process_start, &other.process_start) {
             (Evidence::Present { value: a, .. }, Evidence::Present { value: b, .. }) => {
-                self.pid == other.pid && a == b
+                if self.pid == other.pid && a == b {
+                    IdentityComparison::Same
+                } else {
+                    IdentityComparison::Different
+                }
             }
-            _ => false,
+            _ => IdentityComparison::Indeterminate,
         }
     }
 }

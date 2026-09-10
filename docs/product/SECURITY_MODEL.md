@@ -61,7 +61,7 @@ hardware evidence.
   best-effort / self-asserted) and can be `Missing`/`Unsupported` — there
   is no type-level way to treat a field as "trusted" without inspecting
   its actual source, and PID reuse has defined semantics
-  (`WorkloadIdentity::same_process`) rather than an implicit assumption.
+  (`WorkloadIdentity::compare_process`) rather than an implicit assumption.
 
 ## Enforcement mechanism (validated, not assumed)
 

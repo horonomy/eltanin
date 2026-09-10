@@ -2,8 +2,8 @@
 //! (HORO-831). Complements `resource_golden.rs`'s pattern.
 
 use eltanin_core::identity::{
-    Evidence, EvidenceSource, ExecutionContext, ProcessAncestor, ProcessStartToken,
-    WorkloadIdentity,
+    Evidence, EvidenceSource, ExecutionContext, IdentityComparison, ProcessAncestor,
+    ProcessStartToken, WorkloadIdentity,
 };
 
 fn sample_identity(pid: u32, start: u64) -> WorkloadIdentity {
@@ -93,44 +93,44 @@ fn workload_identity_roundtrips() {
 fn same_pid_same_start_is_the_same_process() {
     let a = sample_identity(42, 100);
     let b = sample_identity(42, 100);
-    assert!(a.same_process(&b));
+    assert_eq!(a.compare_process(&b), IdentityComparison::Same);
 }
 
 #[test]
-fn same_pid_different_start_is_pid_reuse_not_the_same_process() {
+fn same_pid_different_start_is_pid_reuse_reported_as_different() {
     let a = sample_identity(42, 100);
     let b = sample_identity(42, 200);
-    assert!(!a.same_process(&b));
+    assert_eq!(a.compare_process(&b), IdentityComparison::Different);
 }
 
 #[test]
-fn missing_start_token_is_never_assumed_to_be_the_same_process() {
+fn missing_start_token_is_indeterminate_not_different_and_not_same() {
     // If either side's process_start is not Present, the comparison must
-    // return false, not silently fall back to comparing pid alone —
-    // that would let an indeterminate observation masquerade as a
-    // confirmed identity match.
+    // be Indeterminate, not silently collapsed into Same or Different —
+    // a caller checking for "different" must not accidentally catch
+    // "we don't know" too.
     let mut a = sample_identity(42, 100);
     a.process_start = Evidence::Missing {
         reason: "permission denied".into(),
     };
     let b = sample_identity(42, 100);
-    assert!(!a.same_process(&b));
-    assert!(!b.same_process(&a));
+    assert_eq!(a.compare_process(&b), IdentityComparison::Indeterminate);
+    assert_eq!(b.compare_process(&a), IdentityComparison::Indeterminate);
 }
 
 #[test]
-fn unsupported_start_token_is_never_assumed_to_be_the_same_process() {
+fn unsupported_start_token_is_indeterminate() {
     let mut a = sample_identity(42, 100);
     a.process_start = Evidence::Unsupported;
     let b = sample_identity(42, 100);
-    assert!(!a.same_process(&b));
+    assert_eq!(a.compare_process(&b), IdentityComparison::Indeterminate);
 }
 
 #[test]
-fn different_pid_is_never_the_same_process_regardless_of_start() {
+fn different_pid_with_present_tokens_is_reported_as_different() {
     let a = sample_identity(42, 100);
     let b = sample_identity(43, 100);
-    assert!(!a.same_process(&b));
+    assert_eq!(a.compare_process(&b), IdentityComparison::Different);
 }
 
 #[test]

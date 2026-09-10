@@ -80,13 +80,16 @@ time — no hidden state or ordering dependency).
 | `WorkloadIdentity` | pid, process_start, uid, gid, executable_path/hash, ancestry — all as `Evidence<T>`. |
 | `ExecutionContext` | `WorkloadIdentity` + cgroup_path/namespace_hint/container_hint/session_origin, all `Evidence<T>`. |
 
-`WorkloadIdentity::same_process` defines PID-reuse/restart semantics
-(HORO-831 AC): two identities are the same process only if `pid` matches
-**and** both `process_start` tokens are `Present` and equal. Either side
-missing or unsupported means "not confirmed the same" (`false`), never a
-silent assumption of sameness — this is what keeps `uid == owner`,
-`name == trusted`, `path == trusted`, `parent == trusted` from ever
-becoming unconditional authorization (North Star invariant 4).
+`WorkloadIdentity::compare_process` defines PID-reuse/restart semantics
+(HORO-831 AC) via a three-way `IdentityComparison` result — `Same`,
+`Different`, or `Indeterminate` — deliberately not a `bool`: collapsing
+"confirmed different" and "insufficient evidence" into one `false` would
+let a caller mistake missing evidence for a confirmed answer. `Same`
+requires `pid` to match **and** both `process_start` tokens to be
+`Present` and equal; either side missing/unsupported is `Indeterminate`,
+never silently treated as `Different` or `Same`. This is what keeps
+`uid == owner`, `name == trusted`, `path == trusted`, `parent == trusted`
+from ever becoming unconditional authorization (North Star invariant 4).
 
 ## Not yet implemented
 
