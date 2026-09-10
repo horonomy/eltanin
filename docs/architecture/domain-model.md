@@ -240,9 +240,14 @@ domain crate.
 **Validation check order** (load-bearing, not incidental): issuer
 identity → revocation → resource → action → workload identity (via
 `WorkloadIdentity::compare_process`, reusing HORO-831's semantics rather
-than inventing new ones) → expiry. Binding checks precede expiry so a
-cross-workload/cross-resource replay attempt is reported as a mismatch,
-not downgraded into a routine `Expired` audit line.
+than inventing new ones) → executable identity (via
+`WorkloadIdentity::compare_executable`, added by independent review —
+`compare_process` alone cannot detect a process staying alive but
+`execve()`-ing into a different binary, since neither `pid` nor
+`ProcessStartToken` changes across `execve()`) → expiry. Binding checks
+precede expiry so a cross-workload/cross-resource replay attempt is
+reported as a mismatch, not downgraded into a routine `Expired` audit
+line.
 
 **Scope narrowing is structural**: `ComputeLease::narrow_expiry(self,
 not_after)` computes `min(current, not_after)` and consumes `self` —
@@ -255,6 +260,7 @@ a new authorization act, never an extension.
 | Case | Mechanism | Result |
 |---|---|---|
 | Workload restarts / PID reused | `compare_process` on pid + `ProcessStartToken` | `WorkloadMismatch`, or `WorkloadIndeterminate` when evidence is insufficient |
+| Process stays alive, `execve()`s into a different binary | `compare_executable` on hash (falling back to path) | `ExecutableMismatch`, or `WorkloadIndeterminate` when evidence is insufficient |
 | Agent/issuer restarts | New `LeaseIssuer` → new `IssuerInstanceId` | Any lease from the old instance → `ForeignIssuer` |
 | Serialized lease replayed | No `Deserialize`, no public constructor | Bytes cannot become a `ComputeLease` at all |
 
