@@ -52,8 +52,24 @@ asserts `eltanin-core` never depends back on `eltanin-backend`, enforcing
 HORO-826's required dependency direction (vendor backend → `eltanin-backend`
 → `eltanin-core`).
 
+## Fake Compute Backend (F-M1-001, HORO-827) — `eltanin_backend::fake::FakeBackend`
+
+Deterministic, in-memory `ComputeBackend` implementation for tests/CI —
+no special-case logic a real backend couldn't also provide. Resources
+are added via `insert`/removed via `remove` (simulating disappearance);
+`script_enforcement` pins a specific `enforce` outcome for a resource,
+which is how tests simulate an already-decided policy ALLOW/DENY
+(F-M1-004) or a lease-expiry denial (F-M1-005) without depending on
+either Feature, neither of which exists yet.
+
+`crates/eltanin-backend/tests/fake_backend_scenarios.rs` covers every
+scenario named in HORO-827's scope: resource present/absent, a backend
+lacking a capability, enforcement success/scripted-failure, resource
+disappearance, a lease-expiry stand-in, revoke with/without capability,
+and determinism across repeated runs (same script, same result, every
+time — no hidden state or ordering dependency).
+
 ## Not yet implemented
 
-Fake Compute Backend (F-M1-001/HORO-827), identity/policy/lease/provenance
-domain types (F-M1-003/004/005, HORO-831/834/836) — tracked in
-`docs/development/campaign-state.md`.
+Identity/policy/lease/provenance domain types (F-M1-003/004/005,
+HORO-831/834/836) — tracked in `docs/development/campaign-state.md`.
