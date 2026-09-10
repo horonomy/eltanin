@@ -94,7 +94,12 @@ fn origin() -> ProvenanceRecord {
 fn re_issuing_after_expiry_mints_a_distinct_lease_id_not_a_continuation() {
     // "Renewal" is a fresh issue, so the "renewed" lease must carry its
     // own identity — never the expired lease's id with a pushed-out
-    // expiry, which would be an extension in disguise.
+    // expiry, which would be an extension in disguise. This pins
+    // id-uniqueness specifically (`next_sequence` is never recycled after
+    // expiry); it does not by itself distinguish "freshly re-evaluated
+    // policy decision" from a hypothetical bug that copied cached
+    // decision state forward, since the test's origin() is
+    // value-identical on every call either way.
     let mut issuer = LeaseIssuer::new(IssuerInstanceId::new("issuer-a"), Duration::from_secs(3600));
     let policy = allow_all_policy();
 
@@ -189,6 +194,17 @@ fn revoking_a_renewed_lease_does_not_revoke_the_lease_it_replaced() {
 
     issuer.revoke(renewed.id());
 
+    // The revocation actually took effect on the lease it targeted...
+    assert_eq!(
+        issuer.validate(&renewed, &origin(), MonotonicTime::from_nanos(2)),
+        LeaseValidity::Revoked
+    );
+    // ...and, independently, did not touch the lease it replaced. Both
+    // assertions are load-bearing: without the first, this test would
+    // pass identically even if `revoke` were a complete no-op, since
+    // `first`'s validity was never going to change from revoking
+    // `renewed` regardless of whether the revoke actually did anything
+    // (found by independent review).
     assert!(issuer
         .validate(&first, &origin(), MonotonicTime::from_nanos(2))
         .is_valid());
