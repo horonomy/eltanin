@@ -36,18 +36,18 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-831 | F-M1-003: `WorkloadIdentity`/`ExecutionContext` trust contract (`Evidence<T>`, `IdentityComparison`) | #10 | `f2f3fd8` |
 | HORO-832 | F-M1-003: Linux `/proc`-based workload context collection (`crates/eltanin-linux`) | #11 | `e190a1b` |
 | HORO-833 | F-M1-003: spoof/PID-reuse/exit-race regression coverage, `ProvenanceRecord`, first Feature Verification Record, review-driven `compare_process` self-asserted-evidence fix | #12 | `dd570f3` |
-| HORO-834 | F-M1-004: `PolicySet`/`PolicyDecision` default-deny policy engine (`crates/eltanin-core/src/policy.rs`) | in progress | — |
+| HORO-834 | F-M1-004: `PolicySet`/`PolicyDecision` default-deny policy engine, review-driven `IndeterminateEvidence` fail-closed fix | #13 | `42dfbf7` |
+| HORO-835 | F-M1-004: replay/malformed-policy/multi-vector spoof regression coverage, docs-synced policy example, second Feature Verification Record | in progress | — |
 
-Current `main` HEAD: `dd570f3`. F-M1-001 (HORO-784/HORO-825/826/827) and
-F-M1-003 (HORO-786/HORO-831/832/833) are both functionally complete,
-each pending a formal Done transition against HORO-819's DoD once it
-exists (F-M1-003 already has its own Feature Verification Record —
-HORO-786 itself was transitioned Done alongside HORO-833).
+Current `main` HEAD: `42dfbf7`. F-M1-001, F-M1-003 are functionally
+complete; F-M1-004's engine (HORO-834) is merged, HORO-835 closing it
+out.
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-834-policy_engine` (branch
-  `mvp-1.0/HORO-834/policy_engine`), off `dd570f3`, in progress.
+- `eltanin-mvp-1.0-HORO-835-policy_security_regression` (branch
+  `mvp-1.0/HORO-835/policy_security_regression`), off `42dfbf7`, in
+  progress.
 
 ## Dependency blockers
 
@@ -61,8 +61,10 @@ formally raised as its own escalation beyond the note in
 ## Feature QA states
 
 F-M1-003 (HORO-786): Done, Feature Verification Record PASS —
-`docs/qa/feature-verification/F-M1-003.md` (HORO-833). All other
-F-M1-001/002/004..009 — no Feature Verification Record yet.
+`docs/qa/feature-verification/F-M1-003.md` (HORO-833). F-M1-004
+(HORO-787): Feature Verification Record in progress —
+`docs/qa/feature-verification/F-M1-004.md` (HORO-835). All other
+F-M1-001/002/005..009 — no Feature Verification Record yet.
 Governance/foundation work (HORO-780/781/782/783/821) is done; F-M1-001
 (HORO-784/825/826/827) is functionally complete but has no formal record
 yet.
@@ -99,9 +101,9 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001 (HORO-784) and F-M1-003 (HORO-786) are both done. Currently in
-progress: F-M1-004 (HORO-787, Authorization Policy Decision), subtask
-HORO-834 (`PolicySet`/`PolicyDecision` default-deny engine in
-`eltanin-core::policy`). Next after HORO-834 merges: HORO-835 (policy
+F-M1-001 (HORO-784) and F-M1-003 (HORO-786) are both done. F-M1-004's
+engine (HORO-834) is merged; currently in progress: HORO-835 (policy
 replay/malformed-policy/spoof-signal regression suite + F-M1-004 Feature
-Verification Record).
+Verification Record). Once HORO-835 merges, F-M1-004 is done and
+F-M1-005 (HORO-822, Compute Lease, subtasks HORO-836/837) becomes the
+next unblocked Feature.
