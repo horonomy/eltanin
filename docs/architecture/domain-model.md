@@ -276,7 +276,10 @@ caller-supplied and both types are `Deserialize`. The invariant
 depends on F-M1-006's agent sourcing `presented` from its own collector
 and `now` from its own clock, never from anything a client sends over
 IPC — named explicitly here since it is the item most likely to be
-silently dropped by a future ticket.
+silently dropped by a future ticket. The same boundary applies to
+`LeaseIssuer::issue`'s `now`: this crate cannot verify monotonicity
+across successive `issue` calls from inside a single call — that is
+F-M1-006's obligation as sole owner of the clock.
 
 **Known limitation**: `narrow_expiry` preserves `LeaseId`, so two
 `ComputeLease` values can share an id with different `expires_at` — an

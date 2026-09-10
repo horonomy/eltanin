@@ -87,7 +87,12 @@
 //! own collector and `now` from its own clock — **never** from anything
 //! a client sends over IPC. This is the single obligation most likely
 //! to be silently dropped by a future ticket; it is named explicitly
-//! here for that reason.
+//! here for that reason. The same trust boundary applies to
+//! [`LeaseIssuer::issue`]'s `now` parameter: this crate does not, and
+//! structurally cannot, check that successive `issue` calls receive
+//! non-decreasing `now` values — monotonicity across calls is
+//! F-M1-006's obligation as the sole owner of the clock, not something
+//! `eltanin-core` can verify from inside a single call.
 //!
 //! # Scope narrowing is structural, not merely checked
 //!
