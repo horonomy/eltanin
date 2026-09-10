@@ -38,14 +38,15 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-833 | F-M1-003: spoof/PID-reuse/exit-race regression coverage, `ProvenanceRecord`, first Feature Verification Record, review-driven `compare_process` self-asserted-evidence fix | #12 | `dd570f3` |
 | HORO-834 | F-M1-004: `PolicySet`/`PolicyDecision` default-deny policy engine, review-driven `IndeterminateEvidence` fail-closed fix | #13 | `42dfbf7` |
 | HORO-835 | F-M1-004: replay/malformed-policy/multi-vector spoof regression coverage, docs-synced policy example, second Feature Verification Record, 4 review-driven test fixes | #14 | `5e99896` |
-| HORO-836 | F-M1-005: `ComputeLease`/`LeaseIssuer` scoped expiring authorization artifact (`crates/eltanin-core/src/lease.rs`) | in progress | — |
+| HORO-836 | F-M1-005: `ComputeLease`/`LeaseIssuer` scoped expiring authorization artifact (`crates/eltanin-core/src/lease.rs`), review-driven `compare_executable`/`ExecutableMismatch` fix | #15 | `e822bfd` |
+| HORO-837 | F-M1-005: renewal-boundary regression coverage, third Feature Verification Record | in progress | — |
 
-Current `main` HEAD: `5e99896`. F-M1-001, F-M1-003, F-M1-004 are done.
+Current `main` HEAD: `e822bfd`. F-M1-001, F-M1-003, F-M1-004 are done.
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-836-compute_lease` (branch
-  `mvp-1.0/HORO-836/compute_lease`), off `5e99896`, in progress.
+- `eltanin-mvp-1.0-HORO-837-lease_regression` (branch
+  `mvp-1.0/HORO-837/lease_regression`), off `e822bfd`, in progress.
 
 ## Dependency blockers
 
@@ -58,10 +59,11 @@ formally raised as its own escalation beyond the note in
 
 ## Feature QA states
 
-F-M1-003 (HORO-786) and F-M1-004 (HORO-787): Done, Feature Verification
-Record PASS — `docs/qa/feature-verification/F-M1-003.md` (HORO-833),
-`F-M1-004.md` (HORO-835). All other F-M1-001/002/005..009 — no Feature
-Verification Record yet. Governance/foundation work
+F-M1-003 (HORO-786), F-M1-004 (HORO-787), and F-M1-005 (HORO-822): Done,
+Feature Verification Record PASS —
+`docs/qa/feature-verification/F-M1-003.md` (HORO-833), `F-M1-004.md`
+(HORO-835), `F-M1-005.md` (HORO-837). All other F-M1-001/002/006..009 —
+no Feature Verification Record yet. Governance/foundation work
 (HORO-780/781/782/783/821) is done; F-M1-001 (HORO-784/825/826/827) is
 functionally complete but has no formal record yet.
 
@@ -97,8 +99,8 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001, F-M1-003, F-M1-004 are done. Currently in progress: F-M1-005
-(HORO-822, Compute Lease), subtask HORO-836 (`ComputeLease`/`LeaseIssuer`
-in `eltanin-core::lease`). Next after HORO-836 merges: HORO-837 (lease
-expiry/replay/mismatch/scope-broadening adversarial coverage + F-M1-005
-Feature Verification Record).
+F-M1-001, F-M1-003, F-M1-004 are done. Currently in progress: HORO-837
+(F-M1-005's last subtask — renewal-boundary regression coverage +
+Feature Verification Record; HORO-836 already merged). Next after
+HORO-837 merges and HORO-822 transitions to Done: F-M1-006 (HORO-788,
+Local Agent & IPC), subtasks HORO-838/839/840.
