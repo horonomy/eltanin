@@ -269,10 +269,14 @@ mod imp {
             // exercises the "split on the *last* `)`" parsing rule
             // rather than the real kernel, since renaming this test
             // binary's own comm is not practical from a unit test.
-            let synthetic = "999 (1 (evil) proc)) S 111 999 999 0 -1 4194304 100 0 0 0 0 0 0 0 20 0 1 0 123456 0 0 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0";
+            let synthetic = "999 (1 (evil) proc)) S 111 222 333 0 -1 4194304 100 0 0 0 0 0 0 0 20 0 1 0 123456 0 0 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0";
             let after_comm = synthetic.rsplit_once(')').unwrap().1;
             let fields: Vec<&str> = after_comm.split_whitespace().collect();
-            assert_eq!(fields[4 - 3], "999", "ppid field misaligned");
+            // field3 (state) = "S" at fields[0]; field4 (ppid) = "111" at
+            // fields[4-3]; field5 (pgrp) = "222"; field6 (session) =
+            // "333" — three distinct values so a field-alignment bug
+            // cannot coincidentally pass by comparing equal placeholders.
+            assert_eq!(fields[4 - 3], "111", "ppid field misaligned");
             assert_eq!(fields[22 - 3], "123456", "starttime field misaligned");
         }
 
