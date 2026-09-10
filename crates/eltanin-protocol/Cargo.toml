@@ -1,0 +1,11 @@
+[package]
+name = "eltanin-protocol"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Eltanin versioned local IPC protocol (MVP 1.0 scaffold, F-M1-006 / HORO-788/838)."
+
+[lints]
+workspace = true
+
+[dependencies]
