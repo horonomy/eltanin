@@ -3,11 +3,11 @@
 version = 4
 
 [[package]]
-name = "eltanin-agent-core"
+name = "eltanin-agent"
 version = "0.1.0"
 
 [[package]]
-name = "eltanin-backend-api"
+name = "eltanin-backend"
 version = "0.1.0"
 
 [[package]]
@@ -15,33 +15,9 @@ name = "eltanin-cli"
 version = "0.1.0"
 
 [[package]]
-name = "eltanin-domain"
-version = "0.1.0"
-
-[[package]]
-name = "eltanin-identity"
-version = "0.1.0"
-
-[[package]]
-name = "eltanin-lease"
-version = "0.1.0"
-
-[[package]]
-name = "eltanin-policy"
+name = "eltanin-core"
 version = "0.1.0"
 
 [[package]]
 name = "eltanin-protocol"
-version = "0.1.0"
-
-[[package]]
-name = "eltanin-provenance"
-version = "0.1.0"
-
-[[package]]
-name = "eltanin-resource"
-version = "0.1.0"
-
-[[package]]
-name = "eltanin-simulator"
 version = "0.1.0"
