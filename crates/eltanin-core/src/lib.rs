@@ -6,6 +6,7 @@
 //! HORO-834), `lease` (F-M1-005, HORO-836).
 #![forbid(unsafe_code)]
 
+pub mod envelope;
 pub mod identity;
 pub mod lease;
 pub mod policy;
