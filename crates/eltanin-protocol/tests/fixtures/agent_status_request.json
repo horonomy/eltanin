@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": 3,
+    "body": {
+      "op": "agent_status"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": 2,
+    "body": {
+      "result": "lease_released",
+      "outcome": "released"
+    }
+  }
+}

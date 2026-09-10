@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": 1,
+    "body": {
+      "result": "lease_granted",
+      "lease": {
+        "lease_id": {
+          "issuer": "issuer-a",
+          "sequence": 7
+        },
+        "remaining": {
+          "secs": 30,
+          "nanos": 0
+        }
+      }
+    }
+  }
+}

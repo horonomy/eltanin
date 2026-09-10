@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": 1,
+    "body": {
+      "op": "request_lease",
+      "resource": {
+        "vendor": "fake",
+        "kind": "gpu",
+        "local_id": "gpu-0"
+      },
+      "action": "compute"
+    }
+  }
+}

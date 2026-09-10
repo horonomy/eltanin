@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": 3,
+    "body": {
+      "result": "status",
+      "status": {
+        "protocol_version": 1
+      }
+    }
+  }
+}

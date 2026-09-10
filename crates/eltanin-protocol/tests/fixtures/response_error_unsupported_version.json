@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "payload": {
+    "request_id": null,
+    "body": {
+      "result": "error",
+      "code": {
+        "error": "unsupported_version",
+        "found": 99,
+        "expected": 1
+      }
+    }
+  }
+}
