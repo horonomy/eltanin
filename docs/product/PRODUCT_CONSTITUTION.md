@@ -15,39 +15,61 @@ architecture decision.
 - **No C++** unless a vendor SDK makes it unavoidable, documented in an
   ADR before the dependency is introduced.
 - **Unsafe Rust must be isolated, documented, and reviewed.** Vendor-
-  neutral domain crates (`crates/domain`, `resource`, `identity`,
-  `policy`, `lease`, `provenance`, `protocol`, `backend-api`,
-  `agent-core`, `simulator`) `#![forbid(unsafe_code)]`. Unsafe is
-  permitted only in platform/vendor crates added for FFI/eBPF boundaries
-  (`platform/linux/`, `backends/nvidia-linux/`), and every `unsafe` block
-  there must carry a `// SAFETY:` comment.
+  neutral crates (`crates/eltanin-core`, `eltanin-backend`,
+  `eltanin-protocol`, `eltanin-agent`, `eltanin-cli`)
+  `#![forbid(unsafe_code)]`. Unsafe is permitted only in platform/vendor
+  crates added for FFI/eBPF boundaries (`crates/eltanin-nvidia`,
+  `crates/eltanin-linux`, `ebpf/eltanin-device-guard/`), and every
+  `unsafe` block there must carry a `// SAFETY:` comment.
 
 ## Architecture boundaries
 
 - **Vendor-neutral core, vendor-specific adapters.** NVIDIA/CUDA concepts
-  must not leak into `crates/domain`, `crates/policy`, `crates/lease`, or
-  `crates/agent-core`. Those crates depend on `crates/backend-api`'s
-  trait contract, never on a concrete vendor backend. The vendor backend
-  (`backends/nvidia-linux`) depends on `backend-api`, never the reverse.
+  must not leak into `crates/eltanin-core` or `crates/eltanin-agent`.
+  Those crates depend on `crates/eltanin-backend`'s trait contract, never
+  on a concrete vendor backend. The vendor backend (`crates/eltanin-nvidia`,
+  added by F-M1-002) depends on `eltanin-backend`, never the reverse.
 - **Zero-code enforcement is the product requirement.** A protected
   workload must not need to link an Eltanin SDK to be enforced. An SDK
   (`sdk/`) may exist for *richer* integration (e.g. self-reporting
   provenance), but it is optional enrichment, never a requirement for
   the enforcement boundary to function.
-- **Local persistence, local IPC.** The agent's local state and its
-  protocol boundary (`crates/protocol`) do not require a network call to
-  function. Cloud is absent from the per-compute hot path (North Star
-  invariant 9).
+- **Local persistence, local IPC.** The agent's local state does not
+  require a network call to function (North Star invariant 9). The IPC
+  boundary itself (`crates/eltanin-protocol`) is a **versioned Unix
+  Domain Socket protocol** on Linux MVP, with caller identity/context
+  derived from OS peer credentials (`SO_PEERCRED`) rather than trusted
+  from anything the caller asserts about itself — see HORO-788 and
+  [ADR 0004](../adr/0004-local-ipc-and-nvml-ffi-boundary.md).
 - **Versioned protocol over unstable ABI.** When the backend boundary is
   externalized (e.g. out-of-process backend), use a versioned
   process/protocol boundary — never rely on Rust's unstable dynamic ABI
   across a process/version boundary.
-- **Simulator/conformance strategy.** `crates/simulator` provides a
-  deterministic Fake Compute Backend implementing the same
-  `backend-api` trait as the real NVIDIA backend, so CI (and most
-  development) never requires GPU hardware. Every backend contract test
-  in `tests/conformance/` runs against both the fake and (on real
-  hardware, as a separate gate) the NVIDIA backend.
+- **Simulator/conformance strategy.** `crates/eltanin-backend`'s `fake`
+  module provides a deterministic Fake Compute Backend implementing the
+  same trait as the real NVIDIA backend, so CI (and most development)
+  never requires GPU hardware. Every backend contract test in
+  `tests/conformance/` runs against both the fake and (on real hardware,
+  as a separate gate) the NVIDIA backend.
+- **NVML FFI boundary.** All NVIDIA/NVML interaction is isolated to
+  `crates/eltanin-nvidia` (F-M1-002) behind safe Rust wrapper types; no
+  other crate calls NVML directly. See
+  [ADR 0004](../adr/0004-local-ipc-and-nvml-ffi-boundary.md).
+
+## Open enforcement substrate, proprietary governance (forward-looking)
+
+The local enforcement substrate (policy/lease/agent/device-guard —
+everything under `crates/eltanin-core`, `eltanin-agent`,
+`ebpf/eltanin-device-guard/`) is and stays open source in this
+repository; it is what OSS users run today, and remains the trust anchor
+a customer can audit. A future enterprise **governance/control-plane**
+layer (fleet policy authoring, cross-host reporting, SSO/RBAC — Stage 6,
+HORO-777/`horonomy/eltanin-enterprise`) may be proprietary, but it
+observes/manages the open substrate — it is never a required dependency
+for the open substrate's own per-compute authorization/enforcement
+decision (North Star invariant 9). MVP 1.0 does not build any part of
+that governance layer; this bullet exists so no future PR quietly makes
+local enforcement depend on the proprietary layer to function.
 
 ## Session, delegation, and step-up (forward-looking — MVP 2.0)
 
