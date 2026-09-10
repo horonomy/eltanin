@@ -43,7 +43,7 @@
 //! silently "not match," the rule would vanish and an unrelated `Allow`
 //! rule could win, which is exactly "missing evidence silently upgrades
 //! trust" (HORO-787). So a `Deny` rule whose outcome cannot be
-//! determined — [`ConditionOutcome::Indeterminate`] — fails closed to
+//! determined — `ConditionOutcome::Indeterminate` — fails closed to
 //! `Deny` via [`DecisionReason::IndeterminateEvidence`] instead of being
 //! dropped. See [`PolicySet::evaluate`] for the exact precedence.
 //!
@@ -183,11 +183,11 @@ enum ConditionOutcome {
 
 impl<T: PartialEq> EvidenceMatch<T> {
     /// Evaluate this match against `evidence`. `Present` with an equal
-    /// value and a source clearing `min_trust` is [`ConditionOutcome::Matched`].
+    /// value and a source clearing `min_trust` is `ConditionOutcome::Matched`.
     /// `Present` with a different value, or a source below `min_trust`,
-    /// is [`ConditionOutcome::NotMatched`] — that evidence was actually
+    /// is `ConditionOutcome::NotMatched` — that evidence was actually
     /// observed and definitively doesn't satisfy this match.
-    /// `Missing`/`Unsupported` is [`ConditionOutcome::Indeterminate`] —
+    /// `Missing`/`Unsupported` is `ConditionOutcome::Indeterminate` —
     /// nothing was observed at all.
     fn evaluate(&self, evidence: &Evidence<T>) -> ConditionOutcome {
         match evidence {
@@ -249,7 +249,7 @@ impl Condition {
         }
     }
 
-    /// Evaluate this condition against `context`. See [`ConditionOutcome`].
+    /// Evaluate this condition against `context`. See `ConditionOutcome`.
     fn evaluate(&self, context: &ExecutionContext) -> ConditionOutcome {
         match self {
             Condition::Uid(m) => m.evaluate(&context.workload.uid),
@@ -280,7 +280,7 @@ impl Rule {
     /// if `resource`/`action` don't match `request` at all — this rule
     /// is simply not relevant to the request, regardless of conditions.
     /// Otherwise returns the combination of every condition's
-    /// [`ConditionOutcome`]: `NotMatched` if any condition is
+    /// `ConditionOutcome`: `NotMatched` if any condition is
     /// definitively not satisfied (an `Indeterminate` condition
     /// elsewhere cannot rescue that), `Indeterminate` if none are
     /// `NotMatched` but at least one is `Indeterminate`, else `Matched`.
@@ -498,7 +498,7 @@ impl PolicySet {
     ///    ([`DecisionReason::ExplicitDeny`]), regardless of how many
     ///    `Allow` rules also matched.
     /// 2. Otherwise, any `Deny` rule whose match is
-    ///    [`ConditionOutcome::Indeterminate`] (a condition it depends on
+    ///    `ConditionOutcome::Indeterminate` (a condition it depends on
     ///    has `Missing`/`Unsupported` evidence) → [`Effect::Deny`]
     ///    ([`DecisionReason::IndeterminateEvidence`]). This fails closed:
     ///    whether that deny rule truly applies is unknown, and an
