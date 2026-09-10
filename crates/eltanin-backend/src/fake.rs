@@ -21,10 +21,10 @@ use crate::contract::{BackendError, ComputeBackend};
 /// Resources are added at construction (or later, via [`Self::insert`])
 /// and can be removed to simulate a resource disappearing mid-session.
 /// [`Self::script_enforcement`] lets a test pin exactly what `enforce`
-/// returns for a given resource, independent of its capabilities —
-/// this is how a test simulates "policy already decided ALLOW/DENY" and
-/// "a lease has expired" without depending on F-M1-004/005, which don't
-/// exist yet.
+/// returns for a resource that has [`Capability::Enforce`] — this is how
+/// a test simulates "policy already decided ALLOW/DENY" and "a lease has
+/// expired" without depending on F-M1-004/005, which don't exist yet. A
+/// script can never override a real capability downgrade.
 #[derive(Default)]
 pub struct FakeBackend {
     resources: RwLock<HashMap<ResourceIdentity, ProtectedResource>>,
