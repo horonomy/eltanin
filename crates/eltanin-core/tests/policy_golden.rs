@@ -181,3 +181,49 @@ fn explicit_deny_overriding_allow_decision_golden_json() {
 }"#;
     assert_eq!(json, expected);
 }
+
+#[test]
+fn indeterminate_evidence_decision_golden_json() {
+    let policy = PolicySet::from_document(PolicyDocument {
+        id: PolicyId::new("p1"),
+        revision: 1,
+        rules: vec![Rule {
+            id: RuleId::new("deny-root"),
+            effect: Effect::Deny,
+            resource: resource(),
+            action: Action::Compute,
+            conditions: vec![Condition::Uid(EvidenceMatch {
+                expected: 0,
+                min_trust: TrustFloor::KernelObserved,
+            })],
+        }],
+    })
+    .unwrap();
+    let mut ctx = context(1000);
+    ctx.workload.uid = Evidence::Missing {
+        reason: "permission denied".into(),
+    };
+    let decision = policy.evaluate(
+        &ctx,
+        &ComputeRequest {
+            resource: resource(),
+            action: Action::Compute,
+        },
+    );
+    let json = serde_json::to_string_pretty(&decision).unwrap();
+    let expected = r#"{
+  "effect": "deny",
+  "reason": {
+    "reason": "indeterminate_evidence",
+    "rules": [
+      "deny-root"
+    ]
+  },
+  "policy": {
+    "policy_id": "p1",
+    "policy_revision": 1,
+    "schema_version": 1
+  }
+}"#;
+    assert_eq!(json, expected);
+}

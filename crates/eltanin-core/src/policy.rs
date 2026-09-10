@@ -32,10 +32,20 @@
 //! clears the condition's [`TrustFloor`]. [`EvidenceSource::SelfAsserted`]
 //! never clears any floor — a rule that trusts a workload's own claim
 //! about itself is unrepresentable, not merely rejected at runtime (see
-//! [`TrustFloor::admits`]). `Evidence::Missing`/`Evidence::Unsupported`
-//! never match; there is deliberately no "field is missing" matcher —
-//! default-deny already covers absence, and an allow-on-missing matcher
-//! would be a pure footgun ("allow when we couldn't see who you are").
+//! [`TrustFloor::admits`]). There is deliberately no "field is missing"
+//! matcher — an allow-on-missing matcher would be a pure footgun ("allow
+//! when we couldn't see who you are").
+//!
+//! `Evidence::Missing`/`Evidence::Unsupported` on a condition an `Allow`
+//! rule depends on simply means that rule doesn't contribute — safe,
+//! because default-deny already covers it. The same is **not** safe for
+//! a `Deny` rule: if missing evidence made a `Deny` rule's condition
+//! silently "not match," the rule would vanish and an unrelated `Allow`
+//! rule could win, which is exactly "missing evidence silently upgrades
+//! trust" (HORO-787). So a `Deny` rule whose outcome cannot be
+//! determined — [`ConditionOutcome::Indeterminate`] — fails closed to
+//! `Deny` via [`DecisionReason::IndeterminateEvidence`] instead of being
+//! dropped. See [`PolicySet::evaluate`] for the exact precedence.
 //!
 //! Deliberately unmatchable fields: `pid` (a raw PID is the canonical
 //! contextual-signal-as-authority mistake), `ancestry` (HORO-787: parent
@@ -151,17 +161,55 @@ pub struct EvidenceMatch<T> {
     pub min_trust: TrustFloor,
 }
 
+/// The result of evaluating one [`Condition`] against observed evidence.
+/// Three states, not a `bool`, for the same reason
+/// [`crate::identity::IdentityComparison`] is three states: collapsing
+/// "definitively does not match" and "cannot be determined" into a
+/// single `false` would let a [`Rule`] whose condition depends on
+/// missing evidence silently behave as if that condition were absent —
+/// safe for an `Allow` rule (default-deny already covers it) but unsafe
+/// for a `Deny` rule, whose whole purpose is to block on that evidence.
+/// See [`PolicySet::evaluate`] for how `Indeterminate` is handled
+/// differently for `Allow` vs `Deny` rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConditionOutcome {
+    Matched,
+    NotMatched,
+    /// The evidence needed to decide this condition was
+    /// `Evidence::Missing` or `Evidence::Unsupported` — not "the
+    /// condition failed," but "whether it holds could not be observed."
+    Indeterminate,
+}
+
 impl<T: PartialEq> EvidenceMatch<T> {
-    /// Whether `evidence` satisfies this match: `Present` with an equal
-    /// value and a source that clears `min_trust`. `Missing` and
-    /// `Unsupported` never match.
+    /// Evaluate this match against `evidence`. `Present` with an equal
+    /// value and a source clearing `min_trust` is [`ConditionOutcome::Matched`].
+    /// `Present` with a different value, or a source below `min_trust`,
+    /// is [`ConditionOutcome::NotMatched`] — that evidence was actually
+    /// observed and definitively doesn't satisfy this match.
+    /// `Missing`/`Unsupported` is [`ConditionOutcome::Indeterminate`] —
+    /// nothing was observed at all.
+    fn evaluate(&self, evidence: &Evidence<T>) -> ConditionOutcome {
+        match evidence {
+            Evidence::Present { value, source } => {
+                if *value == self.expected && self.min_trust.admits(*source) {
+                    ConditionOutcome::Matched
+                } else {
+                    ConditionOutcome::NotMatched
+                }
+            }
+            Evidence::Missing { .. } | Evidence::Unsupported => ConditionOutcome::Indeterminate,
+        }
+    }
+
+    /// Whether `evidence` satisfies this match. Equivalent to
+    /// `self.evaluate(evidence) == ConditionOutcome::Matched` — provided
+    /// as a convenience for callers (and tests) that only care about the
+    /// boolean case, not the missing-evidence distinction
+    /// [`PolicySet::evaluate`] itself relies on.
     #[must_use]
     pub fn matches(&self, evidence: &Evidence<T>) -> bool {
-        matches!(
-            evidence,
-            Evidence::Present { value, source }
-                if *value == self.expected && self.min_trust.admits(*source)
-        )
+        self.evaluate(evidence) == ConditionOutcome::Matched
     }
 }
 
@@ -201,14 +249,14 @@ impl Condition {
         }
     }
 
-    /// Whether `context` satisfies this condition.
-    fn matches(&self, context: &ExecutionContext) -> bool {
+    /// Evaluate this condition against `context`. See [`ConditionOutcome`].
+    fn evaluate(&self, context: &ExecutionContext) -> ConditionOutcome {
         match self {
-            Condition::Uid(m) => m.matches(&context.workload.uid),
-            Condition::Gid(m) => m.matches(&context.workload.gid),
-            Condition::ExecutablePath(m) => m.matches(&context.workload.executable_path),
-            Condition::ExecutableHash(m) => m.matches(&context.workload.executable_hash),
-            Condition::CgroupPath(m) => m.matches(&context.cgroup_path),
+            Condition::Uid(m) => m.evaluate(&context.workload.uid),
+            Condition::Gid(m) => m.evaluate(&context.workload.gid),
+            Condition::ExecutablePath(m) => m.evaluate(&context.workload.executable_path),
+            Condition::ExecutableHash(m) => m.evaluate(&context.workload.executable_hash),
+            Condition::CgroupPath(m) => m.evaluate(&context.cgroup_path),
         }
     }
 }
@@ -228,11 +276,35 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// Whether this rule matches `request` observed under `context`.
-    fn matches(&self, context: &ExecutionContext, request: &ComputeRequest) -> bool {
-        self.resource == request.resource
-            && self.action == request.action
-            && self.conditions.iter().all(|c| c.matches(context))
+    /// Evaluate this rule against `context`/`request`. Returns `None`
+    /// if `resource`/`action` don't match `request` at all — this rule
+    /// is simply not relevant to the request, regardless of conditions.
+    /// Otherwise returns the combination of every condition's
+    /// [`ConditionOutcome`]: `NotMatched` if any condition is
+    /// definitively not satisfied (an `Indeterminate` condition
+    /// elsewhere cannot rescue that), `Indeterminate` if none are
+    /// `NotMatched` but at least one is `Indeterminate`, else `Matched`.
+    fn evaluate(
+        &self,
+        context: &ExecutionContext,
+        request: &ComputeRequest,
+    ) -> Option<ConditionOutcome> {
+        if self.resource != request.resource || self.action != request.action {
+            return None;
+        }
+        let mut any_indeterminate = false;
+        for condition in &self.conditions {
+            match condition.evaluate(context) {
+                ConditionOutcome::NotMatched => return Some(ConditionOutcome::NotMatched),
+                ConditionOutcome::Indeterminate => any_indeterminate = true,
+                ConditionOutcome::Matched => {}
+            }
+        }
+        Some(if any_indeterminate {
+            ConditionOutcome::Indeterminate
+        } else {
+            ConditionOutcome::Matched
+        })
     }
 }
 
@@ -293,6 +365,18 @@ pub enum DecisionReason {
     ExplicitDeny {
         matched_rules: BTreeSet<RuleId>,
         overridden_allow_rules: BTreeSet<RuleId>,
+    },
+    /// At least one `Deny` rule's resource/action matched the request,
+    /// but whether one of its conditions actually holds could not be
+    /// determined — the evidence it depends on was `Missing` or
+    /// `Unsupported`. Fails closed to `Effect::Deny`: whether a `Deny`
+    /// rule applies must never be resolved by treating unobserved
+    /// evidence as "condition not present, rule doesn't apply," which
+    /// would let missing evidence silently defeat a deny rule and fall
+    /// through to an unrelated `Allow` rule (HORO-787: "missing evidence
+    /// cannot silently upgrade trust").
+    IndeterminateEvidence {
+        rules: BTreeSet<RuleId>,
     },
 }
 
@@ -408,10 +492,24 @@ impl PolicySet {
     /// Evaluate this policy against an observed `context` and `request`.
     ///
     /// Every rule is always evaluated (no first-match short circuit).
-    /// Deny-overrides: if any deny rule matches, the decision is
-    /// [`Effect::Deny`] regardless of how many allow rules also matched.
-    /// [`Effect::Allow`] requires a non-empty matched-allow set and zero
-    /// matched deny rules. No match at all denies.
+    /// Precedence, most to least authoritative:
+    ///
+    /// 1. Any `Deny` rule that definitively matches → [`Effect::Deny`]
+    ///    ([`DecisionReason::ExplicitDeny`]), regardless of how many
+    ///    `Allow` rules also matched.
+    /// 2. Otherwise, any `Deny` rule whose match is
+    ///    [`ConditionOutcome::Indeterminate`] (a condition it depends on
+    ///    has `Missing`/`Unsupported` evidence) → [`Effect::Deny`]
+    ///    ([`DecisionReason::IndeterminateEvidence`]). This fails closed:
+    ///    whether that deny rule truly applies is unknown, and an
+    ///    unknown deny must never be resolved in favor of an `Allow`
+    ///    rule matched on unrelated evidence (HORO-787).
+    /// 3. Otherwise, any `Allow` rule that definitively matches →
+    ///    [`Effect::Allow`] ([`DecisionReason::ExplicitAllow`]). An
+    ///    `Allow` rule whose match is merely `Indeterminate` never
+    ///    contributes here — default-deny already covers that case, so
+    ///    it is treated the same as not matching at all.
+    /// 4. Otherwise → [`Effect::Deny`] ([`DecisionReason::NoMatchingRule`]).
     ///
     /// This function takes no caller-supplied identity/override
     /// parameter — only what is actually observed in `context` can
@@ -420,15 +518,25 @@ impl PolicySet {
     pub fn evaluate(&self, context: &ExecutionContext, request: &ComputeRequest) -> PolicyDecision {
         let mut allow_hits = BTreeSet::new();
         let mut deny_hits = BTreeSet::new();
+        let mut indeterminate_deny_hits = BTreeSet::new();
         for rule in &self.document.rules {
-            if rule.matches(context, request) {
-                match rule.effect {
+            match rule.evaluate(context, request) {
+                None | Some(ConditionOutcome::NotMatched) => {}
+                Some(ConditionOutcome::Matched) => match rule.effect {
                     Effect::Allow => {
                         allow_hits.insert(rule.id.clone());
                     }
                     Effect::Deny => {
                         deny_hits.insert(rule.id.clone());
                     }
+                },
+                Some(ConditionOutcome::Indeterminate) => {
+                    if rule.effect == Effect::Deny {
+                        indeterminate_deny_hits.insert(rule.id.clone());
+                    }
+                    // An Indeterminate Allow rule contributes nothing —
+                    // default-deny already covers "we couldn't confirm
+                    // this allow rule applies."
                 }
             }
         }
@@ -439,6 +547,13 @@ impl PolicySet {
                 DecisionReason::ExplicitDeny {
                     matched_rules: deny_hits,
                     overridden_allow_rules: allow_hits,
+                },
+            )
+        } else if !indeterminate_deny_hits.is_empty() {
+            (
+                Effect::Deny,
+                DecisionReason::IndeterminateEvidence {
+                    rules: indeterminate_deny_hits,
                 },
             )
         } else if !allow_hits.is_empty() {

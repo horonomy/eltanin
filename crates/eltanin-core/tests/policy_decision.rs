@@ -209,3 +209,96 @@ fn decision_carries_policy_provenance() {
         eltanin_core::envelope::DOMAIN_SCHEMA_VERSION
     );
 }
+
+/// **Regression** (found by independent review): a `Deny` rule whose
+/// condition depends on evidence that is `Missing` must never be
+/// silently dropped in favor of an unrelated matching `Allow` rule.
+/// Before this fix, `EvidenceMatch::matches` treated `Missing` the same
+/// as "value doesn't match," so a deny-on-uid-0 rule would vanish when
+/// the real UID couldn't be read, and an allow-by-cgroup-path rule would
+/// win — a UID-0 process could be allowed purely because its UID
+/// couldn't be observed. Now the deny rule's outcome is
+/// `IndeterminateEvidence` and the decision fails closed to `Deny`.
+#[test]
+fn deny_rule_blocked_by_missing_evidence_still_denies_an_otherwise_matching_allow() {
+    let mut allow_by_cgroup = uid_rule("allow-by-cgroup", Effect::Allow, 999_999); // uid irrelevant
+    allow_by_cgroup.conditions = vec![Condition::CgroupPath(EvidenceMatch {
+        expected: "/sys/fs/cgroup/user.slice".to_string(),
+        min_trust: TrustFloor::KernelObserved,
+    })];
+    let deny_root = uid_rule("deny-root", Effect::Deny, 0);
+
+    let policy = policy(vec![allow_by_cgroup, deny_root]);
+
+    let mut context = context_with_uid_source(1000, EvidenceSource::KernelObserved);
+    // The real UID could be 0 (root) — the collector just couldn't read
+    // it (e.g. permission denied), which must never be treated as "the
+    // deny-on-uid-0 rule doesn't apply."
+    context.workload.uid = Evidence::Missing {
+        reason: "permission denied reading /proc".into(),
+    };
+
+    let decision = policy.evaluate(&context, &request());
+    assert_eq!(
+        decision.effect(),
+        Effect::Deny,
+        "missing evidence on a deny rule's condition must never let an unrelated allow rule win"
+    );
+    assert_eq!(
+        decision.reason(),
+        &DecisionReason::IndeterminateEvidence {
+            rules: BTreeSet::from([RuleId::new("deny-root")])
+        }
+    );
+}
+
+/// A `Deny` rule blocked by missing evidence takes precedence even over
+/// an `Allow` rule that *also* definitively matches (not just an
+/// unrelated one) — indeterminate deny still beats confirmed allow.
+#[test]
+fn indeterminate_deny_outranks_a_definitively_matching_allow_rule() {
+    let allow = uid_rule("allow-r", Effect::Allow, 1000);
+    let mut deny = uid_rule("deny-r", Effect::Deny, 0);
+    deny.conditions = vec![Condition::Gid(EvidenceMatch {
+        expected: 0,
+        min_trust: TrustFloor::KernelObserved,
+    })];
+
+    let policy = policy(vec![allow, deny]);
+
+    let mut context = context_with_uid_source(1000, EvidenceSource::KernelObserved);
+    context.workload.gid = Evidence::Missing {
+        reason: "permission denied".into(),
+    };
+
+    let decision = policy.evaluate(&context, &request());
+    assert_eq!(decision.effect(), Effect::Deny);
+    assert_eq!(
+        decision.reason(),
+        &DecisionReason::IndeterminateEvidence {
+            rules: BTreeSet::from([RuleId::new("deny-r")])
+        }
+    );
+}
+
+/// An `Allow` rule whose condition depends on missing evidence simply
+/// doesn't contribute — no `Indeterminate`-for-allow special case is
+/// needed, since default-deny already covers it.
+#[test]
+fn indeterminate_allow_rule_does_not_allow() {
+    let mut allow = uid_rule("allow-r", Effect::Allow, 1000);
+    allow.conditions = vec![Condition::ExecutablePath(EvidenceMatch {
+        expected: "/usr/bin/tool".to_string(),
+        min_trust: TrustFloor::BestEffort,
+    })];
+
+    let policy = policy(vec![allow]);
+    let mut context = context_with_uid_source(1000, EvidenceSource::KernelObserved);
+    context.workload.executable_path = Evidence::Missing {
+        reason: "permission denied".into(),
+    };
+
+    let decision = policy.evaluate(&context, &request());
+    assert_eq!(decision.effect(), Effect::Deny);
+    assert_eq!(decision.reason(), &DecisionReason::NoMatchingRule);
+}

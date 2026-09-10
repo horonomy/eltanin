@@ -150,16 +150,40 @@ trick HORO-832's pid-only collector API uses.
 | `PolicyDocument` | Authored, not-yet-validated: `id`, author `revision`, `rules`. |
 | `PolicyError` | Six variants; validation failure = construction failure, no bypass. |
 | `PolicyProvenance` | `policy_id` + `policy_revision` + `schema_version` (from `Versioned<T>`'s `DOMAIN_SCHEMA_VERSION`). |
-| `DecisionReason` | `NoMatchingRule` / `ExplicitAllow{matched_rules}` / `ExplicitDeny{matched_rules, overridden_allow_rules}` — `BTreeSet<RuleId>` so the explanation is canonical regardless of authoring order. |
+| `DecisionReason` | `NoMatchingRule` / `ExplicitAllow{matched_rules}` / `ExplicitDeny{matched_rules, overridden_allow_rules}` / `IndeterminateEvidence{rules}` — `BTreeSet<RuleId>` so the explanation is canonical regardless of authoring order. |
 | `PolicyDecision` | Private fields, no public constructor outside `evaluate`, `Serialize`-only (not `Deserialize` — nothing should reconstruct an authority-bearing decision from bytes by default). |
 
 **Evaluation semantics**: every rule is always evaluated (no first-match
-short circuit) — deny-overrides. If any deny rule matches, the decision
-is `Deny` regardless of how many allow rules also matched; `Allow`
-requires a non-empty matched-allow set and zero matched deny rules; no
-match at all denies. This makes default-deny structural: `Effect::Allow`
-is reachable only via `DecisionReason::ExplicitAllow`, and an empty
-policy (zero rules) is valid and denies everything.
+short circuit). Precedence, most to least authoritative: (1) a `Deny`
+rule that definitively matches → `Deny`/`ExplicitDeny`, regardless of
+how many `Allow` rules also matched; (2) otherwise, a `Deny` rule whose
+match is indeterminate (a condition's evidence is `Missing`/
+`Unsupported`) → `Deny`/`IndeterminateEvidence` — this fails closed
+rather than letting an unconfirmed deny rule vanish and an unrelated
+`Allow` rule win (see "Real finding" below); (3) otherwise, a `Deny`
+rule that definitively matches → `Allow`/`ExplicitAllow` (an
+`Allow` rule that is merely indeterminate contributes nothing —
+default-deny already covers that case); (4) otherwise → `Deny`/
+`NoMatchingRule`. This makes default-deny structural: `Effect::Allow`
+is reachable only via `DecisionReason::ExplicitAllow` with a
+definitively-matched rule, and an empty policy (zero rules) is valid
+and denies everything.
+
+**Real finding from independent review, fixed before merge**: the
+original design (and first implementation) treated `Missing`/
+`Unsupported` evidence on *any* condition as simply "doesn't match,"
+uniformly for `Allow` and `Deny` rules. That is safe for `Allow` (a
+non-contributing rule just means default-deny still applies) but unsafe
+for `Deny`: a deny-on-uid-0 rule whose UID evidence was `Missing` would
+silently stop applying, and an unrelated `Allow` rule matched on a
+different field (e.g. cgroup path) could then win — a UID-0 process
+gets `Allow`ed purely because its UID couldn't be observed, directly
+violating HORO-787's "missing evidence cannot silently upgrade trust."
+Fixed by distinguishing `ConditionOutcome::NotMatched` (evidence
+observed, definitively doesn't satisfy the condition) from
+`ConditionOutcome::Indeterminate` (evidence `Missing`/`Unsupported` —
+unknown, not false) and giving `Deny` rules with an indeterminate
+outcome their own fail-closed `Deny` path, per the precedence above.
 
 **Two design decisions made explicitly, not silently**:
 1. No `Principal`/role/group type exists in this domain model (MVP 1.0
