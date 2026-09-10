@@ -91,9 +91,33 @@ never silently treated as `Different` or `Same`. This is what keeps
 `uid == owner`, `name == trusted`, `path == trusted`, `parent == trusted`
 from ever becoming unconditional authorization (North Star invariant 4).
 
+## Linux workload context collection (F-M1-003, HORO-832) — `eltanin_linux`
+
+`collect_workload_identity(pid: u32)` and `collect_execution_context(pid:
+u32)` populate the canonical `WorkloadIdentity`/`ExecutionContext` types
+above from observed `/proc/<pid>/{stat,status,exe,cgroup}` state. Both
+functions take only a `pid` — there is no API surface that accepts a
+caller-supplied identity/context to merge or override, so "caller cannot
+override locally derivable fields" (HORO-832 AC) is not a convention but
+an unexpressable operation.
+
+Every signal is `EvidenceSource::KernelObserved` when read successfully,
+or `Evidence::Missing{reason}` on any read failure (permission denied,
+process already exited, malformed `/proc` content) — never a panic,
+never a silently substituted default. `executable_hash` is deliberately
+always `Missing` (hashing a full binary on every collection is an
+unbounded-cost operation this collector does not implement); ancestry
+walks are bounded (`MAX_ANCESTRY_DEPTH`) and cycle-guarded against a
+corrupted `/proc` parent chain.
+
+On any non-Linux `target_os`, both functions return `Evidence::Unsupported`
+for every field — a documented fallback, not a compile failure — so this
+crate builds and unit-tests on any dev machine while the real
+`#[cfg(target_os = "linux")]` collection path is compiled and exercised
+only on Linux (this repo's `ubuntu-latest` CI runner validates it; local
+macOS development cannot).
+
 ## Not yet implemented
 
-Policy/lease/provenance domain types (F-M1-004/005, HORO-834/836), and
-the Linux collector that actually populates `WorkloadIdentity`/
-`ExecutionContext` from observed process state (F-M1-003, HORO-832) —
+Policy/lease/provenance domain types (F-M1-004/005, HORO-834/836) —
 tracked in `docs/development/campaign-state.md`.
