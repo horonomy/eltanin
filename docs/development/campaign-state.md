@@ -29,14 +29,22 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-783 | Rust workspace, CI (fmt/clippy/test/doc/deny), cargo-deny policy | #3 | `d430c9c` |
 | HORO-782 | North Star, Security Model, Product Constitution, ADRs 0001–0004 | #4 | `793c522` |
 | HORO-783 | Crate layout reconciled with Epic Component table (`eltanin-core/backend/protocol/agent/cli`) | #5 | `e1e71ec` |
-| HORO-772 | This campaign-state.md update | (this PR) | _fill in on merge_ |
+| HORO-772 | Campaign-state.md update (prior pass) | #6 | `45c36cf` |
+| HORO-825 | F-M1-001: resource domain (`Versioned<T>` envelope, `ResourceVendor`/`ResourceKind` opaque newtypes, `Capability`/`ResourceCapabilities`, `ComputeRequest`, `EnforcementResult`) | #7 | `e8896b5` |
+| HORO-826 | F-M1-001: `ComputeBackend` trait contract + `BackendError` | #8 | `ea3214c` |
+| HORO-827 | F-M1-001: `FakeBackend` deterministic test double | #9 | `856461f` |
+| HORO-831 | F-M1-003: `WorkloadIdentity`/`ExecutionContext` trust contract (`Evidence<T>`, `IdentityComparison`) | #10 | `f2f3fd8` |
+| HORO-832 | F-M1-003: Linux `/proc`-based workload context collection (`crates/eltanin-linux`) | in progress | — |
 
-Current `main` HEAD (before this PR merges): `793c522`.
+Current `main` HEAD: `f2f3fd8`. F-M1-001 (HORO-784/HORO-825/826/827) is
+functionally complete pending a formal HORO-784 Done transition once
+F-M1-001's own DoD is checked against HORO-819 (not yet established).
 
 ## Active worktrees
 
-None (all merged and removed). Next worktree will be for HORO-784
-(F-M1-001) or HORO-825 (its first subtask).
+- `eltanin-mvp-1.0-HORO-832-linux_context_collection` (branch
+  `mvp-1.0/HORO-832/linux_context_collection`), off `f2f3fd8`, in
+  progress.
 
 ## Dependency blockers
 
@@ -85,8 +93,10 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-Start F-M1-001 (HORO-784, Protected Resource & Backend Abstraction) via
-its subtasks HORO-825 (resource domain/identities/serialization contract)
-and HORO-826 (backend capability contract). No dependency on other
-Features — every other Feature depends on its domain types, so it's the
-correct next unit of work.
+F-M1-001 (HORO-784) is functionally done (825/826/827 merged). Currently
+in progress: F-M1-003 (HORO-786), subtask HORO-832 (Linux `/proc`
+workload-context collector in `crates/eltanin-linux`), following HORO-831
+(trust contract, merged in PR #10). Next after HORO-832 merges: HORO-833
+(spoof/PID-reuse/provenance regression coverage), then F-M1-003 is done
+and F-M1-004 (HORO-787, Authorization Policy Decision) becomes the next
+unblocked Feature.

@@ -30,6 +30,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "eltanin-linux"
+version = "0.1.0"
+dependencies = [
+ "eltanin-core",
+]
+
+[[package]]
 name = "eltanin-protocol"
 version = "0.1.0"
 

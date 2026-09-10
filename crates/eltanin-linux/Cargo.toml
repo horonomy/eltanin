@@ -1,0 +1,12 @@
+[package]
+name = "eltanin-linux"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Linux adapter that derives WorkloadIdentity/ExecutionContext from observed /proc state (F-M1-003, HORO-832)."
+
+[lints]
+workspace = true
+
+[dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
