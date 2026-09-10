@@ -81,9 +81,32 @@ fn eltanin_core_does_not_depend_back_on_eltanin_backend() {
     let core_manifest = fs::read_to_string(workspace_root.join("crates/eltanin-core/Cargo.toml"))
         .expect("read eltanin-core Cargo.toml");
     assert!(
-        !core_manifest.contains("eltanin-backend"),
+        !core_manifest.to_lowercase().contains("eltanin-backend")
+            && !core_manifest.to_lowercase().contains("eltanin_backend"),
         "eltanin-core/Cargo.toml must not depend on eltanin-backend"
     );
+
+    // Also catch an indirect reference through a `[workspace.dependencies]`
+    // rename alias (`foo = { package = "eltanin-backend", ... }`), which
+    // wouldn't contain the literal string "eltanin-backend" in
+    // eltanin-core's own manifest even though it resolves to it. This
+    // workspace already uses the `{ workspace = true }` aliasing pattern
+    // for serde/thiserror, so the shape is real, not hypothetical.
+    let root_manifest =
+        fs::read_to_string(workspace_root.join("Cargo.toml")).expect("read workspace Cargo.toml");
+    for line in root_manifest.lines() {
+        let lower = line.to_lowercase();
+        if lower.contains("eltanin-backend") || lower.contains("eltanin_backend") {
+            if let Some(alias) = line.split('=').next() {
+                let alias = alias.trim();
+                assert!(
+                    !core_manifest.contains(&format!("{alias} =")),
+                    "eltanin-core/Cargo.toml references workspace-dependency alias {alias:?}, \
+                     which the root Cargo.toml points at eltanin-backend"
+                );
+            }
+        }
+    }
 
     let mut core_src_files = Vec::new();
     code_files(
