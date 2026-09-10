@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/resource",
+    "crates/identity",
+    "crates/policy",
+    "crates/lease",
+    "crates/provenance",
+    "crates/protocol",
+    "crates/backend-api",
+    "crates/agent-core",
+    "crates/simulator",
+    "cli",
+]
+
+# Platform/vendor crates (platform/linux/*, backends/nvidia-linux) are added
+# to this workspace by the Feature ticket that first needs them
+# (F-M1-002/006/007), not here — see docs/development/campaign-state.md.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[workspace.lints.rust]
+# "warn" is the floor for platform/vendor crates that will need FFI later
+# (backends/nvidia-linux, platform/linux/ebpf). Every vendor-neutral crate
+# in this workspace currently overrides this with `#![forbid(unsafe_code)]`
+# in source, which always wins over this weaker workspace default — so this
+# setting is presently inert for existing crates and only takes effect once
+# an unsafe-needing crate is added without its own forbid.
+unsafe_code = "warn"

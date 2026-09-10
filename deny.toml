@@ -1,0 +1,38 @@
+# cargo-deny configuration for Eltanin.
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Placeholder while Eltanin's own LICENSE is undecided (HORO-781). Common
+# permissive licenses are allowed for dependencies regardless of the
+# project's own eventual license choice.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+# Eltanin's own workspace crates (publish = false) have no `license` field
+# yet — the project's own license is an open founder decision (HORO-781),
+# tracked separately from third-party dependency licensing. Don't fail CI
+# on our own unpublished crates for a decision that hasn't been made yet;
+# this only exempts crates with publish = false, never third-party deps.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

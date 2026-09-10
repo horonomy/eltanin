@@ -1,0 +1,11 @@
+[package]
+name = "eltanin-resource"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Eltanin resource crate (MVP 1.0 scaffold - populated by its owning Feature ticket)."
+
+[lints]
+workspace = true
+
+[dependencies]
