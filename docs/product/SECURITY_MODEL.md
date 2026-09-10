@@ -17,12 +17,21 @@ corrected before it ships.
 Adapted for MVP 1.0's Happy Path scope. Each level states what MVP 1.0
 claims to resist, and what it explicitly does not yet resist.
 
+**No claim below is validated yet.** No physical bare-metal Linux/NVIDIA
+hardware evidence exists as of this document's initial version — every
+"Claimed: denied" here is the *target* F-M1-007 is built to, pending
+HORO-841's hardware spike. Treat every claim in this section as
+provisional until §"Enforcement mechanism" below is updated with real
+hardware evidence.
+
 - **L1 — Unauthenticated/naive access.** A workload with no authorization
-  path at all attempting to use the protected GPU. **Claimed: denied.**
+  path at all attempting to use the protected GPU. **Claimed (pending
+  hardware validation): denied.**
 - **L2 — Same-user, non-adversarial misuse.** A legitimate local user
   running a workload without going through the authorized launch path
-  (`eltanin run`). **Claimed: denied**, on the supported enforcement
-  boundary (new device-node opens after enforcement is active).
+  (`eltanin run`). **Claimed (pending hardware validation): denied**, on
+  the supported enforcement boundary (new device-node opens after
+  enforcement is active).
 - **L3 — Same-user, mildly adversarial.** A user or process attempting to
   work around the CLI (e.g. invoking the underlying binary directly,
   reusing an inherited file descriptor). **Partially claimed** — new opens
