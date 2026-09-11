@@ -335,9 +335,13 @@ HORO-839**: the `eltanin run` launch model (fork+exec vs. exec-in-place)
 question is now moot for the transport layer — `eltanin-agent` derives
 peer context for *the connecting peer at connect time*, a fact identical
 under either launch model, so there is no target-pid field a launch
-model could change. What a lease's *binding subject* should be (pid vs.
-cgroup) remains an open architecture question for F-M1-007/HORO-840, not
-a transport concern.
+model could change. **The lease binding-subject question (pid vs.
+cgroup) is resolved in HORO-840**: a lease binds to the connecting peer
+process (pid + `ProcessStartToken` + executable), via
+`LeaseIssuer::validate`'s existing `compare_process`/`compare_executable`
+pair — not to a cgroup. See the "Local authorization agent integration"
+section below for why, and its named cross-ticket obligation on
+F-M1-008.
 
 ## Local authorization agent transport (F-M1-006, HORO-839) — `eltanin-agent`, `eltanin_linux::peer`
 
@@ -345,8 +349,9 @@ Implements the Unix Domain Socket listener, peer-credential collection,
 and bounded single-request connection lifecycle that HORO-838's protocol
 types and framing rules assumed. Contains no policy evaluation or lease
 issue/release logic — `eltanin-agent`'s `handler::RequestHandler` is the
-seam HORO-840 implements that behind; `tests/agent_architecture_guard.rs`
-makes the boundary mechanically checkable.
+seam HORO-840's `authz` module (below) implements that behind;
+`tests/agent_architecture_guard.rs` makes the boundary mechanically
+checkable.
 
 **Peer credential collection (`eltanin_linux::peer`)**: `SO_PEERCRED`
 (via `rustix::net::sockopt::socket_peercred`, a safe wrapper preserving
@@ -385,12 +390,111 @@ unsafe `libc` `getsockopt`/`geteuid` calls specifically to keep
 additional (cargo-deny-clean) transitive dependency — a founder decision,
 not a default.
 
+## Local authorization agent integration (F-M1-006, HORO-840) — `eltanin-agent::authz`
+
+Implements `RequestHandler` for real: wires `eltanin-core`'s policy
+(F-M1-004) and lease (F-M1-005) contracts to an
+`eltanin-backend::ComputeBackend` (F-M1-001). This is the one module in
+`eltanin-agent` permitted to name `PolicySet`/`LeaseIssuer`/
+`ComputeLease`/`.evaluate(`/`.issue(`/`.revoke(` —
+`tests/agent_architecture_guard.rs` was rescoped (not removed) to exempt
+exactly `src/authz/**`, with a positive assertion that every transport
+module file was still actually scanned, so the exemption is a fixed
+hole rather than an escape hatch a future commit could quietly widen.
+
+**Request path — issue, then enforce**: `RequestLease` issues a lease
+(re-evaluating policy over the exact `ProvenanceRecord` it binds to,
+per `LeaseIssuer::issue`'s own contract) *before* calling
+`ComputeBackend::enforce` — `enforce`'s docs are explicit that
+authorization "has already been made by the time this is called." If
+`enforce` does not report `EnforcementResult::Allowed`, the just-issued
+lease is compensated with `LeaseIssuer::revoke` and never inserted into
+the store.
+
+**Wire mapping rule**: `LeaseDenied` if and only if `PolicySet::evaluate`
+itself produced `Effect::Deny`. Every other non-grant condition (backend
+failure, enforcement refusal, capacity exhaustion) maps to
+`Error { Internal }` — continuing `handler.rs`'s existing
+`StatusOnlyHandler` reasoning that "no policy backend decided this" must
+never be reported as if policy had denied it.
+
+**Lease binding subject (D-C, resolves the question HORO-838/839 left
+open)**: the connecting peer *process* — pid, `ProcessStartToken`, and
+executable hash/path — not a cgroup. This was already fixed by merged
+`eltanin-core` code: `LeaseIssuer::issue` binds a lease to the exact
+`ProvenanceRecord` passed in, and `validate` compares
+`origin.context.workload` via `compare_process` then
+`compare_executable`. Choosing a cgroup subject for MVP 1.0 would mean
+changing `validate`'s comparison set in a QA-PASSed F-M1-005 module —
+out of scope for a one-PR integration ticket. `cgroup_path` is still
+carried in the bound `ExecutionContext` (so a policy condition can match
+on it, and audit preserves it) — it is simply not part of the identity
+comparison. **Named forward obligation on F-M1-007**: cgroup-scoped
+device-BPF enforcement must reconcile a process-bound lease with a
+cgroup-scoped enforcement mechanism; adding a cgroup dimension to
+`validate` later is additive. **Named cross-ticket obligation on
+F-M1-008**: because the lease binds to the connecting peer, `eltanin
+run` must arrange for the *workload process itself* to be the process
+that connects to the agent socket — a CLI that connects and then forks
+the workload would bind the lease to the CLI, which then exits.
+
+**`ReleaseLease` discharges the `SECURITY_MODEL` named obligation**:
+`LeaseIssuer::validate` performs exactly the mandated
+`compare_process` + `compare_executable` pair (both required `Same`),
+plus issuer/revocation/resource/action/expiry checks, in an order
+already merged and QA-verified in `eltanin-core`. Anything but `Valid`
+is reported identically as `ReleaseOutcome::Refused` — a client can
+never use the wire response to distinguish "unknown lease id" from
+"belongs to another client" from "already expired."
+
+**Restart and disconnect semantics**: an agent restart is a fresh
+`AuthorizationHandler` — fresh `LeaseIssuer` instance (a distinct
+`IssuerInstanceId`, derived by the daemon binary from
+`runtime::issuer_instance_id()`), empty in-memory lease store. A lease
+naming a prior instance simply misses the store, and would separately
+hit `LeaseValidity::ForeignIssuer` even if it didn't. **Lease lifetime
+is bound to TTL, never to connection lifetime**: HORO-839's transport is
+one-request-per-connection, so "a client disconnects without releasing"
+just means no `ReleaseLease` ever arrives — the lease expires at
+`expires_at` and is dropped by the next `prune`. Tying lease lifetime to
+a connection would revoke a workload's authorization the instant the
+CLI process that requested it exits, which is exactly wrong for
+`eltanin run`. **Named limitation for F-M1-007**: MVP 1.0 has no
+expiry-driven backend teardown — only an explicit `ReleaseLease` calls
+`backend.revoke`. A lease that expires unreleased leaves enforcement
+applied indefinitely; fail-closed (over-restrictive), not fail-open, and
+F-M1-007's to close with real device state.
+
+**Correlation seam for F-M1-009 (`eltanin-agent::authz::event`)**:
+`eltanin-protocol`'s wire responses are deliberately lossy (`ErrorCode`
+carries no detail, `DenialReason`/`ReleaseOutcome` collapse several
+internal outcomes into one wire variant). `AuthorizationEvent` records
+full internal fidelity — what was asked, the peer as observed, what
+actually happened, what the client actually saw — once per request,
+after every internal lock is released. `NullSink` discards; `StderrSink`
+Debug-formats to stderr (captured by `journald`/systemd, no new logging
+dependency). F-M1-009 owns turning these into a persistent, queryable
+audit trail; this seam only guarantees the information needed to do
+that already exists.
+
+**Daemon binary (`eltanin-agentd`)**: environment-variable configuration
+(`ELTANIN_AGENT_SOCKET`, `ELTANIN_AGENT_SOCKET_MODE`,
+`ELTANIN_AGENT_POLICY`, `ELTANIN_AGENT_LEASE_TTL_SECS` — all but the
+socket path required, no silent default for a security-relevant value).
+Always constructs a `FakeBackend` — F-M1-002's real NVIDIA backend does
+not exist yet; swapping it in is additive once it does. `SIGTERM`/
+`SIGINT` are wired to `ShutdownHandle::shutdown()` via a dedicated
+`signal-hook` iterator thread (`eltanin-agent::daemon::run`) — a founder
+decision (D2) made on the same basis as HORO-839's D1: `signal-hook`
+over hand-written unsafe `libc` `sigaction`, to keep
+`#![forbid(unsafe_code)]` intact workspace-wide.
+
 ## Not yet implemented
 
-F-M1-001/003/004/005 (`eltanin-core`) and all of F-M1-006's transport
-layer (`eltanin-protocol` HORO-838, `eltanin-agent`/`eltanin_linux::peer`
-HORO-839) are implemented. Remaining work: F-M1-006's integration with
-policy/lease/backend behind `RequestHandler` (HORO-840, including the
-pid-vs-cgroup lease-binding-subject decision and `SIGTERM`/daemon-binary
-wiring), F-M1-007 enforcement, F-M1-008 CLI, F-M1-009 audit — tracked in
-`docs/development/campaign-state.md`.
+F-M1-001/003/004/005 (`eltanin-core`) and all of F-M1-006
+(`eltanin-protocol` HORO-838, `eltanin-agent` HORO-839/HORO-840) are
+implemented. Remaining work: F-M1-007 enforcement (including the named
+cgroup-reconciliation and expiry-driven-teardown obligations above),
+F-M1-008 CLI (including the named same-process-connects obligation
+above), F-M1-009 audit (consuming the `authz::event` correlation seam)
+— tracked in `docs/development/campaign-state.md`.
