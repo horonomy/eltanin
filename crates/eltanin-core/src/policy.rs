@@ -489,6 +489,27 @@ impl PolicySet {
         }
     }
 
+    /// Every distinct [`ResourceIdentity`] named by at least one rule in
+    /// this policy, in rule-authoring order with duplicates removed.
+    /// A backend composition root (e.g. `eltanin-agentd`) that has no
+    /// independent resource-discovery mechanism of its own — a fake or
+    /// stub backend, unlike a real vendor backend's `discover()` — can
+    /// use this to know which resources it must seed itself so `enforce`
+    /// has something to enforce on: [`crate::policy`] itself has no
+    /// opinion on backend wiring, this is purely a read of what the
+    /// policy already names.
+    #[must_use]
+    pub fn resources(&self) -> Vec<ResourceIdentity> {
+        let mut seen = BTreeSet::new();
+        let mut resources = Vec::new();
+        for rule in &self.document.rules {
+            if seen.insert(rule.resource.clone()) {
+                resources.push(rule.resource.clone());
+            }
+        }
+        resources
+    }
+
     /// Evaluate this policy against an observed `context` and `request`.
     ///
     /// Every rule is always evaluated (no first-match short circuit).
