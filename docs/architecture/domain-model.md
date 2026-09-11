@@ -293,8 +293,9 @@ documented rather than silently left unaddressed.
 `crates/eltanin-protocol` defines the canonical, platform-neutral wire
 types for the local authorization agent's IPC channel — the type
 definitions and framing rules only; the actual Unix Domain Socket
-listener, peer-credential collection, and agent runtime are HORO-839,
-and their integration with policy/lease/backend is HORO-840.
+listener, peer-credential collection, and agent runtime are HORO-839
+(see the section below), and their integration with policy/lease/backend
+is HORO-840.
 
 | Type | Purpose |
 |---|---|
@@ -318,30 +319,78 @@ fails closed with `ErrorCode::UnsupportedVersion { found, expected }`.
 
 **Framing**: a 4-byte big-endian `u32` length prefix + UTF-8 JSON,
 bounded by `MAX_FRAME_BYTES` (64 KiB). `decode_request` checks the
-length *before* attempting deserialization. **Named obligation on
-HORO-839** (a contract on the transport, not a property this crate
-alone can enforce): the transport must call `decode_frame_len` on the
-4-byte header and reject before allocating a read buffer for the body —
-a check applied only after reading the full body still permits an
-unbounded allocation driven by an attacker-chosen length prefix.
+length *before* attempting deserialization. **Discharged by HORO-839**:
+`eltanin-agent`'s `connection::serve_connection` calls `decode_frame_len`
+on the 4-byte header and rejects an oversized length before allocating a
+read buffer for the body — verified by
+`agent_request_handling.rs::an_oversized_frame_is_rejected_promptly_before_the_body_is_ever_read`.
 
 **Trust boundary**: zero identity/evidence fields in any wire type. See
 `docs/product/SECURITY_MODEL.md`'s "Local IPC trust boundary" section
 for the full derived-vs-client mapping and the `AgentResponse`-derives-
 `Deserialize` enforcement argument.
 
-**Known limitation, flagged during design, not yet resolved**: the
-`eltanin run` launch model (fork+exec vs. exec-in-place) is undecided,
-and both plausible paths currently fail lease validation differently —
-fork+exec produces a new pid (`WorkloadMismatch`), exec-in-place
-preserves pid/start-token but changes the binary (`ExecutableMismatch`,
-per HORO-836's `compare_executable`). Must be resolved by HORO-839/840
-before transport work assumes either.
+**Known limitation, flagged during design, resolved by construction in
+HORO-839**: the `eltanin run` launch model (fork+exec vs. exec-in-place)
+question is now moot for the transport layer — `eltanin-agent` derives
+peer context for *the connecting peer at connect time*, a fact identical
+under either launch model, so there is no target-pid field a launch
+model could change. What a lease's *binding subject* should be (pid vs.
+cgroup) remains an open architecture question for F-M1-007/HORO-840, not
+a transport concern.
+
+## Local authorization agent transport (F-M1-006, HORO-839) — `eltanin-agent`, `eltanin_linux::peer`
+
+Implements the Unix Domain Socket listener, peer-credential collection,
+and bounded single-request connection lifecycle that HORO-838's protocol
+types and framing rules assumed. Contains no policy evaluation or lease
+issue/release logic — `eltanin-agent`'s `handler::RequestHandler` is the
+seam HORO-840 implements that behind; `tests/agent_architecture_guard.rs`
+makes the boundary mechanically checkable.
+
+**Peer credential collection (`eltanin_linux::peer`)**: `SO_PEERCRED`
+(via `rustix::net::sockopt::socket_peercred`, a safe wrapper preserving
+this workspace's `#![forbid(unsafe_code)]` instead of hand-written
+unsafe `libc` `getsockopt` code) reports the peer's **effective** uid/gid
+at `connect()` time. `collect_peer_context` cross-checks that against a
+fresh `/proc/<pid>/status` read (which reports **real** uid first,
+effective second) via `PeerConsistency`, rather than naively assuming
+the two uid notions are interchangeable — a naive direct comparison
+would false-positive-diverge on any setuid/setgid peer. A match on
+either the real or the effective `/proc` value is `Consistent`; both
+values unreadable is `Indeterminate`; anything else is
+`CredentialDivergence`. pid `0` (an unmappable namespace peer) is
+`PeerUnmapped` and `/proc/0` is never read. Only `PeerContext::consistency
+== Consistent` is `authorizable()`. Linux-only; every other `target_os`
+returns `PeerCredentialError::UnsupportedPlatform` rather than falsely
+claiming support.
+
+**Socket lifecycle (`eltanin-agent::listener::BoundSocket`)**: binds only
+after validating the parent directory (not a symlink, is a directory,
+not group/other-writable, owned by this process's own euid); discriminates
+a stale socket file (nothing listening) from a live one via a
+connect-probe — `ConnectionRefused` is the only outcome treated as safe
+to unlink — before ever removing a pre-existing path; chmods to the
+caller's configured mode after bind. `Drop` unlinks the socket path.
+
+**Connection lifecycle (`eltanin-agent::connection::serve_connection`)**:
+exactly one request per accepted connection — read one framed request,
+dispatch to `RequestHandler` inside `catch_unwind`, write one framed
+response, close. No loop, no retry. See that function's own doc comment
+for the full failure-to-`ErrorCode` mapping.
+
+**Dependency decision (D1)**: `rustix` was chosen over hand-written
+unsafe `libc` `getsockopt`/`geteuid` calls specifically to keep
+`#![forbid(unsafe_code)]` intact workspace-wide, at the cost of one
+additional (cargo-deny-clean) transitive dependency — a founder decision,
+not a default.
 
 ## Not yet implemented
 
-F-M1-001/003/004/005 (`eltanin-core`) and the protocol type layer of
-F-M1-006 (`eltanin-protocol`, HORO-838) are implemented. Remaining work:
-F-M1-006's agent runtime/transport (HORO-839) and its integration with
-policy/lease/backend (HORO-840), F-M1-007 enforcement, F-M1-008 CLI,
-F-M1-009 audit — tracked in `docs/development/campaign-state.md`.
+F-M1-001/003/004/005 (`eltanin-core`) and all of F-M1-006's transport
+layer (`eltanin-protocol` HORO-838, `eltanin-agent`/`eltanin_linux::peer`
+HORO-839) are implemented. Remaining work: F-M1-006's integration with
+policy/lease/backend behind `RequestHandler` (HORO-840, including the
+pid-vs-cgroup lease-binding-subject decision and `SIGTERM`/daemon-binary
+wiring), F-M1-007 enforcement, F-M1-008 CLI, F-M1-009 audit — tracked in
+`docs/development/campaign-state.md`.

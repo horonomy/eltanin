@@ -3,9 +3,29 @@ name = "eltanin-agent"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Eltanin privileged local authorization agent (MVP 1.0 scaffold, F-M1-006 / HORO-788)."
+description = "Eltanin privileged local authorization coordinator (MVP 1.0, F-M1-006 / HORO-788/838/839/840)."
 
 [lints]
 workspace = true
 
 [dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+eltanin-linux = { path = "../eltanin-linux", version = "0.1.0" }
+eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
+thiserror = { workspace = true }
+
+# Socket-directory ownership validation (listener.rs) needs this
+# process's own euid. rustix's safe geteuid() wrapper keeps this crate
+# at #![forbid(unsafe_code)] instead of a hand-written unsafe libc call
+# (see crates/eltanin-linux/Cargo.toml's identical rationale and ADR
+# 0004). Scoped to `cfg(unix)` since the socket listener itself is
+# Unix-only.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# Enables PeerCredential::new/PeerContext::new (test doubles only) for
+# this crate's integration tests, without exposing them to production
+# builds — see eltanin-linux/Cargo.toml's "test-support" feature doc.
+eltanin-linux = { path = "../eltanin-linux", version = "0.1.0", features = ["test-support"] }

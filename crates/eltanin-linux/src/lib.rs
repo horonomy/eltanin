@@ -25,6 +25,8 @@
 
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
 
+pub mod peer;
+
 /// Collect a [`WorkloadIdentity`] for `pid` from currently observed
 /// process state. Never panics: any signal that cannot be read (permission
 /// denied, the process has already exited, malformed `/proc` content) is
@@ -40,6 +42,18 @@ pub fn collect_workload_identity(pid: u32) -> WorkloadIdentity {
 #[must_use]
 pub fn collect_execution_context(pid: u32) -> ExecutionContext {
     imp::collect_execution_context(pid)
+}
+
+/// Read the **real** and **effective** uid/gid pair for `pid` from
+/// `/proc/<pid>/status` in one parse. [`collect_workload_identity`] only
+/// ever surfaces the real value (`WorkloadIdentity`'s established
+/// semantics, HORO-832) — this lower-level accessor exists for
+/// [`peer`], which must reconcile `SO_PEERCRED`'s **effective**-uid
+/// report against `/proc`'s real uid rather than conflating the two.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub(crate) fn read_status_ids(pid: u32, label: &str) -> (Evidence<u32>, Evidence<u32>) {
+    imp::read_status_ids(pid, label)
 }
 
 #[cfg(target_os = "linux")]
@@ -107,36 +121,56 @@ mod imp {
         parse_stat(pid).ok().map(|s| s.ppid)
     }
 
-    /// Read the first (`real`) uid/gid from `/proc/<pid>/status`'s `Uid:`
-    /// / `Gid:` line (`Uid:\treal\teffective\tsaved\tfs`).
-    fn read_status_id(pid: u32, label: &str) -> Evidence<u32> {
+    /// Read the (`real`, `effective`) uid/gid pair from
+    /// `/proc/<pid>/status`'s `Uid:`/`Gid:` line
+    /// (`Uid:\treal\teffective\tsaved\tfs`), in one parse.
+    pub(super) fn read_status_ids(pid: u32, label: &str) -> (Evidence<u32>, Evidence<u32>) {
         let raw = match fs::read_to_string(format!("/proc/{pid}/status")) {
             Ok(raw) => raw,
             Err(e) => {
-                return Evidence::Missing {
-                    reason: format!("read /proc/{pid}/status: {e}"),
-                }
+                let reason = format!("read /proc/{pid}/status: {e}");
+                return (
+                    Evidence::Missing {
+                        reason: reason.clone(),
+                    },
+                    Evidence::Missing { reason },
+                );
             }
         };
         let Some(line) = raw.lines().find(|l| l.starts_with(label)) else {
-            return Evidence::Missing {
-                reason: format!("no {label} line in /proc/{pid}/status"),
-            };
+            let reason = format!("no {label} line in /proc/{pid}/status");
+            return (
+                Evidence::Missing {
+                    reason: reason.clone(),
+                },
+                Evidence::Missing { reason },
+            );
         };
-        let Some(real) = line.split_whitespace().nth(1) else {
-            return Evidence::Missing {
-                reason: format!("{label} line has no value: {line:?}"),
-            };
+        let mut fields = line.split_whitespace().skip(1);
+        let parse = |raw: Option<&str>, which: &str| -> Evidence<u32> {
+            match raw.map(str::parse::<u32>) {
+                Some(Ok(value)) => Evidence::Present {
+                    value,
+                    source: EvidenceSource::KernelObserved,
+                },
+                Some(Err(e)) => Evidence::Missing {
+                    reason: format!("parse {label} {which}: {e}"),
+                },
+                None => Evidence::Missing {
+                    reason: format!("{label} line missing {which} value: {line:?}"),
+                },
+            }
         };
-        match real.parse::<u32>() {
-            Ok(value) => Evidence::Present {
-                value,
-                source: EvidenceSource::KernelObserved,
-            },
-            Err(e) => Evidence::Missing {
-                reason: format!("parse {label}: {e}"),
-            },
-        }
+        (
+            parse(fields.next(), "real"),
+            parse(fields.next(), "effective"),
+        )
+    }
+
+    /// The **real** uid/gid — [`collect_workload_identity`]'s only
+    /// consumer of this pair.
+    fn read_status_id(pid: u32, label: &str) -> Evidence<u32> {
+        read_status_ids(pid, label).0
     }
 
     fn executable_path(pid: u32) -> Evidence<String> {
