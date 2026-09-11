@@ -23,6 +23,7 @@ use eltanin_core::resource::EnforcementResult;
 use eltanin_linux::peer::PeerContext;
 
 use eltanin_backend::contract::BackendError;
+use eltanin_protocol::request::ClientRequest;
 use eltanin_protocol::response::AgentResponse;
 
 /// Which wire operation this event reports on.
@@ -72,9 +73,13 @@ pub enum AuthorizationOutcome {
 /// regardless of outcome), what actually happened, and what the client
 /// actually saw. `peer` is recorded even when the outcome is a denial —
 /// an audit trail needs the identity of a *refused* request as much as
-/// a granted one.
+/// a granted one. `request` (added for F-M1-009/HORO-824) is what was
+/// actually asked — without it, a denied record would say "denied by
+/// rule X" without naming what was denied, since `PolicyDecision` alone
+/// carries effect/reason/policy only.
 pub struct AuthorizationEvent<'a> {
     pub operation: Operation,
+    pub request: &'a ClientRequest,
     pub peer: &'a PeerContext,
     pub outcome: &'a AuthorizationOutcome,
     pub response: &'a AgentResponse,
@@ -97,14 +102,18 @@ impl EventSink for NullSink {
 /// Debug-formats each event to stderr — captured by `journald`/systemd
 /// under a normal service unit, with no new logging dependency. Not an
 /// audit trail (no persistence, no structure a query can rely on): a
-/// stopgap until F-M1-009 supplies a real one.
+/// stopgap for a build with no richer sink configured — see
+/// `crate::authz::audit::AuditEventSink` (F-M1-009, HORO-824) for the
+/// real one.
 pub struct StderrSink;
 
 impl EventSink for StderrSink {
     fn record(&self, event: &AuthorizationEvent<'_>) {
         eprintln!(
-            "eltanin-agent authz event: operation={:?} peer_pid={} outcome={:?} response={:?}",
+            "eltanin-agent authz event: operation={:?} request={:?} peer_pid={} outcome={:?} \
+             response={:?}",
             event.operation,
+            event.request,
             event.peer.credential().pid(),
             event.outcome,
             event.response
