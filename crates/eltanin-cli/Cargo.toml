@@ -18,3 +18,19 @@ eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+# SIGINT/SIGTERM/etc. forwarding (HORO-846). Same founder decision as
+# HORO-840's eltanin-agent daemon: signal-hook over hand-written unsafe
+# libc sigaction, to keep #![forbid(unsafe_code)] intact workspace-wide.
+# `iterator` is the only feature needed: a dedicated thread blocks on
+# `Signals::forever()` and pushes onto a channel, no raw handler needed.
+[target.'cfg(unix)'.dependencies.signal-hook]
+version = "0.3"
+default-features = false
+features = ["iterator"]
+
+[target.'cfg(unix)'.dependencies]
+# Sending a signal to the workload/its process group without hand-written
+# unsafe libc kill() — same #![forbid(unsafe_code)]-preserving rationale
+# as eltanin-agent/eltanin-linux's use of rustix (ADR 0004, D1/D2).
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
