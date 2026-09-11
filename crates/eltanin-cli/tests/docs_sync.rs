@@ -23,15 +23,25 @@ fn cli_contract_exit_code_table_matches_the_exit_code_enum() {
         (ExitCode::ProfileUnresolved, "could not be resolved"),
     ];
     for (code, doc_fragment) in codes {
-        let row = format!("| {} |", code.code());
+        // Require the code and its description on the *same* table row —
+        // two independent whole-document `contains` checks would still
+        // pass if a row's code and description were swapped with
+        // another row's, since both fragments would still appear
+        // somewhere in the document.
+        let row_prefix = format!("| {} |", code.code());
+        let row = doc
+            .lines()
+            .find(|line| line.starts_with(&row_prefix))
+            .unwrap_or_else(|| {
+                panic!(
+                    "CLI_CONTRACT.md must have a row for exit code {}",
+                    code.code()
+                )
+            });
         assert!(
-            doc.contains(&row),
-            "CLI_CONTRACT.md must have a row for exit code {}",
-            code.code()
-        );
-        assert!(
-            doc.contains(doc_fragment),
-            "CLI_CONTRACT.md must describe exit code {} using language matching {doc_fragment:?}",
+            row.contains(doc_fragment),
+            "CLI_CONTRACT.md's row for exit code {} must describe it using language matching \
+             {doc_fragment:?}, got: {row:?}",
             code.code()
         );
     }

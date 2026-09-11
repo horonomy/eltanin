@@ -35,10 +35,12 @@ pub enum ProfileNameError {
     ContainsSlash,
     #[error("--profile name must not be \".\" or \"..\"")]
     PathTraversal,
-    #[error("--profile name must be at most {MAX_PROFILE_NAME_LEN} characters, got {0}")]
+    #[error("--profile name must be at most {MAX_PROFILE_NAME_LEN} bytes, got {0}")]
     TooLong(usize),
     #[error("--profile name must be valid UTF-8")]
     NotUtf8,
+    #[error("--profile name must not contain a control character")]
+    ContainsControlCharacter,
 }
 
 impl ProfileName {
@@ -47,7 +49,8 @@ impl ProfileName {
     /// # Errors
     ///
     /// Returns [`ProfileNameError`] if `raw` is empty, too long, not
-    /// UTF-8, contains a path separator, or is `.`/`..`.
+    /// UTF-8, contains a path separator or control character, or is
+    /// `.`/`..`.
     pub fn parse(raw: &OsStr) -> Result<Self, ProfileNameError> {
         let raw = raw.to_str().ok_or(ProfileNameError::NotUtf8)?;
         if raw.is_empty() {
@@ -61,6 +64,14 @@ impl ProfileName {
         }
         if raw == "." || raw == ".." {
             return Err(ProfileNameError::PathTraversal);
+        }
+        // A future loader resolves this name to a filesystem path
+        // (`crate` docs above) — reject NUL and other control
+        // characters here, at the argv-validation boundary this ticket
+        // owns, rather than letting them reach that loader as a
+        // confusing path-construction error later.
+        if raw.chars().any(char::is_control) {
+            return Err(ProfileNameError::ContainsControlCharacter);
         }
         Ok(Self(raw.to_string()))
     }

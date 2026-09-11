@@ -604,9 +604,13 @@ mandatory; argv is read as `OsString` throughout and launched via
 Action)` pair (`crate::profile::ProfileDocument`) — it never reaches the
 wire and never influences policy evaluation; the filesystem loader that
 resolves a name to a document is HORO-846's. Exit codes 64/69/70/74/76/
-77/78 are a closed, pairwise-distinct taxonomy distinct from
-workload-passthrough (`0..=125`), spawn-failure (126/127), and
-signal-terminated (`128+N`) codes (`tests/exit_code_contract.rs`).
+77/78 are a closed, pairwise-distinct taxonomy, disjoint from
+spawn-failure (126/127) and signal-terminated (`128+N`) codes
+(`tests/exit_code_contract.rs`) — they unavoidably overlap the
+workload-passthrough range (`0..=125`), the same property every Unix
+process wrapper has, so a workload's own exit status and an `eltanin
+run` outcome are not always distinguishable by exit code alone; the
+stderr message is the reliable signal (`docs/product/CLI_CONTRACT.md`).
 
 **Launch sequence** (`crate::sequence::LaunchStage`, S0–S11): parse argv
 → resolve profile → establish governed execution context → connect to

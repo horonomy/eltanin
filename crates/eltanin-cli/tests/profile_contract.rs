@@ -58,6 +58,22 @@ fn a_name_at_the_length_limit_is_accepted() {
     assert!(ProfileName::parse(OsStr::new(&exactly_64)).is_ok());
 }
 
+#[test]
+fn a_name_containing_a_nul_byte_is_rejected() {
+    assert_eq!(
+        ProfileName::parse(OsStr::new("dev\0workstation")),
+        Err(ProfileNameError::ContainsControlCharacter)
+    );
+}
+
+#[test]
+fn a_name_containing_a_newline_is_rejected() {
+    assert_eq!(
+        ProfileName::parse(OsStr::new("dev\nworkstation")),
+        Err(ProfileNameError::ContainsControlCharacter)
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_non_utf8_name_is_rejected() {

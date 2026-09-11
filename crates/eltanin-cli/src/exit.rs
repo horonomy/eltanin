@@ -35,10 +35,18 @@ pub enum ExitCode {
 }
 
 impl ExitCode {
-    /// The process exit code this variant maps to. Values are chosen to
-    /// avoid the `0..=127` range workload-passthrough and
-    /// spawn-failure/signal codes already use — see
-    /// `docs/product/CLI_CONTRACT.md`'s exit-code table.
+    /// The process exit code this variant maps to. Values fall in
+    /// `64..128`, so they never collide with 126/127 (spawn failure) or
+    /// `128+N` (a workload terminated by signal `N`). They **do** fall
+    /// inside `0..=125`, the same range a workload's own exit status
+    /// passes through verbatim — this is an accepted, unavoidable
+    /// property of any Unix process wrapper (`timeout`, `ssh`, `sudo`
+    /// have the same one), not a guarantee this type can make. A
+    /// workload that happens to exit 77 is indistinguishable, by exit
+    /// code alone, from `eltanin run` reporting `Denied`; the stderr
+    /// message (`crate::failure::LaunchFailure::message`) is the only
+    /// reliable disambiguator. See `docs/product/CLI_CONTRACT.md`'s
+    /// exit-code table.
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {

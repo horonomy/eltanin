@@ -40,16 +40,17 @@ fn every_eltanin_exit_code_is_pairwise_distinct() {
 }
 
 #[test]
-fn every_eltanin_exit_code_falls_in_the_reserved_sysexits_style_range() {
-    // 0..=125 is workload passthrough, 126/127 is spawn failure, 128+N
-    // is a signal-terminated workload — eltanin's own codes must not
-    // collide with any of those ranges.
+fn every_eltanin_exit_code_avoids_spawn_failure_and_signal_ranges() {
+    // 126/127 is spawn failure, 128+N is a signal-terminated workload —
+    // eltanin's own codes must not collide with either. They necessarily
+    // DO overlap 0..=125 (workload passthrough) — no process wrapper can
+    // avoid that; see ExitCode::code's docs for why this isn't a defect.
     for code in ALL {
         let value = code.code();
         assert!(
-            (64..128).contains(&value),
-            "{code:?} = {value} must fall in 64..128, outside the workload-passthrough \
-             (0..=125), spawn-failure (126/127), and signal (128+N) ranges"
+            (64..126).contains(&value),
+            "{code:?} = {value} must fall in 64..126, outside the spawn-failure (126/127) and \
+             signal (128+N) ranges"
         );
     }
 }

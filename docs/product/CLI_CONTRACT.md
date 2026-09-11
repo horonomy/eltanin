@@ -103,7 +103,10 @@ returns `LeaseGranted`. The agent's own `AuthorizationHandler` calls
 integration" section). `eltanin run`'s entire obligation is: no
 `Command::spawn` on any path that has not observed `LeaseGranted`.
 
-**Lease renewal (within S7)**: MVP 1.0 has no lease "extend" — a renewal
+**Lease renewal (within S7, HORO-846 — not yet implemented)**: like S2's
+governed-context establishment, this describes the behavior HORO-846
+must build, not something the current placeholder `main.rs` does yet.
+MVP 1.0 has no lease "extend" — a renewal
 is a fresh `RequestLease` over freshly observed context
 (`docs/adr/0003-scoped-expiring-compute-lease.md`). At roughly half the
 granted lease's remaining time, `eltanin run` requests a fresh lease; on
@@ -144,8 +147,8 @@ continuing an unauthorized workload.
 | Exit | Meaning |
 |---|---|
 | 0–125 | the workload's own exit status, passed through verbatim |
-| 126 | the workload was found but could not be executed |
-| 127 | the workload was not found |
+| 126 | `eltanin run` found the workload but could not execute it |
+| 127 | `eltanin run` could not find the workload |
 | 128+N | the workload was terminated by signal `N` |
 | 64 | usage error (malformed argv, missing `--`, empty command) |
 | 69 | the agent is unavailable (cannot connect / socket error) |
@@ -158,6 +161,27 @@ continuing an unauthorized workload.
 Exit 76 overrides the `128+N` convention when `eltanin run` itself sent
 the terminating signal — stderr names the workload's own exit status
 that this suppressed, so it's not silently lost.
+
+**64/69/70/74/76/77/78 are disjoint from 126/127 and `128+N`, but not
+from `0..=125`.** A workload that itself legitimately exits with status
+77 (for example, the GNU Automake test protocol's "skipped" code) is
+indistinguishable, by exit code alone, from `eltanin run` reporting a
+policy denial — this is an accepted, unavoidable property of any Unix
+process wrapper (`timeout`, `ssh`, and `sudo` all have it too), not a
+guarantee this taxonomy can make. The stderr message
+(`crate::failure::LaunchFailure::message`) is the reliable
+disambiguator, always printed for every `eltanin run`-originated
+outcome.
+
+**126/127 ambiguity, named rather than hidden**: the table above
+describes `eltanin run`'s *own* spawn-failure signal. If the workload's
+own program legitimately exits with status 126 or 127 (e.g. a wrapped
+shell script's own "command not found"), that status is passed through
+via the ordinary `0..=125`-and-beyond passthrough rule above and is
+**not** distinguishable from `eltanin run`'s spawn failure by exit code
+alone — the same limitation as the 77 case above, stated separately here
+since 126/127 is the one place this taxonomy's own codes and the
+passthrough convention share a *name*, not just a numeric range.
 
 ## Deny and error messages
 
