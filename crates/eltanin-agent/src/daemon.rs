@@ -53,8 +53,9 @@ pub fn run(
     // handlers; the iterator must be driven (here, on a dedicated
     // thread) for signals to actually be delivered to this process
     // rather than merely queued.
-    let mut signals =
-        Signals::new([SIGTERM, SIGINT]).map_err(|e| StartupError::Io { reason: e.to_string() })?;
+    let mut signals = Signals::new([SIGTERM, SIGINT]).map_err(|e| StartupError::Io {
+        reason: e.to_string(),
+    })?;
     thread::spawn(move || {
         // Exactly one shutdown per process lifetime: the first signal
         // observed breaks out of the loop, so no later SIGTERM/SIGINT

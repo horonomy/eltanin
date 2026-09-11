@@ -17,7 +17,9 @@ use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::resource::{Action, Capability, EnforcementResult};
 use eltanin_protocol::request::{ClientRequest, LeaseRequest, ReleaseRequest};
 use eltanin_protocol::response::{AgentResponse, ErrorCode, ReleaseOutcome};
-use support::authz::{allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer};
+use support::authz::{
+    allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer,
+};
 
 fn lease_request() -> ClientRequest {
     ClientRequest::RequestLease(LeaseRequest {
@@ -54,7 +56,12 @@ fn a_scripted_backend_denial_never_grants_a_lease() {
 
     let response = handler.handle(&lease_request(), &peer.context());
 
-    assert_eq!(response, AgentResponse::Error { code: ErrorCode::Internal });
+    assert_eq!(
+        response,
+        AgentResponse::Error {
+            code: ErrorCode::Internal
+        }
+    );
 }
 
 #[test]
@@ -77,7 +84,12 @@ fn a_scripted_backend_error_never_grants_a_lease_and_compensates() {
     let peer = TestPeer::fresh(1000, "sha256:trusted");
 
     let response = handler.handle(&lease_request(), &peer.context());
-    assert_eq!(response, AgentResponse::Error { code: ErrorCode::Internal });
+    assert_eq!(
+        response,
+        AgentResponse::Error {
+            code: ErrorCode::Internal
+        }
+    );
 
     // The sequence consumed by the compensated issue must not be
     // releasable later — it was never actually granted.
@@ -114,7 +126,12 @@ fn resource_disappearing_mid_session_fails_safely() {
 
     let response = handler.handle(&lease_request(), &peer.context());
 
-    assert_eq!(response, AgentResponse::Error { code: ErrorCode::Internal });
+    assert_eq!(
+        response,
+        AgentResponse::Error {
+            code: ErrorCode::Internal
+        }
+    );
 }
 
 #[test]
@@ -194,5 +211,10 @@ fn a_permission_denied_backend_error_is_reported_as_internal_not_a_policy_denial
 
     let response = handler.handle(&lease_request(), &peer.context());
 
-    assert_eq!(response, AgentResponse::Error { code: ErrorCode::Internal });
+    assert_eq!(
+        response,
+        AgentResponse::Error {
+            code: ErrorCode::Internal
+        }
+    );
 }

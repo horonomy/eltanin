@@ -24,7 +24,9 @@ use eltanin_agent::peer::LinuxPeerContextSource;
 use eltanin_backend::fake::FakeBackend;
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::IssuerInstanceId;
-use eltanin_core::policy::{Condition, Effect, EvidenceMatch, PolicyDocument, PolicyId, PolicySet, Rule, RuleId, TrustFloor};
+use eltanin_core::policy::{
+    Condition, Effect, EvidenceMatch, PolicyDocument, PolicyId, PolicySet, Rule, RuleId, TrustFloor,
+};
 use eltanin_core::resource::{Action, Capability, ProtectedResource, ResourceCapabilities};
 use eltanin_protocol::request::{ClientRequest, LeaseRequest, RequestBody, RequestId};
 use eltanin_protocol::response::{AgentResponse, ResponseBody};

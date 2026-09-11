@@ -61,7 +61,9 @@ use std::time::Duration;
 
 use eltanin_backend::contract::ComputeBackend;
 use eltanin_core::envelope::Versioned;
-use eltanin_core::lease::{IssuerInstanceId, LeaseError, LeaseIssuer, LeaseValidity, MonotonicTime};
+use eltanin_core::lease::{
+    IssuerInstanceId, LeaseError, LeaseIssuer, LeaseValidity, MonotonicTime,
+};
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
 use eltanin_core::provenance::ProvenanceRecord;
 use eltanin_core::resource::EnforcementResult;

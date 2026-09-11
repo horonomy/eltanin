@@ -68,9 +68,9 @@ impl LeaseState {
         let Some(released) = self.leases.get(id) else {
             return false;
         };
-        self.leases
-            .iter()
-            .any(|(other_id, other)| other_id != id && other.origin().request.resource == released.origin().request.resource)
+        self.leases.iter().any(|(other_id, other)| {
+            other_id != id && other.origin().request.resource == released.origin().request.resource
+        })
     }
 }
 

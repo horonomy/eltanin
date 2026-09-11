@@ -15,9 +15,15 @@ use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::resource::Capability;
 use eltanin_protocol::request::{ClientRequest, LeaseRequest};
 use eltanin_protocol::response::{AgentResponse, DenialReason, ErrorCode};
-use support::authz::{allow_policy_for_uid, backend_with_resource, deny_all_policy, resource_identity, FixedClock, TestPeer};
+use support::authz::{
+    allow_policy_for_uid, backend_with_resource, deny_all_policy, resource_identity, FixedClock,
+    TestPeer,
+};
 
-fn handler_with(policy: eltanin_core::policy::PolicySet, backend: Arc<eltanin_backend::fake::FakeBackend>) -> AuthorizationHandler {
+fn handler_with(
+    policy: eltanin_core::policy::PolicySet,
+    backend: Arc<eltanin_backend::fake::FakeBackend>,
+) -> AuthorizationHandler {
     AuthorizationHandler::new(
         IssuerInstanceId::new("test-instance"),
         policy,
@@ -73,7 +79,10 @@ fn a_request_denied_by_policy_cannot_mint_a_lease() {
 #[test]
 fn an_empty_policy_denies_every_request() {
     let peer = TestPeer::fresh(1000, "sha256:trusted");
-    let handler = handler_with(deny_all_policy(), backend_with_resource(&[Capability::Enforce]));
+    let handler = handler_with(
+        deny_all_policy(),
+        backend_with_resource(&[Capability::Enforce]),
+    );
 
     let response = handler.handle(&lease_request(), &peer.context());
 
@@ -113,7 +122,12 @@ fn a_backend_lacking_enforce_capability_never_grants_a_lease() {
 
     let response = handler.handle(&lease_request(), &peer.context());
 
-    assert_eq!(response, AgentResponse::Error { code: ErrorCode::Internal });
+    assert_eq!(
+        response,
+        AgentResponse::Error {
+            code: ErrorCode::Internal
+        }
+    );
 }
 
 #[test]

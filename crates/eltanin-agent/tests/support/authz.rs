@@ -5,12 +5,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use eltanin_agent::authz::Clock;
-use eltanin_core::identity::{Evidence, EvidenceSource, ExecutionContext, ProcessStartToken, WorkloadIdentity};
-use eltanin_core::lease::MonotonicTime;
-use eltanin_core::policy::{Condition, Effect, EvidenceMatch, PolicyDocument, PolicySet, Rule, RuleId, TrustFloor};
-use eltanin_core::policy::PolicyId;
-use eltanin_core::resource::{Action, Capability, ComputeRequest, ProtectedResource, ResourceCapabilities, ResourceIdentity, ResourceKind, ResourceVendor};
 use eltanin_backend::fake::FakeBackend;
+use eltanin_core::identity::{
+    Evidence, EvidenceSource, ExecutionContext, ProcessStartToken, WorkloadIdentity,
+};
+use eltanin_core::lease::MonotonicTime;
+use eltanin_core::policy::PolicyId;
+use eltanin_core::policy::{
+    Condition, Effect, EvidenceMatch, PolicyDocument, PolicySet, Rule, RuleId, TrustFloor,
+};
+use eltanin_core::resource::{
+    Action, Capability, ComputeRequest, ProtectedResource, ResourceCapabilities, ResourceIdentity,
+    ResourceKind, ResourceVendor,
+};
 use eltanin_linux::peer::{PeerConsistency, PeerContext, PeerCredential};
 
 /// A fully-specified fake peer identity, distinct instances of which

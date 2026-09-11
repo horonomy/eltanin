@@ -14,7 +14,9 @@ use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::resource::{Action, Capability};
 use eltanin_protocol::request::{ClientRequest, LeaseRequest, ReleaseRequest};
 use eltanin_protocol::response::{AgentResponse, ReleaseOutcome};
-use support::authz::{allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer};
+use support::authz::{
+    allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer,
+};
 
 fn handler() -> AuthorizationHandler {
     AuthorizationHandler::new(
@@ -102,7 +104,9 @@ fn a_different_client_cannot_release_another_clients_lease() {
     let lease_id = granted_lease_id(&granted);
 
     let response = handler.handle(
-        &ClientRequest::ReleaseLease(ReleaseRequest { lease_id: lease_id.clone() }),
+        &ClientRequest::ReleaseLease(ReleaseRequest {
+            lease_id: lease_id.clone(),
+        }),
         &attacker.context(),
     );
 

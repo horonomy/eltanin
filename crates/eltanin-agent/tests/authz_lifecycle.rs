@@ -14,7 +14,9 @@ use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::resource::{Action, Capability};
 use eltanin_protocol::request::{ClientRequest, LeaseRequest, ReleaseRequest};
 use eltanin_protocol::response::{AgentResponse, ErrorCode, ReleaseOutcome};
-use support::authz::{allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer};
+use support::authz::{
+    allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer,
+};
 
 fn lease_request() -> ClientRequest {
     ClientRequest::RequestLease(LeaseRequest {
@@ -142,7 +144,12 @@ fn a_request_beyond_max_outstanding_leases_fails_safely_without_granting() {
     assert!(matches!(first, AgentResponse::LeaseGranted { .. }));
 
     let second = handler.handle(&lease_request(), &second_peer.context());
-    assert_eq!(second, AgentResponse::Error { code: ErrorCode::Internal });
+    assert_eq!(
+        second,
+        AgentResponse::Error {
+            code: ErrorCode::Internal
+        }
+    );
 }
 
 #[test]
