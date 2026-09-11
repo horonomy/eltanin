@@ -1,4 +1,12 @@
-//! Shared test support (F-M1-006, HORO-839).
+//! Shared test support (F-M1-006, HORO-839/HORO-840).
+//!
+//! `#![allow(dead_code)]`: each `tests/*.rs` binary compiles this whole
+//! module but only uses a subset of it — the unused-per-binary items are
+//! not a real dead-code smell, just the shape of a shared support module
+//! across many integration-test binaries.
+#![allow(dead_code)]
+
+pub mod authz;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
