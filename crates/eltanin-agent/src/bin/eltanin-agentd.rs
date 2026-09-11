@@ -17,7 +17,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use eltanin_agent::authz::event::StderrSink;
+use eltanin_agent::authz::audit::AuditEventSink;
+use eltanin_agent::authz::event::{EventSink, StderrSink};
 use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::config::{AgentConfig, DEFAULT_SOCKET_PATH};
 use eltanin_agent::peer::LinuxPeerContextSource;
@@ -57,12 +58,36 @@ fn run() -> Result<(), String> {
     // token isn't kernel-observed — propagated here, never papered over.
     let instance = issuer_instance_id().map_err(|e| format!("cannot start agent: {e}"))?;
 
+    // ELTANIN_AUDIT_LOG is optional — its absence is not a startup
+    // error, unlike the required vars above, since a real audit trail
+    // is additive (F-M1-009/HORO-824) over the StderrSink stopgap that
+    // shipped with F-M1-006. A *set-but-non-UTF-8* value is a distinct
+    // case from "unset" and must not silently fall through to the
+    // stopgap sink — that would mask a real misconfiguration in the
+    // switch between "real audit trail" and "no persistent audit trail
+    // at all."
+    let sink: Arc<dyn EventSink> = match env::var_os("ELTANIN_AUDIT_LOG") {
+        None => Arc::new(StderrSink),
+        Some(path) => {
+            let path = path.into_string().map_err(|raw| {
+                format!(
+                    "ELTANIN_AUDIT_LOG is set but not valid UTF-8: {}",
+                    raw.to_string_lossy()
+                )
+            })?;
+            Arc::new(
+                AuditEventSink::open(&PathBuf::from(path), instance.clone())
+                    .map_err(|e| format!("failed to open audit log: {e}"))?,
+            )
+        }
+    };
+
     let handler = Arc::new(AuthorizationHandler::new(
         instance,
         policy,
         Arc::new(FakeBackend::new()),
         Arc::new(AgentClock::new()),
-        Arc::new(StderrSink),
+        sink,
         &authz_config,
     ));
 

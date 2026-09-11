@@ -88,6 +88,7 @@ use eltanin_protocol::response::{
 use crate::handler::RequestHandler;
 use crate::runtime::AgentClock;
 
+pub mod audit;
 pub mod event;
 mod state;
 
@@ -505,6 +506,7 @@ impl RequestHandler for AuthorizationHandler {
 
         self.sink.record(&AuthorizationEvent {
             operation,
+            request,
             peer,
             outcome: &outcome,
             response: &response,

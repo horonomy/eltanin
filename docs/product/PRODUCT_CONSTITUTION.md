@@ -16,7 +16,7 @@ architecture decision.
   ADR before the dependency is introduced.
 - **Unsafe Rust must be isolated, documented, and reviewed.** Vendor-
   neutral crates (`crates/eltanin-core`, `eltanin-backend`,
-  `eltanin-protocol`, `eltanin-agent`, `eltanin-cli`)
+  `eltanin-protocol`, `eltanin-agent`, `eltanin-cli`, `eltanin-audit`)
   `#![forbid(unsafe_code)]`. Unsafe is permitted only in platform/vendor
   crates added for FFI/eBPF boundaries (`crates/eltanin-nvidia`,
   `crates/eltanin-linux`, `ebpf/eltanin-device-guard/`), and every

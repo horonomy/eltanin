@@ -1,0 +1,21 @@
+[package]
+name = "eltanin-audit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Eltanin local audit & explain evidence — versioned append-only record schema, file sink, and explain reader (F-M1-009, HORO-824)."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "eltanin-explain"
+path = "src/bin/eltanin-explain.rs"
+
+[dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+eltanin-backend = { path = "../eltanin-backend", version = "0.1.0" }
+eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

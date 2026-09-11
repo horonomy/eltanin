@@ -126,6 +126,89 @@ This document will be updated with the actual validated boundary once
 HORO-841 completes; until then, §"Threat levels" above states the
 intended, not-yet-hardware-verified target.
 
+## Audit & explain evidence (F-M1-009, HORO-824) — `eltanin-audit`
+
+**Audit is evidence, not authority.** `crates/eltanin-audit` writes one
+append-only NDJSON record per `AuthorizationHandler` decision
+(`eltanin-agent::authz::event::EventSink`), and `eltanin-explain`
+(`crates/eltanin-audit/src/bin/eltanin-explain.rs`) reads that log back to
+answer "what happened for this decision." Neither side may become part of
+the ALLOW/DENY/release decision path itself:
+
+- **The writer never reads.** `eltanin-agent` calls only
+  `EventSink::record(&self, event) -> ()` — a signature that returns
+  nothing and cannot fail the caller. `eltanin-agent` never calls
+  `eltanin_audit::explain::{read_log, select, Selector}`; this is
+  mechanically enforced by
+  `crates/eltanin-agent/tests/audit_reader_isolation.rs`, which fails the
+  build if any agent source file names the reader API.
+- **A written record cannot become an authorization input.** Every
+  authority-bearing type this crate mirrors (`ComputeLease`,
+  `PolicyDecision`, `AuthorizationOutcome`, …) is deliberately
+  `Serialize`-only or has no `serde` derive at all in `eltanin-core` — see
+  `docs/architecture/domain-model.md`'s "Compute Lease" and "Authorization
+  policy" sections. `eltanin-audit::record` mirrors each one with a
+  hand-written `Recorded*` struct/enum that is `Deserialize`, but nothing
+  in the codebase ever constructs a `ComputeLease` or `PolicyDecision`
+  from a `RecordedLease*`/`RecordedPolicyDecision` — editing or replaying
+  a log line changes what `eltanin-explain` reports, never what the agent
+  authorizes.
+- **Best-effort durability is an explicit MVP 1.0 limitation, by founder
+  decision.** An audit write failure is reported to the caller
+  (`AuditSinkError`) and logged to stderr by `eltanin-agent`'s
+  `AuditEventSink` adapter, and counted via
+  `AuditFileSink::failed_writes()` — but it never changes an
+  already-computed `AgentResponse`. Reopening `EventSink::record`'s
+  `-> ()` contract to make audit I/O authoritative was explicitly
+  rejected: an agent that denies protected compute because its *disk* is
+  unhappy is a new, separately-designed failure mode, not an MVP 1.0
+  requirement. `failed_writes()` is a plain accessor, not wired into any
+  wire-visible `AgentResponse`/`AgentStatusView` field — reopening that
+  QA-PASSed protocol schema (HORO-838/839) was equally out of scope for
+  this ticket. A future mode such as
+  `require_durable_audit_before_commit` may make durability authoritative
+  for deployments that need it, but is explicitly **not** implemented
+  here.
+- **Evidence-exists vs. not-found vs. possibly-lost is honestly
+  distinguishable, where it's actually knowable.**
+  `AuditFileSink::append` reserves its sequence number *before*
+  attempting the write and never reuses it on failure, so a failed write
+  leaves a permanent, structural gap in the sequence space rather than a
+  silently reused id. `eltanin_audit::explain::LogScan::gaps` detects
+  these gaps per issuer instance, ranging from sequence `0` (where every
+  instance's sequence space starts) up to the highest sequence actually
+  observed; `select()` reports `SelectionResult::Found` (the record
+  exists), `PossiblyLost` (the id falls inside an observed gap — it may
+  have failed to persist), or `NotFound` otherwise — which ordinarily
+  means never issued, but **not always**: an id beyond the highest
+  sequence an instance was ever observed to reach also reports
+  `NotFound`, even if it was in fact reserved and lost, because nothing
+  in a purely local log can tell "reserved then lost at the very end of
+  the log" apart from "never issued" without an independent liveness
+  signal. This is the honest limit of what a local, best-effort log can
+  tell you: it cannot prove a record was never *issued* if persistence
+  itself is what failed, and this limit is sharpest at an instance's
+  trailing edge.
+- **Redaction / log-sensitivity contract.** An audit record may contain
+  process ancestry, executable paths, and cgroup/namespace hints — the
+  same kernel-observed `ExecutionContext` evidence the authorization
+  decision itself used — but never a lease's reusable authorization
+  material, raw protected payload content, or secrets. Structurally: no
+  `crates/eltanin-linux` collector reads `/proc/<pid>/cmdline` or
+  `/proc/<pid>/environ` (only `stat`/`status`/`exe`/`cgroup`), so workload
+  argv/env can never reach a record via that evidence path in the first
+  place; see `crates/eltanin-audit/tests/redaction.rs`. The log file is
+  created at mode `0600` (Unix) — see
+  `crates/eltanin-audit/tests/sink_append.rs`.
+
+Regression coverage
+(`crates/eltanin-agent/tests/audit_sink.rs::an_audit_write_failure_never_changes_the_already_computed_response`)
+proves both a grant and a denial remain unaffected when every audit write
+fails, via a deterministic always-failing `Write` implementation injected
+through `AuditEventSink::from_writer` — filesystem-based fault injection
+(deleting/replacing the log file under an open file descriptor) proved
+unreliable across platforms and was rejected as the test mechanism.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of
