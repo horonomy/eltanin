@@ -39,7 +39,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-targets
-      - run: cargo test --workspace
+      - name: Track B — canonical Product/Business E2E
+        run: cargo test -p eltanin-cli --test canonical_e2e
+      - name: Track A — full hardware-free suite
+        if: success() || failure()
+        run: cargo test --workspace
 
   deny:
     name: cargo-deny (license/advisory)
