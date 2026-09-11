@@ -71,9 +71,16 @@ state. `crates/eltanin-protocol`'s wire types carry zero identity or
 evidence fields — no request or response names a `WorkloadIdentity`,
 `ExecutionContext`, or `Evidence<T>` — so there is no wire shape a client
 could populate to claim a UID, executable path, or process ancestry
-that overrides what the agent observes about the connecting peer itself
-(via OS peer credentials and `eltanin-linux`'s collector, both HORO-839
-concerns). A client can name a `resource`/`action` (a request parameter
+that overrides what the agent observes about the connecting peer itself.
+Concretely (HORO-839): the agent reads the peer's `SO_PEERCRED`
+credential (effective uid/gid, via `rustix`'s safe wrapper — never
+hand-written unsafe `libc` `getsockopt`) and cross-checks it against a
+fresh `/proc/<pid>/status` read through `eltanin-linux`'s collector
+before treating the peer as authorizable; the two are reconciled rather
+than naively compared, since `SO_PEERCRED` reports the peer's
+**effective** uid while `/proc/<pid>/status`'s first `Uid:` field is the
+**real** uid, and a setuid/setgid peer legitimately differs between
+them. A client can name a `resource`/`action` (a request parameter
 default-deny policy can only narrow, never widen) and a `lease_id` (a
 lookup key, not a capability), and nothing else.
 
