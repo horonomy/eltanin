@@ -51,8 +51,10 @@ version = "0.1.0"
 dependencies = [
  "eltanin-core",
  "eltanin-protocol",
+ "rustix",
  "serde",
  "serde_json",
+ "signal-hook",
  "thiserror",
 ]
 

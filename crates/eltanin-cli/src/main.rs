@@ -1,39 +1,29 @@
-//! `eltanin` CLI entrypoint (F-M1-008, HORO-823/845).
+//! `eltanin` CLI entrypoint (F-M1-008, HORO-823/845/846).
 //!
-//! Only `run` exists so far. This binary honors the argv/exit-code
-//! contract HORO-845 defines (`docs/product/CLI_CONTRACT.md`); the
-//! actual agent-connection/spawn/supervise launch path is HORO-846's.
+//! Only `run` exists so far.
 #![forbid(unsafe_code)]
 
-use std::path::Path;
 use std::process::ExitCode as ProcessExitCode;
 
 use eltanin_cli::args::parse_run;
 use eltanin_cli::failure::LaunchFailure;
+use eltanin_cli::launch::{self, LaunchOutcome};
 
 fn main() -> ProcessExitCode {
     let argv = std::env::args_os().skip(1);
-    match parse_run(argv) {
-        Ok(invocation) => {
-            eprintln!(
-                "eltanin run: parsed profile {:?}, program {:?} — launch not yet implemented \
-                 (HORO-846)",
-                invocation.profile.as_str(),
-                Path::new(&invocation.program).display()
-            );
-            ProcessExitCode::from(
-                LaunchFailure::AgentUnavailable(
-                    "eltanin run's launch path is not yet implemented (HORO-846)".to_string(),
-                )
-                .exit_code()
-                .code(),
-            )
-        }
-        Err(error) => {
-            let failure = LaunchFailure::from(error);
-            eprintln!("eltanin: {}", failure.message());
-            eprintln!("eltanin: {}", failure.next_action());
-            ProcessExitCode::from(failure.exit_code().code())
-        }
+    let invocation = match parse_run(argv) {
+        Ok(invocation) => invocation,
+        Err(error) => return report(&LaunchFailure::from(error)),
+    };
+
+    match launch::run(&invocation) {
+        LaunchOutcome::Failure(failure) => report(&failure),
+        LaunchOutcome::Exit(code) => ProcessExitCode::from(code),
     }
+}
+
+fn report(failure: &LaunchFailure) -> ProcessExitCode {
+    eprintln!("eltanin: {}", failure.message());
+    eprintln!("eltanin: {}", failure.next_action());
+    ProcessExitCode::from(failure.exit_code().code())
 }

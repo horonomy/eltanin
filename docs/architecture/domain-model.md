@@ -573,13 +573,39 @@ audit correlation. If F-M1-008 needs to correlate a CLI invocation with
 its audit trail, it must do so via the `LeaseId` the grant already
 returns, not by threading `RequestId` through the audit schema.
 
-## `eltanin run` controlled launch (F-M1-008, HORO-823/845) — `eltanin-cli`
+## `eltanin run` controlled launch (F-M1-008, HORO-823/845/846) — `eltanin-cli`
 
-HORO-845 defines the contract (`docs/product/CLI_CONTRACT.md`); HORO-846
+HORO-845 defined the contract (`docs/product/CLI_CONTRACT.md`); HORO-846
 implements the actual agent-connection/spawn/supervise launch path.
 Process topology is [ADR 0005](../adr/0005-eltanin-run-process-topology.md):
 `eltanin run` stays alive as the lease-holding supervisor, never
 `execve()`s into the workload.
+
+**One request per connection (HORO-846)**: `eltanin-agent`'s transport
+is one-request-per-connection (`connection.rs::serve_connection` reads
+exactly one frame, dispatches, writes one frame, closes — see
+`docs/architecture/domain-model.md`'s "lease lifetime is bound to TTL,
+never to connection lifetime" note above). `crate::client::AgentClient::exchange`
+therefore opens a fresh `UnixStream` for every request — the initial
+`RequestLease`, every renewal, and the final `ReleaseLease` are each
+their own connect/send/recv/close cycle, never a persistent session.
+`eltanin-protocol::framing` gained the client-direction mirror pair
+(`encode_request`/`decode_response`) for this — additive, no existing
+signature changed; `protocol_client_direction.rs` proves both directions
+round-trip against each other, so wire compatibility with the agent's
+own `decode_request`/`encode_response` holds by construction.
+
+**Renewal is real server behavior, not assumed (verified for HORO-846)**:
+`LeaseIssuer::issue` has no per-resource/per-peer uniqueness check, so a
+second `RequestLease` for the same `(resource, action)` from the same
+peer mints a genuinely independent `ComputeLease`; `LeaseState.leases`
+is keyed by `LeaseId`, so two leases for one resource coexist without
+collision; and `any_other_live_lease_for_same_resource` exists precisely
+so releasing the superseded lease never calls `backend.revoke` while the
+new lease is live. `eltanin-agent/tests/authz_renewal.rs` pins all three
+facts directly against already-merged HORO-836/840 code — this is not
+new agent behavior, `eltanin-cli`'s renewal loop (`crate::supervise`)
+just depends on it holding.
 
 **Named MVP 1.0 limitation, founder-acknowledged (not scope for this
 ticket, tracked as HORO-988)**: because the connecting peer through
@@ -603,7 +629,10 @@ mandatory; argv is read as `OsString` throughout and launched via
 `--profile` name resolves, client-side only, to a `(ResourceIdentity,
 Action)` pair (`crate::profile::ProfileDocument`) — it never reaches the
 wire and never influences policy evaluation; the filesystem loader that
-resolves a name to a document is HORO-846's. Exit codes 64/69/70/74/76/
+resolves a name to a document (`crate::profile::{profile_dir,
+load_profile}`) is a single directory (`ELTANIN_PROFILE_DIR`, else
+`XDG_CONFIG_HOME`, else `HOME`-derived) — deliberately not a
+multi-directory search. Exit codes 64/69/70/74/76/
 77/78 are a closed, pairwise-distinct taxonomy, disjoint from
 spawn-failure (126/127) and signal-terminated (`128+N`) codes
 (`tests/exit_code_contract.rs`) — they unavoidably overlap the
@@ -627,11 +656,11 @@ authorization" is: no `Command::spawn` before an observed
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`
-HORO-838, `eltanin-agent` HORO-839/HORO-840), and F-M1-009
-(`eltanin-audit`, HORO-824) are implemented. F-M1-008's contract
-(HORO-845) is defined; its launch path (HORO-846) and E2E fixtures/docs
-(HORO-847) are not yet implemented. Remaining work: F-M1-007 enforcement
-(including the named cgroup-reconciliation and expiry-driven-teardown
-obligations above), F-M1-008's HORO-846/847 subtasks, and HORO-988 (the
-workload-executable-identity gap named above) — tracked in
+HORO-838, `eltanin-agent` HORO-839/HORO-840), F-M1-009 (`eltanin-audit`,
+HORO-824), and F-M1-008's contract and launch path (HORO-845/846) are
+implemented. F-M1-008's E2E fixtures/docs (HORO-847) are not yet
+implemented. Remaining work: F-M1-007 enforcement (including the named
+cgroup-reconciliation and expiry-driven-teardown obligations above),
+F-M1-008's HORO-847 subtask, and HORO-988 (the workload-executable-
+identity gap named above) — tracked in
 `docs/development/campaign-state.md`.

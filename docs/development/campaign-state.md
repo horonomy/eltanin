@@ -44,15 +44,19 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-839 | F-M1-006: privileged local agent lifecycle — UDS listener (`BoundSocket`), `SO_PEERCRED` peer credential collection (`eltanin_linux::peer`, `rustix`-based per founder decision to preserve `#![forbid(unsafe_code)]`), bounded single-request connection handling, `RequestHandler` seam, graceful shutdown/drain, review-driven `test-support`-feature-gating and accept-loop spawn-panic fixes | #18 | `86b29bd` |
 | HORO-840 | F-M1-006: policy/lease/backend integration (`eltanin-agent::authz`), lease-binding-subject decision (connecting peer process, not cgroup), `ReleaseLease` cross-client/execve-substitution discharge, `eltanin-agentd` daemon binary, `SIGTERM`/`SIGINT` wiring (`signal-hook` per founder decision D2), fourth Feature Verification Record (F-M1-006, closing HORO-788) | #19 | `323827e` |
 | HORO-824 | F-M1-009: local audit & explain evidence (`crates/eltanin-audit`) — append-only NDJSON `AuditRecord` schema with hand-written `Recorded*` mirrors, best-effort-durability sink (founder decision D-A), sequence-gap detection, `eltanin-explain` reader, `eltanin-agent::authz::audit::AuditEventSink` adapter, fifth Feature Verification Record (F-M1-009), 4 review-driven fixes (gap-detection leading-edge blind spot, sequence/file-order divergence, version-skew-vs-lost-write conflation, non-UTF-8 env var silent fallback) | #20 | `ae5e2a3` |
+| HORO-845 | F-M1-008 subtask 1/3: `eltanin run` CLI contract — [ADR 0005](../adr/0005-eltanin-run-process-topology.md) (supervisor process topology), argv/profile/exit/failure/sequence types (`crates/eltanin-cli`), founder decision D-B (workload-executable-identity gap accepted for MVP 1.0, HORO-988 filed), 5 review-driven fixes (exit-code overlap-claim corrections, doc/code sync test tightening, 126/127 ambiguity documented, profile control-character rejection) | #21 | `198dff9` |
+| HORO-846 | F-M1-008 subtask 2/3: `eltanin run` launch/exit/cleanup lifecycle — UDS client (`crate::client`, connect-per-request), profile filesystem loader (`crate::profile`), governed-execution-context seam (`crate::context::NullContext`), signal forwarding (`crate::signals`), spawn/supervise/renew/release driver (`crate::supervise`), S0-S11 orchestrator (`crate::launch`); `eltanin-protocol::framing` gained the client-direction `encode_request`/`decode_response` mirror pair; `eltanin-agent/tests/authz_renewal.rs` pins the server-side renewal semantics the design depends on | *(pending)* | *(pending)* |
 
 Current `main` HEAD: `ae5e2a3`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
-F-M1-006, F-M1-009 are done.
+F-M1-006, F-M1-009 are done. HORO-845 merged (PR #21, `198dff9`);
+HORO-846 in progress in this worktree, pending merge.
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-845-cli_contract` (branch
-  `mvp-1.0/HORO-845/cli_contract`), off `ae5e2a3`, in progress (F-M1-008
-  subtask 1/3 — `eltanin run` CLI contract, `crates/eltanin-cli`).
+- `eltanin-mvp-1.0-HORO-846-launch_lifecycle` (branch
+  `mvp-1.0/HORO-846/launch_lifecycle`), off `198dff9`, in progress
+  (F-M1-008 subtask 2/3 — `eltanin run` launch lifecycle,
+  `crates/eltanin-cli`).
 
 ## Dependency blockers
 
@@ -70,8 +74,9 @@ F-M1-006 (HORO-788), and F-M1-009 (HORO-824): Done, Feature Verification
 Record PASS — `docs/qa/feature-verification/F-M1-003.md` (HORO-833),
 `F-M1-004.md` (HORO-835), `F-M1-005.md` (HORO-837), `F-M1-006.md`
 (HORO-840), `F-M1-009.md` (HORO-824). F-M1-008 (HORO-823) is in
-progress — subtask HORO-845 (this worktree) in progress, HORO-846/847
-not started, no Feature Verification Record yet. All other
+progress — HORO-845 merged, HORO-846 (this worktree) in progress,
+HORO-847 not started, no Feature Verification Record yet (one record
+per Feature, deferred until all three subtasks land). All other
 F-M1-001/002/007 — no Feature Verification Record yet. Governance/
 foundation work (HORO-780/781/782/783/821) is done; F-M1-001
 (HORO-784/825/826/827) is functionally complete but has no formal
@@ -109,13 +114,14 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001, F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-009 are done
-(HORO-824 merged as PR #20, `ae5e2a3`). Currently in progress: F-M1-008
-(HORO-823, `eltanin run` CLI), subtask HORO-845 (define the CLI contract
-and secure launch sequence — `crates/eltanin-cli`, this worktree).
+F-M1-001, F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-009 are done.
+HORO-845 (F-M1-008 subtask 1/3 — CLI contract) merged as PR #21,
+`198dff9`. Currently in progress: HORO-846 (F-M1-008 subtask 2/3 —
+implement the launch path: agent connection, spawn/supervise, signal
+handling, lease renewal, release — `crates/eltanin-cli`, this worktree).
 
-D-B (workload-executable-identity gap) was raised to the founder and
-resolved during HORO-845's design: `eltanin run` stays alive as the
+D-B (workload-executable-identity gap) was raised to the founder during
+HORO-845's design and resolved: `eltanin run` stays alive as the
 lease-holding supervisor ([ADR 0005](../adr/0005-eltanin-run-process-topology.md)) —
 the only topology under which the already-merged lease-release mechanism
 (`compare_process`/`compare_executable`) still works, since
@@ -131,8 +137,7 @@ run`-specific example was added that deliberately omits any
 executable-identity condition. HORO-988 (new ticket) tracks properly
 threat-modeling and closing the gap later — no mechanism pre-selected.
 
-Next after HORO-845 merges: HORO-846 (implement the launch path —
-agent connection, spawn/supervise, signal handling, lease renewal,
-release), then HORO-847 (canonical Product E2E fixtures + user docs,
-testing only what MVP 1.0 actually enforces per the founder's
-instruction), then HORO-823 itself to Done.
+Next after HORO-846 merges: HORO-847 (canonical Product E2E fixtures +
+user docs, testing only what MVP 1.0 actually enforces per the founder's
+instruction), then HORO-823 itself to Done, with a single F-M1-008
+Feature Verification Record once all three subtasks have landed.

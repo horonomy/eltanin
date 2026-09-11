@@ -58,7 +58,11 @@ a client arrived at them.
 Profile names are validated defensively (reject empty, `/`, `..`, and
 names over 64 characters) since a future profile *loader* will resolve a
 name to a file path — HORO-845 defines the name/document shape only; the
-filesystem search path and loading is HORO-846's.
+filesystem search path and loading (HORO-846) is a single directory —
+`ELTANIN_PROFILE_DIR` if set, else `$XDG_CONFIG_HOME/eltanin/profiles`,
+else `$HOME/.config/eltanin/profiles` — deliberately not a
+multi-directory search (that introduces shadowing semantics nobody has
+asked for; adding one later is additive).
 
 ## Launch state machine
 
@@ -103,9 +107,7 @@ returns `LeaseGranted`. The agent's own `AuthorizationHandler` calls
 integration" section). `eltanin run`'s entire obligation is: no
 `Command::spawn` on any path that has not observed `LeaseGranted`.
 
-**Lease renewal (within S7, HORO-846 — not yet implemented)**: like S2's
-governed-context establishment, this describes the behavior HORO-846
-must build, not something the current placeholder `main.rs` does yet.
+**Lease renewal (within S7, implemented HORO-846 — `crate::supervise`)**:
 MVP 1.0 has no lease "extend" — a renewal
 is a fresh `RequestLease` over freshly observed context
 (`docs/adr/0003-scoped-expiring-compute-lease.md`). At roughly half the
@@ -125,6 +127,20 @@ continuing an unauthorized workload.
 - Every signal that would have reached the workload had `eltanin run`
   not been in the way is forwarded to it exactly once; `eltanin run`
   outlives the workload long enough to run S9/S10 afterward.
+- **The workload runs in its own process group** (`process_group(0)` at
+  spawn), not `eltanin run`'s — otherwise a terminal `Ctrl-C` would be
+  delivered by the tty driver to both the workload *and* `eltanin run`,
+  and forwarding would deliver it a second time, violating "exactly
+  once." **Named trade-off**: an interactive workload that reads the
+  controlling terminal is now a background process group and receives
+  `SIGTTIN`/`SIGTTOU` instead of terminal I/O working transparently.
+  Accepted for MVP 1.0's batch-GPU-compute target; revisiting this for
+  interactive workloads is future scope, not a defect of this ticket.
+- A lapsed-authorization termination (exit 76) signals the workload's
+  whole process group, not just the direct child — the fail-closed goal
+  there is that no descendant keeps touching the protected resource, not
+  politeness to one process. This differs from ordinary signal
+  forwarding above, which only ever targets the direct child.
 - A workload that exits normally (zero or non-zero status) or is
   terminated by a signal always reaches S9/S10 — release is attempted
   regardless of how the workload ended.

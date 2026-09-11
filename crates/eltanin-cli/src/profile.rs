@@ -7,12 +7,27 @@
 //! how a client arrived at those two values. See
 //! `docs/product/CLI_CONTRACT.md`'s "Profiles" section.
 //!
-//! HORO-845 defines the name validation and the document shape only.
-//! The filesystem search path that resolves a [`ProfileName`] to a
-//! [`ProfileDocument`] is HORO-846's to add.
+//! HORO-845 defined the name validation and the document shape.
+//! HORO-846 (this loader) resolves a [`ProfileName`] to a
+//! [`ProfileDocument`] from a single search directory — deliberately
+//! not a multi-directory search (that introduces shadowing semantics
+//! nobody has asked for; adding one later is additive).
+//!
+//! **Tampering a profile cannot escalate.** A profile carries only
+//! `(resource, action)` — ordinary `RequestLease` fields any client
+//! could supply directly — and default-deny policy evaluation is
+//! unaffected by how a client arrived at them (see the module docs
+//! above). So, unlike `eltanin-agent`'s socket-directory ownership
+//! validation (`listener.rs::BoundSocket::bind`), this loader adds no
+//! permission/ownership checks of its own: a tampered or malicious
+//! profile document can only cause a denial, never a grant it
+//! shouldn't have.
 
+use std::env;
 use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
+use eltanin_core::envelope::Versioned;
 use eltanin_core::resource::{Action, ResourceIdentity};
 use serde::{Deserialize, Serialize};
 
@@ -91,4 +106,102 @@ impl ProfileName {
 pub struct ProfileDocument {
     pub resource: ResourceIdentity,
     pub action: Action,
+}
+
+/// Why a profile could not be loaded.
+#[derive(Debug, thiserror::Error)]
+pub enum ProfileLoadError {
+    #[error(
+        "no profile search directory: set ELTANIN_PROFILE_DIR, or HOME/XDG_CONFIG_HOME so \
+         one can be derived"
+    )]
+    NoSearchDir,
+    #[error("profile {name:?} not found at {path}", path = path.display())]
+    NotFound { name: String, path: PathBuf },
+    #[error("failed to read profile at {path}: {reason}", path = path.display())]
+    Io { path: PathBuf, reason: String },
+    #[error("profile at {path} is not valid JSON: {reason}", path = path.display())]
+    Json { path: PathBuf, reason: String },
+    #[error("profile at {path}: {source}", path = path.display())]
+    Version {
+        path: PathBuf,
+        #[source]
+        source: eltanin_core::envelope::UnsupportedVersion,
+    },
+}
+
+/// Resolve the profile search directory: `ELTANIN_PROFILE_DIR` if set
+/// (no search — an explicit override is authoritative), else
+/// `$XDG_CONFIG_HOME/eltanin/profiles`, else
+/// `$HOME/.config/eltanin/profiles`.
+///
+/// # Errors
+///
+/// Returns [`ProfileLoadError::NoSearchDir`] if none of the above can be
+/// resolved.
+pub fn profile_dir() -> Result<PathBuf, ProfileLoadError> {
+    if let Some(dir) = env::var_os("ELTANIN_PROFILE_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(xdg).join("eltanin").join("profiles"));
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return Ok(PathBuf::from(home)
+            .join(".config")
+            .join("eltanin")
+            .join("profiles"));
+    }
+    Err(ProfileLoadError::NoSearchDir)
+}
+
+/// Load and validate the profile named `name` from `dir`.
+///
+/// `name` is already validated by [`ProfileName::parse`] (rejects
+/// empty, `/`, `.`/`..`, control characters, non-UTF-8), so
+/// `dir.join(format!("{name}.json"))` is safe by construction — no
+/// further path sanitization is needed here.
+///
+/// # Errors
+///
+/// Returns [`ProfileLoadError`] if the file doesn't exist, can't be
+/// read, isn't valid JSON, or names an unsupported schema version.
+pub fn load_profile_from_dir(
+    dir: &Path,
+    name: &ProfileName,
+) -> Result<ProfileDocument, ProfileLoadError> {
+    let path = dir.join(format!("{}.json", name.as_str()));
+    let contents = std::fs::read_to_string(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            ProfileLoadError::NotFound {
+                name: name.as_str().to_string(),
+                path: path.clone(),
+            }
+        } else {
+            ProfileLoadError::Io {
+                path: path.clone(),
+                reason: e.to_string(),
+            }
+        }
+    })?;
+    let envelope: Versioned<ProfileDocument> =
+        serde_json::from_str(&contents).map_err(|e| ProfileLoadError::Json {
+            path: path.clone(),
+            reason: e.to_string(),
+        })?;
+    envelope
+        .into_current()
+        .map_err(|source| ProfileLoadError::Version { path, source })
+}
+
+/// Resolve the search directory ([`profile_dir`]) and load `name` from
+/// it — the entry point `eltanin run` actually calls.
+///
+/// # Errors
+///
+/// Returns [`ProfileLoadError`] under the same conditions as
+/// [`profile_dir`] and [`load_profile_from_dir`].
+pub fn load_profile(name: &ProfileName) -> Result<ProfileDocument, ProfileLoadError> {
+    let dir = profile_dir()?;
+    load_profile_from_dir(&dir, name)
 }

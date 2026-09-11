@@ -187,3 +187,54 @@ pub fn encode_response(response: &Response) -> Result<Vec<u8>, FramingError> {
     let payload = serde_json::to_vec(response).expect("Response serialization cannot fail");
     encode_frame(&payload)
 }
+
+/// Encode a [`Request`] as one length-prefixed frame — the client-side
+/// mirror of [`encode_response`], for a caller (`eltanin-cli`) that
+/// speaks the client direction of this same protocol.
+///
+/// # Errors
+///
+/// Returns [`FramingError::Oversized`] if the serialized request exceeds
+/// [`MAX_FRAME_BYTES`].
+///
+/// # Panics
+///
+/// Never in practice: every field type in [`Request`] implements
+/// `Serialize` without a fallible path, mirroring [`encode_response`]'s
+/// own guarantee.
+pub fn encode_request(request: &Request) -> Result<Vec<u8>, FramingError> {
+    let payload = serde_json::to_vec(request).expect("Request serialization cannot fail");
+    encode_frame(&payload)
+}
+
+/// Decode one complete frame body into a [`Response`] — the client-side
+/// mirror of [`decode_request`], for a caller (`eltanin-cli`) reading an
+/// agent's reply. Applies the same version-peek-before-shape-decode
+/// ordering: a response with an unsupported version and an otherwise
+/// unparseable payload is reported as [`ProtocolError::Version`], not
+/// [`ProtocolError::Malformed`].
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::Framing`] if `body` exceeds
+/// [`MAX_FRAME_BYTES`]; [`ProtocolError::Version`] if the envelope names
+/// an unsupported schema version; [`ProtocolError::Malformed`] for every
+/// other decode failure.
+pub fn decode_response(body: &[u8]) -> Result<Response, ProtocolError> {
+    if body.len() > MAX_FRAME_BYTES {
+        return Err(FramingError::Oversized {
+            len: body.len(),
+            max: MAX_FRAME_BYTES,
+        }
+        .into());
+    }
+    let version = peek_version(body).ok_or(ProtocolError::Malformed)?;
+    if version != DOMAIN_SCHEMA_VERSION {
+        return Err(UnsupportedVersion {
+            found: version,
+            expected: DOMAIN_SCHEMA_VERSION,
+        }
+        .into());
+    }
+    serde_json::from_slice::<Response>(body).map_err(|_| ProtocolError::Malformed)
+}

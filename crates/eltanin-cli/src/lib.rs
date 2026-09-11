@@ -15,16 +15,22 @@
 //! workload binary is actually run through `eltanin run`. See
 //! `docs/product/CLI_CONTRACT.md` and `docs/product/POLICY_EXAMPLES.md`.
 //!
-//! HORO-845 (this ticket) defines the contract: argv parsing, profile
-//! naming, the exit-code taxonomy, and the failure-message taxonomy.
-//! HORO-846 implements the launch path itself (agent connection, spawn,
-//! signal handling, lease renewal, release) — `main.rs` here is a thin
-//! placeholder that honours the argv/exit contract but does not yet
-//! connect to an agent.
+//! HORO-845 defined the contract: argv parsing, profile naming, the
+//! exit-code taxonomy, and the failure-message taxonomy. HORO-846 (this
+//! ticket) implements the launch path itself: the UDS client
+//! ([`client`]), the profile filesystem loader ([`profile`]), the
+//! governed-execution-context seam ([`context`]), signal handling
+//! ([`signals`]), the spawn/supervise/renew/release driver
+//! ([`supervise`]), and the S0-S11 orchestrator ([`launch`]).
 #![forbid(unsafe_code)]
 
 pub mod args;
+pub mod client;
+pub mod context;
 pub mod exit;
 pub mod failure;
+pub mod launch;
 pub mod profile;
 pub mod sequence;
+pub mod signals;
+pub mod supervise;

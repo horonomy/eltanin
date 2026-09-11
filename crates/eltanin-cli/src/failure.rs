@@ -13,8 +13,10 @@
 use eltanin_protocol::response::{AgentResponse, DenialReason, ErrorCode};
 
 use crate::args::UsageError;
+use crate::client::ClientError;
+use crate::context::GovernedContextError;
 use crate::exit::ExitCode;
-use crate::profile::ProfileNameError;
+use crate::profile::{ProfileLoadError, ProfileNameError};
 
 /// A classified `eltanin run` failure, distinct from a normal
 /// workload-exit-status passthrough.
@@ -135,6 +137,24 @@ impl From<UsageError> for LaunchFailure {
 impl From<ProfileNameError> for LaunchFailure {
     fn from(error: ProfileNameError) -> Self {
         Self::ProfileUnresolved(error.to_string())
+    }
+}
+
+impl From<ProfileLoadError> for LaunchFailure {
+    fn from(error: ProfileLoadError) -> Self {
+        Self::ProfileUnresolved(error.to_string())
+    }
+}
+
+impl From<ClientError> for LaunchFailure {
+    fn from(error: ClientError) -> Self {
+        Self::AgentUnavailable(error.to_string())
+    }
+}
+
+impl From<GovernedContextError> for LaunchFailure {
+    fn from(error: GovernedContextError) -> Self {
+        Self::GovernedContextFailed(error.to_string())
     }
 }
 
