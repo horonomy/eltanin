@@ -432,11 +432,15 @@ on it, and audit preserves it) — it is simply not part of the identity
 comparison. **Named forward obligation on F-M1-007**: cgroup-scoped
 device-BPF enforcement must reconcile a process-bound lease with a
 cgroup-scoped enforcement mechanism; adding a cgroup dimension to
-`validate` later is additive. **Named cross-ticket obligation on
-F-M1-008**: because the lease binds to the connecting peer, `eltanin
-run` must arrange for the *workload process itself* to be the process
-that connects to the agent socket — a CLI that connects and then forks
-the workload would bind the lease to the CLI, which then exits.
+`validate` later is additive. **Cross-ticket obligation on F-M1-008,
+resolved by
+[ADR 0005](../adr/0005-eltanin-run-process-topology.md)**: `eltanin run`
+stays alive as the lease-holding supervisor for the workload's entire
+run — it never `execve()`s into the workload — because
+`compare_executable` does not survive `execve()`, and a topology where
+the lease-holding process does exec would make the lease permanently
+unreleasable. See the F-M1-008 section below for the full launch
+sequence this produces.
 
 **`ReleaseLease` discharges the `SECURITY_MODEL` named obligation**:
 `LeaseIssuer::validate` performs exactly the mandated
@@ -569,12 +573,65 @@ audit correlation. If F-M1-008 needs to correlate a CLI invocation with
 its audit trail, it must do so via the `LeaseId` the grant already
 returns, not by threading `RequestId` through the audit schema.
 
+## `eltanin run` controlled launch (F-M1-008, HORO-823/845) — `eltanin-cli`
+
+HORO-845 defines the contract (`docs/product/CLI_CONTRACT.md`); HORO-846
+implements the actual agent-connection/spawn/supervise launch path.
+Process topology is [ADR 0005](../adr/0005-eltanin-run-process-topology.md):
+`eltanin run` stays alive as the lease-holding supervisor, never
+`execve()`s into the workload.
+
+**Named MVP 1.0 limitation, founder-acknowledged (not scope for this
+ticket, tracked as HORO-988)**: because the connecting peer through
+`eltanin run` is always `eltanin`'s own binary, the agent's
+kernel-observed evidence at decision time can never describe the
+workload's own executable. Policy can discriminate on uid, gid,
+launcher path, process ancestry, and cgroup/governed-context membership
+through `eltanin run` — but not on which workload binary is actually
+run. `docs/product/POLICY_EXAMPLES.md`'s `eltanin run`-specific worked
+example deliberately contains no `executable_path`/`executable_hash`
+condition, and states why. HORO-988 tracks properly threat-modeling and
+designing a closing mechanism (agent-side post-exec verification, a
+protocol subject extension with continuous re-validation, or similar) —
+none pre-selected.
+
+**Argv/exit contract** (`crates/eltanin-cli::args`/`exit`/`failure`):
+`eltanin run --profile <name> -- <program> [args...]`; `--` is
+mandatory; argv is read as `OsString` throughout and launched via
+`Command`'s explicit argv array — never a shell
+(`tests/architecture_no_shell.rs` guards this mechanically). A
+`--profile` name resolves, client-side only, to a `(ResourceIdentity,
+Action)` pair (`crate::profile::ProfileDocument`) — it never reaches the
+wire and never influences policy evaluation; the filesystem loader that
+resolves a name to a document is HORO-846's. Exit codes 64/69/70/74/76/
+77/78 are a closed, pairwise-distinct taxonomy, disjoint from
+spawn-failure (126/127) and signal-terminated (`128+N`) codes
+(`tests/exit_code_contract.rs`) — they unavoidably overlap the
+workload-passthrough range (`0..=125`), the same property every Unix
+process wrapper has, so a workload's own exit status and an `eltanin
+run` outcome are not always distinguishable by exit code alone; the
+stderr message is the reliable signal (`docs/product/CLI_CONTRACT.md`).
+
+**Launch sequence** (`crate::sequence::LaunchStage`, S0–S11): parse argv
+→ resolve profile → establish governed execution context → connect to
+the agent → `RequestLease` (spawn only on `LeaseGranted`) → install
+signal handlers → spawn → supervise (with lease renewal) → workload
+exits → `ReleaseLease` → tear down the governed context → exit. The
+workload process does not exist before `LeaseGranted`, and
+`AuthorizationHandler` (HORO-840) already calls
+`ComputeBackend::enforce()` before granting — so `eltanin run`'s only
+obligation for "never start with globally-permissive access before
+authorization" is: no `Command::spawn` before an observed
+`LeaseGranted`. Full detail: `docs/product/CLI_CONTRACT.md`.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`
 HORO-838, `eltanin-agent` HORO-839/HORO-840), and F-M1-009
-(`eltanin-audit`, HORO-824) are implemented. Remaining work: F-M1-007
-enforcement (including the named cgroup-reconciliation and
-expiry-driven-teardown obligations above), F-M1-008 CLI (including the
-named same-process-connects and `RequestId`-correlation obligations
-above) — tracked in `docs/development/campaign-state.md`.
+(`eltanin-audit`, HORO-824) are implemented. F-M1-008's contract
+(HORO-845) is defined; its launch path (HORO-846) and E2E fixtures/docs
+(HORO-847) are not yet implemented. Remaining work: F-M1-007 enforcement
+(including the named cgroup-reconciliation and expiry-driven-teardown
+obligations above), F-M1-008's HORO-846/847 subtasks, and HORO-988 (the
+workload-executable-identity gap named above) — tracked in
+`docs/development/campaign-state.md`.

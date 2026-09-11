@@ -3,7 +3,7 @@ name = "eltanin-cli"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Eltanin CLI (MVP 1.0 scaffold — populated by F-M1-008, HORO-823/845/846)."
+description = "eltanin run — controlled protected launch (F-M1-008, HORO-823/845/846)."
 
 [[bin]]
 name = "eltanin"
@@ -13,3 +13,8 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
