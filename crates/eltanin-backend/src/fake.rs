@@ -29,6 +29,7 @@ use crate::contract::{BackendError, ComputeBackend};
 pub struct FakeBackend {
     resources: RwLock<HashMap<ResourceIdentity, ProtectedResource>>,
     scripted_enforcement: RwLock<HashMap<ResourceIdentity, EnforcementResult>>,
+    revoke_calls: RwLock<HashMap<ResourceIdentity, u32>>,
 }
 
 impl FakeBackend {
@@ -86,6 +87,28 @@ impl FakeBackend {
             .expect("lock poisoned")
             .insert(identity, result);
     }
+
+    /// How many times [`ComputeBackend::revoke`] has been called for
+    /// `identity` so far — including calls that returned
+    /// `Unsupported`/`Err`, since a caller deciding *whether* to call
+    /// `revoke` at all is exactly the behavior this exists to make
+    /// observable to a test (see `eltanin-agent`'s
+    /// `authz_backend_failure.rs`, which asserts a shared resource's
+    /// backend enforcement is torn down at most once even when two
+    /// clients hold leases on it).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned — see [`Self::insert`].
+    #[must_use]
+    pub fn revoke_call_count(&self, identity: &ResourceIdentity) -> u32 {
+        self.revoke_calls
+            .read()
+            .expect("lock poisoned")
+            .get(identity)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 impl ComputeBackend for FakeBackend {
@@ -138,6 +161,12 @@ impl ComputeBackend for FakeBackend {
     }
 
     fn revoke(&self, resource: &ResourceIdentity) -> Result<EnforcementResult, BackendError> {
+        *self
+            .revoke_calls
+            .write()
+            .expect("lock poisoned")
+            .entry(resource.clone())
+            .or_insert(0) += 1;
         let observed = self.observe(resource)?;
         if !observed.capabilities.supports(Capability::Revoke) {
             return Ok(EnforcementResult::Unsupported {
