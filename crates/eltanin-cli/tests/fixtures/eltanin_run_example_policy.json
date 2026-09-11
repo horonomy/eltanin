@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "payload": {
+    "id": "dev-workstation-gpu-eltanin-run",
+    "revision": 1,
+    "rules": [
+      {
+        "id": "allow-alice-via-eltanin-run",
+        "effect": "allow",
+        "resource": {
+          "vendor": "fake",
+          "kind": "gpu",
+          "local_id": "gpu-0"
+        },
+        "action": "compute",
+        "conditions": [
+          {
+            "field": "uid",
+            "expected": 1000,
+            "min_trust": "kernel_observed"
+          }
+        ]
+      },
+      {
+        "id": "deny-root",
+        "effect": "deny",
+        "resource": {
+          "vendor": "fake",
+          "kind": "gpu",
+          "local_id": "gpu-0"
+        },
+        "action": "compute",
+        "conditions": [
+          {
+            "field": "uid",
+            "expected": 0,
+            "min_trust": "kernel_observed"
+          }
+        ]
+      }
+    ]
+  }
+}
