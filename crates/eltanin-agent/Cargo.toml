@@ -8,11 +8,19 @@ description = "Eltanin privileged local authorization coordinator (MVP 1.0, F-M1
 [lints]
 workspace = true
 
+[[bin]]
+name = "eltanin-agentd"
+path = "src/bin/eltanin-agentd.rs"
+
 [dependencies]
 eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
 eltanin-linux = { path = "../eltanin-linux", version = "0.1.0" }
 eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
+eltanin-backend = { path = "../eltanin-backend", version = "0.1.0" }
 thiserror = { workspace = true }
+# Promoted from a dev-dependency (HORO-839) to a real one: the daemon
+# binary loads a PolicyDocument from a JSON file at startup (HORO-840).
+serde_json = { workspace = true }
 
 # Socket-directory ownership validation (listener.rs) needs this
 # process's own euid. rustix's safe geteuid() wrapper keeps this crate
@@ -23,8 +31,17 @@ thiserror = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
 
+# SIGTERM/SIGINT -> ShutdownHandle::shutdown() wiring (HORO-840, founder
+# decision: signal-hook over hand-written unsafe libc sigaction, same
+# #![forbid(unsafe_code)]-preserving trade-off as rustix in HORO-839).
+# `iterator` is the only feature needed: a dedicated thread blocks on
+# `Signals::forever()` and calls a safe method, no raw handler required.
+[target.'cfg(unix)'.dependencies.signal-hook]
+version = "0.3"
+default-features = false
+features = ["iterator"]
+
 [dev-dependencies]
-serde_json = { workspace = true }
 # Enables PeerCredential::new/PeerContext::new (test doubles only) for
 # this crate's integration tests, without exposing them to production
 # builds — see eltanin-linux/Cargo.toml's "test-support" feature doc.
