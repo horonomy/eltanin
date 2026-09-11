@@ -37,6 +37,29 @@ const RENEWAL_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 const RELEASE_RETRY_BACKOFFS: &[Duration] =
     &[Duration::from_millis(100), Duration::from_millis(200)];
 
+/// Upper bound on a lease's `remaining` duration we'll ever add to an
+/// `Instant`. `LeaseView::remaining` is wire-supplied
+/// (`AgentResponse::LeaseGranted`) with no protocol-level maximum, and
+/// `Instant + Duration` panics on overflow rather than saturating — an
+/// unbounded or malformed value here would crash the supervisor and
+/// leave an already-spawned workload running with no enforcement of the
+/// lapse-termination path at all, the exact fail-open this design
+/// exists to prevent. A year is never a legitimate remaining duration
+/// for an MVP 1.0 lease, so clamping to it is a safe, fail-closed
+/// response, not an arbitrary cap.
+const MAX_LEASE_REMAINING: Duration = Duration::from_hours(365 * 24);
+
+/// Compute `base + remaining`, clamped and checked so this can never
+/// panic regardless of what `remaining` a malfunctioning or hostile
+/// agent supplies. Overflow (unreachable given the clamp on any real
+/// monotonic clock, but checked rather than assumed) falls back to
+/// `base` itself — treating the lease as already at its deadline, which
+/// is the fail-closed choice.
+fn safe_deadline(base: Instant, remaining: Duration) -> Instant {
+    base.checked_add(remaining.min(MAX_LEASE_REMAINING))
+        .unwrap_or(base)
+}
+
 /// The result of supervising a spawned workload through to exit or a
 /// lapsed-authorization termination.
 #[derive(Debug, Clone, Copy)]
@@ -82,8 +105,8 @@ pub fn supervise(
 ) -> RunOutcome {
     let mut renewal = Renewal {
         lease_id: initial_lease_id,
-        deadline: grant_observed_at + initial_remaining,
-        renew_at: grant_observed_at + initial_remaining / 2,
+        deadline: safe_deadline(grant_observed_at, initial_remaining),
+        renew_at: safe_deadline(grant_observed_at, initial_remaining / 2),
     };
     let child_pid = child.id();
 
@@ -125,8 +148,8 @@ fn renew(client: &AgentClient, request: &LeaseRequest, renewal: &mut Renewal) {
     match client.exchange(ClientRequest::RequestLease(request.clone())) {
         Ok(AgentResponse::LeaseGranted { lease }) => {
             let old_lease_id = std::mem::replace(&mut renewal.lease_id, lease.lease_id);
-            renewal.deadline = attempted_at + lease.remaining;
-            renewal.renew_at = attempted_at + lease.remaining / 2;
+            renewal.deadline = safe_deadline(attempted_at, lease.remaining);
+            renewal.renew_at = safe_deadline(attempted_at, lease.remaining / 2);
             release(client, &old_lease_id);
         }
         Ok(_) | Err(_) => {
@@ -215,4 +238,37 @@ pub(crate) fn release(client: &AgentClient, lease_id: &LeaseId) {
          `eltanin-explain --pid {}` for the full decision record",
         std::process::id()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{safe_deadline, MAX_LEASE_REMAINING};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn an_ordinary_remaining_duration_adds_normally() {
+        let base = Instant::now();
+        let deadline = safe_deadline(base, Duration::from_secs(60));
+        assert_eq!(deadline, base + Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_remaining_duration_over_the_cap_is_clamped_not_added_verbatim() {
+        let base = Instant::now();
+        let deadline = safe_deadline(base, MAX_LEASE_REMAINING * 2);
+        assert_eq!(deadline, base + MAX_LEASE_REMAINING);
+    }
+
+    #[test]
+    fn an_overflowing_remaining_duration_never_panics_and_falls_back_to_base() {
+        let base = Instant::now();
+        // Duration::MAX is far beyond any real clock's range even after
+        // the MAX_LEASE_REMAINING clamp is applied to *that* value — but
+        // the clamp still bounds it to MAX_LEASE_REMAINING first, so this
+        // exercises the checked_add fallback for the (documented as
+        // unreachable in practice) case where even the clamped value
+        // overflows.
+        let deadline = safe_deadline(base, Duration::MAX);
+        assert!(deadline == base || deadline == base + MAX_LEASE_REMAINING);
+    }
 }

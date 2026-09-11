@@ -285,7 +285,7 @@ fn a_renewal_acquires_before_releasing_the_old_lease() {
         let mut n = call.lock().unwrap();
         *n += 1;
         match (*n, request) {
-            (1, ClientRequest::RequestLease(_)) => granted(0, 2),
+            (1, ClientRequest::RequestLease(_)) => granted(0, 4),
             (_, ClientRequest::RequestLease(_)) => granted(1, 60),
             (_, ClientRequest::ReleaseLease(_)) => AgentResponse::LeaseReleased {
                 outcome: eltanin_protocol::response::ReleaseOutcome::Released,
@@ -297,9 +297,10 @@ fn a_renewal_acquires_before_releasing_the_old_lease() {
     });
     let profile_dir = profile_dir_with(&resource(), Action::Compute);
 
-    // Sleeps past the renewal point (~1s, half of the 2s initial lease)
-    // but exits well before the test itself times out.
-    let output = run_to_completion(&agent, &profile_dir, &["sh", "-c", "sleep 3"]);
+    // Sleeps past the renewal point (~2s, half of the 4s initial lease)
+    // with a generous margin against a slow/loaded CI runner, but exits
+    // well before the test itself times out.
+    let output = run_to_completion(&agent, &profile_dir, &["sh", "-c", "sleep 6"]);
     assert_eq!(output.status.code(), Some(0));
 
     let requests = agent.requests();
@@ -348,13 +349,26 @@ fn a_renewal_denial_does_not_terminate_the_workload_early() {
     });
     let profile_dir = profile_dir_with(&resource(), Action::Compute);
 
-    // Exits before the 2s deadline, past the ~1s renewal point where a
-    // denial is observed once.
-    let output = run_to_completion(&agent, &profile_dir, &["sh", "-c", "sleep 1"]);
+    // Sleeps well past the ~1s renewal point (so the denial is
+    // actually observed, not raced by the workload exiting first — the
+    // sibling exhaustion test proves the 2s deadline itself is honored)
+    // but still exits before the 2s deadline.
+    let output = run_to_completion(&agent, &profile_dir, &["sh", "-c", "sleep 1.7"]);
     assert_eq!(
         output.status.code(),
         Some(0),
         "a renewal denial must not terminate an already-authorized workload early"
+    );
+
+    let requests = agent.requests();
+    let request_lease_count = requests
+        .iter()
+        .filter(|r| matches!(r, ClientRequest::RequestLease(_)))
+        .count();
+    assert!(
+        request_lease_count >= 2,
+        "expected at least one renewal attempt (and its denial) to actually occur, got only \
+         {request_lease_count} RequestLease call(s): {requests:?}"
     );
 }
 

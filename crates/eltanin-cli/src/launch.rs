@@ -182,6 +182,13 @@ fn status_to_exit_code(status: ExitStatus) -> u8 {
     }
 }
 
+/// `NotFound` maps to 127 ("not found"); everything else (permission
+/// denied, and cases stable `std::io::ErrorKind` cannot distinguish yet
+/// — e.g. `ENOTDIR`/`ELOOP` from a bad path component, which are closer
+/// in spirit to "not found" — maps to 126 ("found, not executable").
+/// This is a taxonomy imprecision, not a security concern: both codes
+/// already mean "the workload never ran," which is the only fact `S9`
+/// (still-run release/teardown) depends on.
 fn spawn_failure_code(error: &std::io::Error) -> u8 {
     match error.kind() {
         std::io::ErrorKind::NotFound => 127,

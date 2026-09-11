@@ -1,14 +1,19 @@
 //! Architecture guard: `eltanin-cli` never invokes a shell to launch the
-//! workload (F-M1-008, HORO-845). The security requirement is "exact
-//! argv semantics avoid shell re-parsing/injection" — the mechanical
-//! check is that no source file in this crate names a shell interpreter
-//! or `libc::system`.
+//! workload (F-M1-008, HORO-845/846). The security requirement is
+//! "exact argv semantics avoid shell re-parsing/injection" — these are
+//! mechanical, literal-substring heuristic checks (no source file names
+//! a known shell interpreter or `libc::system`), not a formal proof: a
+//! sufficiently indirect construction (a dynamically built string, an
+//! unlisted shell, `CommandExt::exec`, `Command::status`/`output`) could
+//! defeat them. They catch the direct, common-case violation; they are
+//! not a substitute for review of any new process-launching code.
 
 use std::fs;
 use std::path::Path;
 
 const FORBIDDEN_PATTERNS: &[&str] = &[
-    "sh -c", "\"sh\"", "'sh'", "/bin/sh", "bash -c", "\"bash\"", "system(",
+    "sh -c", "\"sh\"", "'sh'", "/bin/sh", "bash -c", "\"bash\"", "zsh -c", "\"zsh\"", "ksh -c",
+    "dash -c", "ash -c", "csh -c", "tcsh -c", "system(",
 ];
 
 fn scan_dir(dir: &Path, violations: &mut Vec<String>) {
@@ -69,12 +74,17 @@ fn find_spawn_call_sites(dir: &Path, sites: &mut Vec<String>) {
     }
 }
 
-/// "Never start the workload before an observed `LeaseGranted`"
-/// (HORO-823's security requirement) is provable exactly because
-/// there is exactly one `Command::spawn` call site in this crate, and
-/// it's textually and control-flow-wise inside `launch::run`'s
-/// `LeaseGranted` match arm — not because of an injected `Spawner`
-/// seam production code doesn't otherwise need.
+/// Mechanical, heuristic check supporting "never start the workload
+/// before an observed `LeaseGranted`" (HORO-823's security
+/// requirement): today, there is exactly one literal `.spawn(` call
+/// site in this crate, and it's textually and control-flow-wise inside
+/// `launch::run`'s `LeaseGranted` match arm. This is a substring match,
+/// not a proof — a future process-launch path added via
+/// `Command::status`/`output` or `CommandExt::exec` would not contain
+/// `.spawn(` and would pass this test silently. Any new
+/// process-launching code must be reviewed against the same invariant
+/// by hand; this guard only catches the common-case regression of a
+/// second `.spawn(` call site appearing outside `launch.rs`.
 #[test]
 fn there_is_exactly_one_command_spawn_call_site() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
