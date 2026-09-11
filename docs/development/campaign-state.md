@@ -43,15 +43,16 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-838 | F-M1-006: versioned local IPC protocol types (`crates/eltanin-protocol`) — `RequestId`/`ClientRequest`/`AgentResponse`/framing, opus-architect-designed, review-driven `AgentStatus` unit-variant `deny_unknown_fields` fix | #17 | `93ebfd4` |
 | HORO-839 | F-M1-006: privileged local agent lifecycle — UDS listener (`BoundSocket`), `SO_PEERCRED` peer credential collection (`eltanin_linux::peer`, `rustix`-based per founder decision to preserve `#![forbid(unsafe_code)]`), bounded single-request connection handling, `RequestHandler` seam, graceful shutdown/drain, review-driven `test-support`-feature-gating and accept-loop spawn-panic fixes | #18 | `86b29bd` |
 | HORO-840 | F-M1-006: policy/lease/backend integration (`eltanin-agent::authz`), lease-binding-subject decision (connecting peer process, not cgroup), `ReleaseLease` cross-client/execve-substitution discharge, `eltanin-agentd` daemon binary, `SIGTERM`/`SIGINT` wiring (`signal-hook` per founder decision D2), fourth Feature Verification Record (F-M1-006, closing HORO-788) | #19 | `323827e` |
+| HORO-824 | F-M1-009: local audit & explain evidence (`crates/eltanin-audit`) — append-only NDJSON `AuditRecord` schema with hand-written `Recorded*` mirrors, best-effort-durability sink (founder decision D-A), sequence-gap detection, `eltanin-explain` reader, `eltanin-agent::authz::audit::AuditEventSink` adapter, fifth Feature Verification Record (F-M1-009), 4 review-driven fixes (gap-detection leading-edge blind spot, sequence/file-order divergence, version-skew-vs-lost-write conflation, non-UTF-8 env var silent fallback) | #20 | `ae5e2a3` |
 
-Current `main` HEAD: `323827e`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
-F-M1-006 are done.
+Current `main` HEAD: `ae5e2a3`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+F-M1-006, F-M1-009 are done.
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-824-audit_explain` (branch
-  `mvp-1.0/HORO-824/audit_explain`), off `323827e`, in progress
-  (F-M1-009 — local audit & explain evidence, `crates/eltanin-audit`).
+- `eltanin-mvp-1.0-HORO-845-cli_contract` (branch
+  `mvp-1.0/HORO-845/cli_contract`), off `ae5e2a3`, in progress (F-M1-008
+  subtask 1/3 — `eltanin run` CLI contract, `crates/eltanin-cli`).
 
 ## Dependency blockers
 
@@ -64,15 +65,17 @@ formally raised as its own escalation beyond the note in
 
 ## Feature QA states
 
-F-M1-003 (HORO-786), F-M1-004 (HORO-787), F-M1-005 (HORO-822), and
-F-M1-006 (HORO-788): Done, Feature Verification Record PASS —
-`docs/qa/feature-verification/F-M1-003.md` (HORO-833), `F-M1-004.md`
-(HORO-835), `F-M1-005.md` (HORO-837), `F-M1-006.md` (HORO-840). All
-other F-M1-001/002/007..009 — no Feature Verification Record yet
-(F-M1-009/HORO-824 in progress in this worktree).
-Governance/foundation work (HORO-780/781/782/783/821) is done;
-F-M1-001 (HORO-784/825/826/827) is functionally complete but has no
-formal record yet.
+F-M1-003 (HORO-786), F-M1-004 (HORO-787), F-M1-005 (HORO-822),
+F-M1-006 (HORO-788), and F-M1-009 (HORO-824): Done, Feature Verification
+Record PASS — `docs/qa/feature-verification/F-M1-003.md` (HORO-833),
+`F-M1-004.md` (HORO-835), `F-M1-005.md` (HORO-837), `F-M1-006.md`
+(HORO-840), `F-M1-009.md` (HORO-824). F-M1-008 (HORO-823) is in
+progress — subtask HORO-845 (this worktree) in progress, HORO-846/847
+not started, no Feature Verification Record yet. All other
+F-M1-001/002/007 — no Feature Verification Record yet. Governance/
+foundation work (HORO-780/781/782/783/821) is done; F-M1-001
+(HORO-784/825/826/827) is functionally complete but has no formal
+record yet.
 
 ## Required human decisions outstanding
 
@@ -106,15 +109,30 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001, F-M1-003, F-M1-004, F-M1-005, F-M1-006 are done (HORO-840
-merged as PR #19, `323827e`, closing F-M1-006/HORO-788 entirely).
-Currently in progress: HORO-824 (F-M1-009, Audit & Explain —
-`crates/eltanin-audit`, an append-only NDJSON evidence log plus an
-`eltanin-explain` reader). D-A (best-effort audit durability) was raised
-to the founder and resolved: an audit write failure never changes an
-already-computed ALLOW/DENY/release result — "audit is evidence, not
-authority" — but is logged to stderr and counted
-(`AuditFileSink::failed_writes`); sequence-gap detection distinguishes
-"never issued" from "possibly lost to a persistence failure." Next after
-HORO-824 merges: F-M1-008 (HORO-823, `eltanin run` CLI) — hardware-
-independent and not yet started.
+F-M1-001, F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-009 are done
+(HORO-824 merged as PR #20, `ae5e2a3`). Currently in progress: F-M1-008
+(HORO-823, `eltanin run` CLI), subtask HORO-845 (define the CLI contract
+and secure launch sequence — `crates/eltanin-cli`, this worktree).
+
+D-B (workload-executable-identity gap) was raised to the founder and
+resolved during HORO-845's design: `eltanin run` stays alive as the
+lease-holding supervisor ([ADR 0005](../adr/0005-eltanin-run-process-topology.md)) —
+the only topology under which the already-merged lease-release mechanism
+(`compare_process`/`compare_executable`) still works, since
+`compare_executable` does not survive `execve()`. Named, founder-accepted
+consequence: because the connecting peer is always `eltanin`'s own
+binary, policy cannot discriminate on the workload's executable through
+`eltanin run` in MVP 1.0 (only uid/gid/launcher-path/ancestry/cgroup).
+Founder directed: accept the gap for MVP 1.0, but do **not** paper over
+it — `docs/product/POLICY_EXAMPLES.md`'s headline example was corrected
+with an explicit scope note (it remains true only for a workload
+connecting *directly*, not via `eltanin run`) and a new `eltanin
+run`-specific example was added that deliberately omits any
+executable-identity condition. HORO-988 (new ticket) tracks properly
+threat-modeling and closing the gap later — no mechanism pre-selected.
+
+Next after HORO-845 merges: HORO-846 (implement the launch path —
+agent connection, spawn/supervise, signal handling, lease renewal,
+release), then HORO-847 (canonical Product E2E fixtures + user docs,
+testing only what MVP 1.0 actually enforces per the founder's
+instruction), then HORO-823 itself to Done.
