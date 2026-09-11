@@ -32,7 +32,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::IssuerInstanceId;
@@ -69,11 +69,21 @@ pub enum AuditSinkError {
 /// races (permission changes, deleted-but-open files) that don't
 /// reliably fail a write already in flight on every platform.
 pub struct AuditFileSink {
-    writer: Mutex<Box<dyn Write + Send>>,
+    /// The writer and the next sequence number live behind one lock so a
+    /// sequence is reserved and its line written in the same critical
+    /// section — otherwise two threads could reserve sequences 5 and 6
+    /// but race for the writer in the opposite order, leaving sequence 6
+    /// physically before sequence 5 in the file even though callers
+    /// (`explain::Selector::Pid`/`Lease`, `render`) rely on file order.
+    state: Mutex<SinkState>,
     instance: IssuerInstanceId,
-    next_sequence: AtomicU64,
     failed_writes: AtomicU64,
     clock: Arc<dyn AuditClock>,
+}
+
+struct SinkState {
+    writer: Box<dyn Write + Send>,
+    next_sequence: u64,
 }
 
 impl AuditFileSink {
@@ -106,9 +116,11 @@ impl AuditFileSink {
     #[must_use]
     pub fn from_writer(writer: impl Write + Send + 'static, instance: IssuerInstanceId) -> Self {
         Self {
-            writer: Mutex::new(Box::new(writer)),
+            state: Mutex::new(SinkState {
+                writer: Box::new(writer),
+                next_sequence: 0,
+            }),
             instance,
-            next_sequence: AtomicU64::new(0),
             failed_writes: AtomicU64::new(0),
             clock: Arc::new(SystemWallClock),
         }
@@ -134,10 +146,14 @@ impl AuditFileSink {
     /// Append `entry`, minting its [`AuditEventId`] and
     /// [`crate::record::WallClockTime`].
     ///
-    /// The sequence number is reserved *before* the write is attempted
-    /// and is never reused on failure — so a failure here still advances
-    /// the sequence space, leaving a detectable gap in the log rather
-    /// than a silently reused id. See [`crate::explain::LogScan::gaps`].
+    /// The sequence number is reserved and the line written under the
+    /// *same* lock, so sequence order and file (write) order are always
+    /// identical — a reader relying on file order (e.g.
+    /// `explain::Selector::Pid`/`Lease`) never observes sequence 6
+    /// physically before sequence 5. The sequence is never reused on
+    /// failure — a failure still advances the sequence space, leaving a
+    /// detectable gap in the log rather than a silently reused id. See
+    /// [`crate::explain::LogScan::gaps`].
     ///
     /// # Errors
     ///
@@ -145,38 +161,38 @@ impl AuditFileSink {
     /// fails. The caller decides what to do — this sink never blocks or
     /// retries.
     pub fn append(&self, entry: AuditEntry) -> Result<AuditEventId, AuditSinkError> {
-        let sequence = self.next_sequence.fetch_add(1, Ordering::SeqCst);
+        let recorded_at = self.clock.now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let sequence = state.next_sequence;
+        state.next_sequence += 1;
         let event_id = AuditEventId {
             instance: self.instance.clone(),
             sequence,
         };
         let record = AuditRecord {
             event_id: event_id.clone(),
-            recorded_at: self.clock.now(),
+            recorded_at,
             operation: entry.operation,
             requested: entry.requested,
             peer: entry.peer,
             outcome: entry.outcome,
             response: entry.response,
         };
-        let result = self.write_line(&record);
+        let result = Self::write_line(&mut state.writer, &record);
+        drop(state);
         if result.is_err() {
             self.failed_writes.fetch_add(1, Ordering::SeqCst);
         }
         result.map(|()| event_id)
     }
 
-    fn write_line(&self, record: &AuditRecord) -> Result<(), AuditSinkError> {
+    fn write_line(writer: &mut dyn Write, record: &AuditRecord) -> Result<(), AuditSinkError> {
         let mut line = serde_json::to_string(&Versioned::current(record)).map_err(|e| {
             AuditSinkError::Serialize {
                 reason: e.to_string(),
             }
         })?;
         line.push('\n');
-        let mut writer = self
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         writer
             .write_all(line.as_bytes())
             .and_then(|()| writer.flush())

@@ -7,7 +7,7 @@
 //! it: the agent writes the trail and never reads it, so no edited log
 //! line can reach an authorization decision.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -31,6 +31,15 @@ pub enum UnreadableReason {
 pub struct UnreadableLine {
     pub line_number: u64,
     pub reason: UnreadableReason,
+    /// The event id recovered from the line's envelope, when the
+    /// envelope itself parsed even though its payload couldn't be read
+    /// as this build's [`AuditRecord`] — e.g. an [`UnreadableReason::UnsupportedVersion`]
+    /// line whose `event_id` field has a stable enough shape to extract.
+    /// `None` when the line couldn't be parsed as an envelope at all.
+    /// [`LogScan::gaps`] treats a recovered id as *present*, so a line that
+    /// exists on disk under a different schema version never masquerades
+    /// as a possibly-lost write.
+    pub event_id: Option<crate::record::AuditEventId>,
 }
 
 /// The result of scanning an audit log: every record that parsed, every
@@ -40,16 +49,20 @@ pub struct UnreadableLine {
 pub struct LogScan {
     pub records: Vec<AuditRecord>,
     pub unreadable: Vec<UnreadableLine>,
-    /// Event ids whose sequence number falls strictly between the
-    /// lowest and highest sequence actually observed for their
-    /// `instance`, but which never appeared as a readable record or an
-    /// unreadable line. [`AuditFileSink`](crate::sink::AuditFileSink)
+    /// Event ids whose sequence number falls between `0` and the highest
+    /// sequence actually observed for their `instance` (as a readable
+    /// record or a recovered [`UnreadableLine::event_id`]), but which
+    /// never appeared. [`AuditFileSink`](crate::sink::AuditFileSink)
     /// reserves a sequence number before attempting a write and never
     /// reuses it on failure, so a gap here is the honest, structural
     /// signal that a record *may* be missing because persistence
-    /// failed — distinct from an id that was simply never issued at
-    /// all (which cannot appear here, since it's outside every
-    /// instance's observed sequence range).
+    /// failed. **Accepted limitation**: this cannot detect a lost
+    /// *trailing* write — the highest sequence an instance ever attempted
+    /// is only known from what was actually observed, so a lost last
+    /// write (or every write from an instance) is indistinguishable from
+    /// that instance never having run. See
+    /// `docs/product/SECURITY_MODEL.md`'s "Audit & explain evidence"
+    /// section.
     pub gaps: Vec<crate::record::AuditEventId>,
 }
 
@@ -92,15 +105,17 @@ pub fn read_log(path: &Path) -> Result<LogScan, ExplainError> {
                         found: envelope.version,
                         expected: DOMAIN_SCHEMA_VERSION,
                     },
+                    event_id: recover_event_id(&envelope.payload),
                 });
             }
-            Ok(_) => match serde_json::from_str::<Versioned<AuditRecord>>(line) {
-                Ok(envelope) => records.push(envelope.payload),
+            Ok(envelope) => match serde_json::from_str::<Versioned<AuditRecord>>(line) {
+                Ok(record_envelope) => records.push(record_envelope.payload),
                 Err(e) => unreadable.push(UnreadableLine {
                     line_number,
                     reason: UnreadableReason::Malformed {
                         reason: e.to_string(),
                     },
+                    event_id: recover_event_id(&envelope.payload),
                 }),
             },
             Err(e) => unreadable.push(UnreadableLine {
@@ -108,6 +123,7 @@ pub fn read_log(path: &Path) -> Result<LogScan, ExplainError> {
                 reason: UnreadableReason::Malformed {
                     reason: e.to_string(),
                 },
+                event_id: None,
             }),
         }
     }
@@ -119,33 +135,70 @@ pub fn read_log(path: &Path) -> Result<LogScan, ExplainError> {
     })
 }
 
-/// For each issuer instance observed (readable or not — an unreadable
-/// line's sequence isn't known, so this only ranges over what *is*
-/// known: readable records), find sequence numbers strictly between the
-/// min and max observed that never appeared.
+/// Best-effort recovery of an `event_id` from a payload that didn't parse
+/// as this build's [`AuditRecord`] — used only so [`detect_gaps`] can
+/// treat a line that exists on disk (just under a different schema
+/// version) as *present*, never as a possibly-lost write. `AuditEventId`
+/// serializes as `{"instance": <string>, "sequence": <u64>}`
+/// (`IssuerInstanceId` is `#[serde(transparent)]`); this shape is not
+/// expected to change across schema versions, but recovery is
+/// intentionally best-effort — a failure here just means the line
+/// contributes no extra gap-detection precision, not a hard error.
+fn recover_event_id(payload: &serde_json::Value) -> Option<crate::record::AuditEventId> {
+    let event_id = payload.get("event_id")?;
+    let instance = event_id.get("instance")?.as_str()?;
+    let sequence = event_id.get("sequence")?.as_u64()?;
+    Some(crate::record::AuditEventId {
+        instance: IssuerInstanceId::new(instance),
+        sequence,
+    })
+}
+
+/// For each issuer instance observed — readable records, plus any
+/// [`UnreadableLine`] whose `event_id` could be recovered — find every
+/// sequence number from `0` up to the highest observed that never
+/// appeared as present.
+///
+/// The range starts at `0`, not the lowest observed sequence:
+/// [`crate::sink::AuditFileSink`] always starts an instance's sequence
+/// space at `0`, so a lost *first* write would otherwise fall outside
+/// every observed range and be misreported as "never issued" rather than
+/// "possibly lost." This does **not** close the symmetric case at the
+/// *trailing* edge — a lost *last* write, or every write from an
+/// instance that never persisted anything, is structurally
+/// indistinguishable from that instance never having run; see
+/// `docs/product/SECURITY_MODEL.md`'s "Audit & explain evidence" section
+/// for this accepted limitation of a purely local, best-effort log.
 fn detect_gaps(
     records: &[AuditRecord],
-    _unreadable: &[UnreadableLine],
+    unreadable: &[UnreadableLine],
 ) -> Vec<crate::record::AuditEventId> {
-    let mut by_instance: BTreeMap<IssuerInstanceId, Vec<u64>> = BTreeMap::new();
+    let mut by_instance: BTreeMap<IssuerInstanceId, BTreeSet<u64>> = BTreeMap::new();
     for record in records {
         by_instance
             .entry(record.event_id.instance.clone())
             .or_default()
-            .push(record.event_id.sequence);
+            .insert(record.event_id.sequence);
+    }
+    for line in unreadable {
+        if let Some(id) = &line.event_id {
+            by_instance
+                .entry(id.instance.clone())
+                .or_default()
+                .insert(id.sequence);
+        }
     }
     let mut gaps = Vec::new();
-    for (instance, mut sequences) in by_instance {
-        sequences.sort_unstable();
-        if let (Some(&min), Some(&max)) = (sequences.first(), sequences.last()) {
-            let present: std::collections::HashSet<u64> = sequences.into_iter().collect();
-            for sequence in min..=max {
-                if !present.contains(&sequence) {
-                    gaps.push(crate::record::AuditEventId {
-                        instance: instance.clone(),
-                        sequence,
-                    });
-                }
+    for (instance, present) in by_instance {
+        let Some(&max) = present.iter().max() else {
+            continue;
+        };
+        for sequence in 0..=max {
+            if !present.contains(&sequence) {
+                gaps.push(crate::record::AuditEventId {
+                    instance: instance.clone(),
+                    sequence,
+                });
             }
         }
     }
@@ -169,6 +222,14 @@ pub enum Selector {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SelectionResult<'a> {
     Found(Vec<&'a AuditRecord>),
+    /// No record with this id was found, and it does not fall inside any
+    /// observed [`LogScan::gaps`]. Ordinarily this means the id was
+    /// never issued — but see the accepted trailing-edge limitation on
+    /// [`LogScan::gaps`]: an id beyond the highest sequence this instance
+    /// was ever observed to reach is reported `NotFound` even if it was
+    /// in fact reserved and lost, since nothing in a purely local log can
+    /// distinguish that case from "never issued" without an independent
+    /// liveness signal.
     NotFound,
     /// The selected [`Selector::Event`] id falls inside an observed
     /// sequence gap for its instance — the record may exist and simply

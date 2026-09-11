@@ -200,6 +200,145 @@ fn a_sequence_gap_between_two_records_is_reported_as_possibly_lost() {
 }
 
 #[test]
+fn a_lost_first_write_is_reported_as_possibly_lost_not_never_issued() {
+    // A failed write is never sequence-reused (AuditFileSink::append),
+    // so a lost *first* write leaves sequence 0 missing while sequence 1
+    // exists — this must not fall outside the observed range and be
+    // misreported as "never issued."
+    let path = temp_log_path("lost-first-write");
+    let instance = IssuerInstanceId::new("i");
+    {
+        use eltanin_core::envelope::Versioned;
+        let record = eltanin_audit::record::AuditRecord {
+            event_id: eltanin_audit::record::AuditEventId {
+                instance: instance.clone(),
+                sequence: 1,
+            },
+            recorded_at: eltanin_audit::record::WallClockTime {
+                unix_secs: 0,
+                nanos: 0,
+            },
+            operation: eltanin_audit::record::RecordedOperation::AgentStatus,
+            requested: eltanin_audit::record::RecordedRequest::AgentStatus,
+            peer: peer(1),
+            outcome: eltanin_audit::record::RecordedOutcome::StatusReported,
+            response: AgentResponse::Status {
+                status: eltanin_protocol::response::AgentStatusView {
+                    protocol_version: 1,
+                },
+            },
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&Versioned::current(record)).unwrap()
+        )
+        .unwrap();
+    }
+
+    let scan = read_log(&path).unwrap();
+    let lost_first = eltanin_audit::record::AuditEventId {
+        instance: instance.clone(),
+        sequence: 0,
+    };
+    assert!(
+        scan.gaps.contains(&lost_first),
+        "sequence 0 must be reported as a gap even though it's below \
+         every readable record, not silently excluded"
+    );
+    assert_eq!(
+        select(&scan, &Selector::Event(lost_first)),
+        SelectionResult::PossiblyLost
+    );
+}
+
+#[test]
+fn a_version_mismatched_lines_recovered_event_id_counts_as_present_not_a_gap() {
+    // A line that exists on disk under a different schema version is not
+    // "possibly lost" — it's readable, just not by this build. Its
+    // sequence must not appear in `gaps`.
+    let path = temp_log_path("version-skew-not-a-gap");
+    let instance = IssuerInstanceId::new("i");
+    {
+        let sink = AuditFileSink::open(&path, instance.clone()).unwrap();
+        sink.append(status_entry()).unwrap(); // sequence 0
+    }
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(
+            file,
+            r#"{{"version":9999,"payload":{{"event_id":{{"instance":"i","sequence":1}}}}}}"#
+        )
+        .unwrap();
+    }
+    {
+        use eltanin_core::envelope::Versioned;
+        let record = eltanin_audit::record::AuditRecord {
+            event_id: eltanin_audit::record::AuditEventId {
+                instance: instance.clone(),
+                sequence: 2,
+            },
+            recorded_at: eltanin_audit::record::WallClockTime {
+                unix_secs: 0,
+                nanos: 0,
+            },
+            operation: eltanin_audit::record::RecordedOperation::AgentStatus,
+            requested: eltanin_audit::record::RecordedRequest::AgentStatus,
+            peer: peer(1),
+            outcome: eltanin_audit::record::RecordedOutcome::StatusReported,
+            response: AgentResponse::Status {
+                status: eltanin_protocol::response::AgentStatusView {
+                    protocol_version: 1,
+                },
+            },
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&Versioned::current(record)).unwrap()
+        )
+        .unwrap();
+    }
+
+    let scan = read_log(&path).unwrap();
+    assert_eq!(scan.records.len(), 2, "sequences 0 and 2 must both parse");
+    assert_eq!(scan.unreadable.len(), 1);
+    let recovered = eltanin_audit::record::AuditEventId {
+        instance: instance.clone(),
+        sequence: 1,
+    };
+    assert_eq!(
+        scan.unreadable[0].event_id,
+        Some(recovered.clone()),
+        "the version-mismatched line's event_id must be recovered"
+    );
+    assert!(
+        !scan.gaps.contains(&recovered),
+        "a recovered event_id must count as present, not as a gap: {:?}",
+        scan.gaps
+    );
+    assert_eq!(
+        select(&scan, &Selector::Event(recovered)),
+        SelectionResult::NotFound,
+        "the record isn't readable under this build's schema, so it's \
+         correctly NotFound (not PossiblyLost) via this selector — the \
+         line itself is visible in scan.unreadable instead"
+    );
+}
+
+#[test]
 fn a_grant_and_its_later_release_correlate_by_lease_id() {
     let path = temp_log_path("correlate");
     let instance = IssuerInstanceId::new("i");

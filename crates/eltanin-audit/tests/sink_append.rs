@@ -83,10 +83,17 @@ fn concurrent_writers_never_interleave_a_line() {
         scan.unreadable
     );
 
-    let mut sequences: Vec<u64> = scan.records.iter().map(|r| r.event_id.sequence).collect();
-    sequences.sort_unstable();
-    sequences.dedup();
-    assert_eq!(sequences.len(), 200, "every sequence number must be unique");
+    let sequences: Vec<u64> = scan.records.iter().map(|r| r.event_id.sequence).collect();
+    let mut sorted = sequences.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 200, "every sequence number must be unique");
+    assert_eq!(
+        sequences, sorted,
+        "file order must match sequence order — append() reserves the \
+         sequence and writes the line under the same lock, so no two \
+         concurrent writers can land out of order relative to each other"
+    );
 }
 
 #[cfg(unix)]

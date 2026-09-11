@@ -61,13 +61,25 @@ fn run() -> Result<(), String> {
     // ELTANIN_AUDIT_LOG is optional — its absence is not a startup
     // error, unlike the required vars above, since a real audit trail
     // is additive (F-M1-009/HORO-824) over the StderrSink stopgap that
-    // shipped with F-M1-006.
-    let sink: Arc<dyn EventSink> = match env::var("ELTANIN_AUDIT_LOG") {
-        Ok(path) => Arc::new(
-            AuditEventSink::open(&PathBuf::from(path), instance.clone())
-                .map_err(|e| format!("failed to open audit log: {e}"))?,
-        ),
-        Err(_) => Arc::new(StderrSink),
+    // shipped with F-M1-006. A *set-but-non-UTF-8* value is a distinct
+    // case from "unset" and must not silently fall through to the
+    // stopgap sink — that would mask a real misconfiguration in the
+    // switch between "real audit trail" and "no persistent audit trail
+    // at all."
+    let sink: Arc<dyn EventSink> = match env::var_os("ELTANIN_AUDIT_LOG") {
+        None => Arc::new(StderrSink),
+        Some(path) => {
+            let path = path.into_string().map_err(|raw| {
+                format!(
+                    "ELTANIN_AUDIT_LOG is set but not valid UTF-8: {}",
+                    raw.to_string_lossy()
+                )
+            })?;
+            Arc::new(
+                AuditEventSink::open(&PathBuf::from(path), instance.clone())
+                    .map_err(|e| format!("failed to open audit log: {e}"))?,
+            )
+        }
     };
 
     let handler = Arc::new(AuthorizationHandler::new(

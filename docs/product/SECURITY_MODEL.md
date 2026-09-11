@@ -175,13 +175,20 @@ the ALLOW/DENY/release decision path itself:
   attempting the write and never reuses it on failure, so a failed write
   leaves a permanent, structural gap in the sequence space rather than a
   silently reused id. `eltanin_audit::explain::LogScan::gaps` detects
-  these gaps per issuer instance; `select()` reports
-  `SelectionResult::Found` (the record exists), `NotFound` (the id falls
-  outside every observed sequence range — never issued), or
-  `PossiblyLost` (the id falls inside an observed gap — it may have
-  failed to persist). This is the honest limit of what a local,
-  best-effort log can tell you: it cannot prove a record was never
-  *issued* if persistence itself is what failed.
+  these gaps per issuer instance, ranging from sequence `0` (where every
+  instance's sequence space starts) up to the highest sequence actually
+  observed; `select()` reports `SelectionResult::Found` (the record
+  exists), `PossiblyLost` (the id falls inside an observed gap — it may
+  have failed to persist), or `NotFound` otherwise — which ordinarily
+  means never issued, but **not always**: an id beyond the highest
+  sequence an instance was ever observed to reach also reports
+  `NotFound`, even if it was in fact reserved and lost, because nothing
+  in a purely local log can tell "reserved then lost at the very end of
+  the log" apart from "never issued" without an independent liveness
+  signal. This is the honest limit of what a local, best-effort log can
+  tell you: it cannot prove a record was never *issued* if persistence
+  itself is what failed, and this limit is sharpest at an instance's
+  trailing edge.
 - **Redaction / log-sensitivity contract.** An audit record may contain
   process ancestry, executable paths, and cgroup/namespace hints — the
   same kernel-observed `ExecutionContext` evidence the authorization
