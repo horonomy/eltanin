@@ -49,8 +49,10 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-847 | F-M1-008 subtask 3/3: canonical Product/Business E2E scenario `E2E-F-M1-008-controlled-launch-v1` (`crates/eltanin-cli/tests/canonical_e2e.rs`, real `eltanin-agentd`+`eltanin` binaries, real UDS socket and on-disk policy, Linux-only) plus `docs/product/QUICKSTART.md` and the Track B record `docs/qa/e2e/F-M1-008-controlled-launch.md`; `docs_sync.rs` gained 5 new pinning assertions; 9 review-driven fixes plus a 10th real bug caught by CI (`eltanin-agentd` never seeded `FakeBackend` with any resource — fixed via new `PolicySet::resources()`) | #23 | `5cedf83` |
 | HORO-823 | F-M1-008 rollup: single Feature Verification Record (`docs/qa/feature-verification/F-M1-008.md`) once all three subtasks landed | #24 | `fd42434` |
 | HORO-814 | Claude Code project gate (`.claude/CLAUDE.md`) + Codex adapter (`AGENTS.md`) — the only concrete gap found, everything else already existed from HORO-781/782/783; 5 review-driven fixes (branch-format statement, CONTRIBUTING.md dedup, escalation-section gaps, DoD pointer) | #25 | `2f21164` |
+| HORO-814 | campaign-state.md sync after PR #24/#25 | #26 | `59d6acd` |
+| HORO-819 | Formalized feature-level QA verification governance (`docs/qa/README.md`, `docs/qa/feature-verification/TEMPLATE.md`) — Feature Definition, Feature inventory, release-gate contract, distilled from existing practice; 5 review-driven fixes (2 overclaims of template universality corrected, one deferred AC named, 2 inventory-table clarity fixes) | #27 | `0b5b980` |
 
-Current `main` HEAD: `2f21164`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+Current `main` HEAD: `0b5b980`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
 F-M1-006, F-M1-008, F-M1-009 are done.
 
 ## Active worktrees
@@ -141,11 +143,16 @@ session should read `.claude/CLAUDE.md` first.
 
 With all hardware-free Feature work done, the campaign is now working
 through the remaining Highest-priority governance Tasks under HORO-772
-that don't require bare-metal hardware: HORO-819 (feature-level QA
-verification/DoD, due 2026-09-14) next, then HORO-820 (documentation
-architecture/Docs Impact governance, due 2026-09-14; likely
-substantially already satisfied — verify rather than redo), then
-HORO-810/HORO-811 (versioned QA test plans / business-scenario E2E
-suite, due 2026-10-03). HORO-781 remains intentionally `In Progress` —
-its only open AC is the founder's LICENSE choice (see "Required human
-decisions outstanding"), not additional implementation work.
+that don't require bare-metal hardware. HORO-819 (feature-level QA
+verification/DoD) merged as PR #27, `0b5b980` —
+[`docs/qa/README.md`](../qa/README.md) formalizes the Feature
+Verification Record convention this campaign already follows, plus a
+Feature Verification Record template
+([`docs/qa/feature-verification/TEMPLATE.md`](../qa/feature-verification/TEMPLATE.md)).
+Next: HORO-820 (documentation architecture/Docs Impact governance, due
+2026-09-14; likely substantially already satisfied — verify rather than
+redo), then HORO-810/HORO-811 (versioned QA test plans /
+business-scenario E2E suite, due 2026-10-03). HORO-781 remains
+intentionally `In Progress` — its only open AC is the founder's LICENSE
+choice (see "Required human decisions outstanding"), not additional
+implementation work.
