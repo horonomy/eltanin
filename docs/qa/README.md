@@ -58,6 +58,10 @@ Criteria and, where applicable, `NORTH_STAR.md`), not a restatement of
   adversarial-regression test suites living under each crate's own
   `tests/`. Every Feature Verification Record's "Subtasks and evidence"
   table cites the specific Track A test files that back each subtask.
+  [`docs/qa/test-plans/`](test-plans/) holds the versioned, per-milestone
+  Track A test plan (HORO-810) — which quality-model layers are
+  REQUIRED/NOT APPLICABLE/DEFERRED, and the `NORTH_STAR.md`
+  invariant-to-test-file map.
 - **Track B (Product/Business E2E)** — a canonical, user-facing journey
   proving the Feature works as a real user/operator would use it, under
   [`docs/qa/e2e/`](e2e/) (see `F-M1-008-controlled-launch.md` for the
@@ -89,10 +93,15 @@ doesn't need to reconstruct it from the campaign-state narrative.
 `*` = the record's own `Status` line is more nuanced than a bare PASS;
 read the linked record.
 
-Nothing currently enforces "update both together" beyond convention —
-each Feature landing is expected to touch both files in the same PR, as
-this campaign has done so far, but a future HORO-810 pass could make
-this checkable in CI rather than relying on habit.
+`crates/eltanin-cli/tests/qa_governance_sync.rs` mechanically checks
+that this table has no orphaned Feature Verification Record, that every
+linked record path exists, and that every `F-M1-00N` in
+[`docs/qa/test-plans/mvp-1.0.md`](test-plans/mvp-1.0.md)'s invariant map
+cites a test file that actually exists on disk — closing HORO-810's
+AC that inventory/evidence-path drift is checkable in CI, not just
+convention. It does **not** check that "update both together" (this
+table vs. `campaign-state.md`) actually happened — that remains a PR
+discipline, not a mechanical guarantee.
 
 ## Release-gate contract
 
@@ -116,11 +125,17 @@ Done. Before a release gate may pass:
    which for a Feature specifically means: its scenario/docs examples
    agree with what was actually tested (not merely believed to), its
    documentation states unsupported/partial behavior honestly, and its
-   linked documentation has been checked against `NORTH_STAR.md`.
+   linked documentation has been checked against `NORTH_STAR.md`;
+7. a target-version test plan exists under
+   [`docs/qa/test-plans/`](test-plans/) and its Track A evidence
+   requirements are satisfied (HORO-810).
 
-Automated CI detection of a missing/unverified record for a target
-version (rather than a human checking this table) is not yet built —
-tracked under HORO-810.
+`qa_governance_sync.rs` mechanically catches inventory/test-path drift
+(above) but does not itself decide "is this Feature's status actually
+PASS" — that judgment call, and instantiating a
+[Release Quality Report](reports/TEMPLATE.md) from the accumulated
+evidence, both remain a human/agent verification step at gate time, not
+something CI can currently render automatic end to end.
 
 ## Independence principle
 
