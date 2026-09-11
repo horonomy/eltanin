@@ -110,7 +110,13 @@ Done. Before a release gate may pass:
    physical enforcement (F-M1-002, F-M1-007 in this milestone);
 6. documentation impact is closed for every in-scope Feature (User Docs
    / Contributor Docs / Both / an explicit reasoned None — see the PR
-   template's `Docs Impact` field).
+   template's `Docs Impact` field, and
+   [`docs/development/documentation-governance.md`](../development/documentation-governance.md)
+   for the audience split and Change-to-Docs rules that field enforces),
+   which for a Feature specifically means: its scenario/docs examples
+   agree with what was actually tested (not merely believed to), its
+   documentation states unsupported/partial behavior honestly, and its
+   linked documentation has been checked against `NORTH_STAR.md`.
 
 Automated CI detection of a missing/unverified record for a target
 version (rather than a human checking this table) is not yet built —
