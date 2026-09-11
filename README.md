@@ -46,6 +46,11 @@ ebpf/eltanin-device-guard/ cgroup v2 device-BPF guard (added by F-M1-007)
 docs/                      Product constitution, architecture, ADRs, QA
 ```
 
+## Quickstart
+
+See [`docs/product/QUICKSTART.md`](docs/product/QUICKSTART.md) for the
+ALLOW/DENY `eltanin run` walkthrough.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) and
