@@ -18,6 +18,16 @@ pub(crate) struct LeaseState {
     issuer: LeaseIssuer,
     leases: HashMap<LeaseId, ComputeLease>,
     max_outstanding: usize,
+    /// Slots reserved by an `issue()` that succeeded but whose backend
+    /// enforcement is still pending (`enforce()` runs unlocked, between
+    /// this reservation and the eventual `insert`/`release_reservation`
+    /// call). Without this, `is_at_capacity` checked only against
+    /// `leases.len()` would let N concurrent `RequestLease` calls all
+    /// pass the capacity gate before any of them inserts — the capacity
+    /// bound would be enforced against a snapshot that's stale by the
+    /// time it matters. `is_at_capacity` counts both together so the
+    /// check-then-issue-then-(later)-insert sequence can't overshoot.
+    reserved: usize,
 }
 
 impl LeaseState {
@@ -26,6 +36,7 @@ impl LeaseState {
             issuer,
             leases: HashMap::new(),
             max_outstanding,
+            reserved: 0,
         }
     }
 
@@ -45,10 +56,27 @@ impl LeaseState {
     }
 
     pub(crate) fn is_at_capacity(&self) -> bool {
-        self.leases.len() >= self.max_outstanding
+        self.leases.len() + self.reserved >= self.max_outstanding
     }
 
+    /// Reserve a capacity slot for a lease that has just been issued but
+    /// not yet inserted (its backend enforcement is still pending). Must
+    /// be paired with exactly one later `insert` or
+    /// `release_reservation` call.
+    pub(crate) fn reserve(&mut self) {
+        self.reserved += 1;
+    }
+
+    /// Release a slot reserved by [`Self::reserve`] without inserting a
+    /// lease — the compensating-revoke path when enforcement did not
+    /// succeed.
+    pub(crate) fn release_reservation(&mut self) {
+        self.reserved = self.reserved.saturating_sub(1);
+    }
+
+    /// Consume one reservation and insert the lease it was reserved for.
     pub(crate) fn insert(&mut self, lease: ComputeLease) {
+        self.release_reservation();
         self.leases.insert(lease.id().clone(), lease);
     }
 

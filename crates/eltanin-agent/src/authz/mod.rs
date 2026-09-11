@@ -24,13 +24,20 @@
 //!
 //! # Wire mapping rule
 //!
-//! `LeaseDenied` if and only if `PolicySet::evaluate` itself produced
-//! `Effect::Deny`. Every other non-grant condition (backend failure,
-//! enforcement refusal, capacity exhaustion, a structurally-unreachable
-//! lease error) maps to `Error { Internal }` — "no policy backend
-//! decided this" must never be reported as if policy had denied it,
-//! continuing the same reasoning `handler.rs`'s `StatusOnlyHandler` docs
-//! already state for "no policy backend in this build."
+//! Once policy is actually consulted, `LeaseDenied` if and only if
+//! `PolicySet::evaluate` itself produced `Effect::Deny` — every other
+//! *post-policy* non-grant condition (backend failure, enforcement
+//! refusal, capacity exhaustion, a structurally-unreachable lease error)
+//! maps to `Error { Internal }`, continuing `handler.rs`'s
+//! `StatusOnlyHandler` reasoning that "no policy backend decided this"
+//! must never be reported as if policy had denied it. The one exception,
+//! *before* policy is ever consulted: a non-`authorizable()` peer is
+//! reported as `LeaseDenied { IndeterminateEvidence }` per
+//! [`crate::handler::RequestHandler`]'s own established contract
+//! (HORO-839) — this predates policy evaluation entirely and is not
+//! itself a policy decision, but shares that wire shape because
+//! "evidence about the requester couldn't be confirmed" is the same
+//! client-facing fact in both cases.
 //!
 //! # `ReleaseLease` discharges the `SECURITY_MODEL` named obligation
 //!
@@ -46,14 +53,19 @@
 //!
 //! # Clock discipline
 //!
-//! `now` is read from [`Clock`] exactly once per lock acquisition, after
-//! the lock is held, never before — this is how `eltanin_core::lease`'s
-//! named obligation ("monotonicity across successive `issue` calls is
-//! F-M1-006's obligation as sole owner of the clock") is discharged: two
-//! concurrent `RequestLease` calls cannot observe `now` out of order
-//! relative to the sequence their `issue` calls actually execute in,
-//! because both the clock read and the `issue` call happen under the
-//! same [`std::sync::Mutex`].
+//! Every `now` reading that feeds `issue`/`validate`/`prune` is taken
+//! from [`Clock`] after the lock is already held, never before — this is
+//! how `eltanin_core::lease`'s named obligation ("monotonicity across
+//! successive `issue` calls is F-M1-006's obligation as sole owner of
+//! the clock") is discharged: two concurrent `RequestLease` calls cannot
+//! observe `now` out of order relative to the sequence their `issue`
+//! calls actually execute in, because both the clock read and the
+//! `issue` call happen under the same [`std::sync::Mutex`]. A display-
+//! only `now` reading computed for the client-facing `remaining:
+//! Duration` after a successful `enforce()` call is *not* under the
+//! lock — it feeds nothing `eltanin_core::lease` requires monotonicity
+//! for, only the value shown to the client, so this exception does not
+//! weaken the guarantee above.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -197,6 +209,14 @@ fn denial_reason_for(reason: &DecisionReason) -> DenialReason {
     }
 }
 
+/// Why [`AuthorizationHandler::issue_reserving_capacity`] did not
+/// produce a lease.
+enum IssueFailure {
+    CapacityExhausted { outstanding: usize },
+    Denied(eltanin_core::policy::PolicyDecision),
+    Other(LeaseError),
+}
+
 /// Implements [`RequestHandler`] by wiring policy evaluation, lease
 /// issue/release, and backend enforcement together. Shared across
 /// concurrently-served connections (`Arc<dyn RequestHandler>`); internal
@@ -239,6 +259,42 @@ impl AuthorizationHandler {
         }
     }
 
+    /// Prune, capacity-check, issue, and reserve the resulting lease's
+    /// capacity slot — all under one lock acquisition. Reserving here
+    /// (rather than only checking capacity) closes a race
+    /// `is_at_capacity` alone would leave open: `enforce()` runs
+    /// unlocked after this returns, so without a reservation held across
+    /// that window, concurrent callers could all observe capacity as
+    /// free before any of them reaches `insert`. Every caller of this
+    /// method must release exactly one reservation on every path
+    /// (`LeaseState::insert` does so on success;
+    /// `LeaseState::release_reservation` on every failure path after a
+    /// successful issue).
+    fn issue_reserving_capacity(
+        &self,
+        provenance: ProvenanceRecord,
+    ) -> Result<eltanin_core::lease::ComputeLease, IssueFailure> {
+        let mut guard = state::lock(&self.state);
+        let now = self.clock.now();
+        guard.prune(now);
+        if guard.is_at_capacity() {
+            return Err(IssueFailure::CapacityExhausted {
+                outstanding: self.max_outstanding_leases,
+            });
+        }
+        let issued = guard
+            .issuer_mut()
+            .issue(&self.policy, provenance, now, self.lease_ttl);
+        match issued {
+            Ok(lease) => {
+                guard.reserve();
+                Ok(lease)
+            }
+            Err(LeaseError::Denied { decision }) => Err(IssueFailure::Denied(decision)),
+            Err(error) => Err(IssueFailure::Other(error)),
+        }
+    }
+
     fn handle_status() -> (AuthorizationOutcome, AgentResponse) {
         (
             AuthorizationOutcome::StatusReported,
@@ -265,36 +321,24 @@ impl AuthorizationHandler {
         };
         let provenance = provenance_for(request, observed.clone());
 
-        let issued = {
-            let mut guard = state::lock(&self.state);
-            let now = self.clock.now();
-            guard.prune(now);
-            if guard.is_at_capacity() {
-                drop(guard);
+        let lease = match self.issue_reserving_capacity(provenance) {
+            Ok(lease) => lease,
+            Err(IssueFailure::CapacityExhausted { outstanding }) => {
                 return (
-                    AuthorizationOutcome::CapacityExhausted {
-                        outstanding: self.max_outstanding_leases,
-                    },
+                    AuthorizationOutcome::CapacityExhausted { outstanding },
                     AgentResponse::Error {
                         code: ErrorCode::Internal,
                     },
-                );
+                )
             }
-            guard
-                .issuer_mut()
-                .issue(&self.policy, provenance, now, self.lease_ttl)
-        };
-
-        let lease = match issued {
-            Ok(lease) => lease,
-            Err(LeaseError::Denied { decision }) => {
+            Err(IssueFailure::Denied(decision)) => {
                 let reason = denial_reason_for(decision.reason());
                 return (
                     AuthorizationOutcome::PolicyDenied { decision },
                     AgentResponse::LeaseDenied { reason },
                 );
             }
-            Err(error) => {
+            Err(IssueFailure::Other(error)) => {
                 return (
                     AuthorizationOutcome::LeaseIssueFailed { error },
                     AgentResponse::Error {
@@ -310,7 +354,9 @@ impl AuthorizationHandler {
                 let remaining = expires_at.saturating_duration_since(self.clock.now());
                 let lease_id = lease.id().clone();
                 if remaining.is_zero() {
-                    state::lock(&self.state).issuer_mut().revoke(&lease_id);
+                    let mut guard = state::lock(&self.state);
+                    guard.issuer_mut().revoke(&lease_id);
+                    guard.release_reservation();
                     return (
                         AuthorizationOutcome::LeaseIssueFailed {
                             error: LeaseError::ExpiryOverflow,
@@ -320,6 +366,8 @@ impl AuthorizationHandler {
                         },
                     );
                 }
+                // `insert` itself releases the reservation this lease
+                // was issued under, in the same lock acquisition.
                 state::lock(&self.state).insert(lease);
                 (
                     AuthorizationOutcome::Granted {
@@ -335,7 +383,9 @@ impl AuthorizationHandler {
                 )
             }
             Ok(result) => {
-                state::lock(&self.state).issuer_mut().revoke(lease.id());
+                let mut guard = state::lock(&self.state);
+                guard.issuer_mut().revoke(lease.id());
+                guard.release_reservation();
                 (
                     AuthorizationOutcome::EnforcementRefused { result },
                     AgentResponse::Error {
@@ -344,7 +394,9 @@ impl AuthorizationHandler {
                 )
             }
             Err(error) => {
-                state::lock(&self.state).issuer_mut().revoke(lease.id());
+                let mut guard = state::lock(&self.state);
+                guard.issuer_mut().revoke(lease.id());
+                guard.release_reservation();
                 (
                     AuthorizationOutcome::BackendFailed { error },
                     AgentResponse::Error {
@@ -403,13 +455,24 @@ impl AuthorizationHandler {
         let revoke_backend = !guard.any_other_live_lease_for_same_resource(&id);
         let revocation = guard.issuer_mut().revoke(&id);
         guard.remove(&id);
-        drop(guard);
 
+        // The state lock is held across this backend call, deliberately
+        // (unlike the grant path's `enforce()`, which runs unlocked):
+        // dropping the lock first would open a release-then-acquire
+        // race — another thread's concurrent RequestLease for the same
+        // resource could pass capacity, issue, enforce, and insert
+        // entirely between this release's revoke_backend decision and
+        // the actual backend.revoke() call below, and this call would
+        // then tear down that thread's freshly-granted, still-live
+        // lease's enforcement. Holding the lock here serializes this
+        // decide-and-execute sequence against every insert, which also
+        // requires this same lock (see state::LeaseState::insert).
         let backend_result = if revoke_backend {
             self.backend.revoke(&resource).ok()
         } else {
             None
         };
+        drop(guard);
 
         (
             AuthorizationOutcome::Released {
