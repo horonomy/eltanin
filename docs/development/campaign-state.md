@@ -54,10 +54,12 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-819 | campaign-state.md sync after PR #26/#27 | #28 | `28fccfd` |
 | HORO-820 | Documentation governance (`docs/development/documentation-governance.md`) — User/Operator-vs-Contributor audience split, Change-to-Docs rule table, the only concrete gap found; amended `docs/qa/README.md`'s release-gate item 6 and added a PR-template pointer; 3 review-driven fixes (1 blocking false citation fixed by making it true, 2 medium: coverage overclaim, missing PR-template pointer) | #29 | `4cfd56c` |
 | HORO-810 | Versioned MVP 1.0 QA/Security test plan (`docs/qa/test-plans/mvp-1.0.md` — 10-layer quality model, North Star invariant→test-file map, honest hardware-evidence section), `docs/qa/reports/TEMPLATE.md`, `crates/eltanin-cli/tests/qa_governance_sync.rs` (4 mechanical drift-guard tests extending the `docs_sync.rs` pattern); 4 review-driven fixes (H1 dangling-link, M1 tokenizer prefix-escape, M2 path-escape, M3 `.md`-vs-`.yaml` FVR reconciliation) | #31 | `e1493a4` |
+| HORO-810 | campaign-state.md sync after PR #31 | #32 | `1de70f3` |
+| HORO-811 | Track B scenario index (`docs/qa/e2e/README.md` — scenario manifest, per-Feature coverage table, release-gate notes), North Star assertions table added to `docs/qa/e2e/F-M1-008-controlled-launch.md`, `.github/workflows/ci.yml` split into named Track B (`canonical_e2e`) then Track A (`--workspace`) steps, `qa_governance_sync.rs` extended with 4 Track B drift-guard tests; 5 review-driven fixes (H1 wrong-crate citation, M2 one-directional→set-equality coverage checks, M3 `../`-escape guard, M4 `.rs`-link existence check, L5 magic-number removal) | #33 | `660c87e` |
 
-Current `main` HEAD: `e1493a4`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
-F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810 (governance)
-are done.
+Current `main` HEAD: `660c87e`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811
+(governance) are done.
 
 ## Active worktrees
 
@@ -161,9 +163,9 @@ don't require bare-metal hardware:
   Change-to-Docs rule table — the one concrete gap; everything else
   HORO-820 asked for already existed.
 
-**HORO-814/819/820/810 are all Done.** Every remaining Highest-priority
-governance Task due 2026-09-13/14 has landed, plus HORO-810 (due
-2026-10-03, done early).
+**HORO-814/819/820/810/811 are all Done.** Every Highest-priority
+governance Task under HORO-772 due 2026-09-13/14 has landed, plus
+HORO-810 and HORO-811 (both due 2026-10-03, done early).
 
 HORO-810 (PR #31, `e1493a4`) shipped `docs/qa/test-plans/mvp-1.0.md`
 (versioned Track A test plan), `docs/qa/reports/TEMPLATE.md`, and
@@ -173,27 +175,43 @@ Markdown Feature Verification Record convention rather than Jira's
 suggested YAML shape, and HORO-845/847's `docs_sync.rs` `include_str!`
 pinning pattern rather than inventing a new mechanism.
 
-**Next unblocked work**: HORO-811 (business-scenario E2E automation
-framework — Track B), due 2026-10-03. Per the opus-architect design
-already produced for HORO-810/811 jointly: a new `docs/qa/e2e/README.md`
-Track B index (scenario model, manifest table, per-Feature
-scenario-or-N/A coverage, North Star assertion-honesty table), a
-`.github/workflows/ci.yml` amendment splitting the `test` job into a
-named "Track B — canonical Product/Business E2E" step
-(`cargo test -p eltanin-cli --test canonical_e2e`) followed by "Track A
-— full hardware-free suite" (`cargo test --workspace`), and an extension
-of `qa_governance_sync.rs` with Track B assertions (every Feature ID in
-`canonical_e2e.rs`'s `COVERS` const is cited by both
-`docs/qa/e2e/F-M1-008-controlled-launch.md`'s coverage table and the new
-index; every `F-M1-00N` in the README inventory appears in the Track B
-index with a scenario link or an explicit N/A/BLOCKED marker; every
-scenario-record path the index cites exists). New worktree branches from
-this updated `main` (HORO-811 depends on `qa_governance_sync.rs`
-existing). Same full validation/review/PR/CI/merge/Jira/cleanup cycle as
-every prior ticket this campaign.
+HORO-811 (PR #33, `660c87e`) shipped `docs/qa/e2e/README.md` (the Track B
+scenario index: manifest table, per-Feature coverage table, release-gate
+notes), a North Star assertions table added to
+`docs/qa/e2e/F-M1-008-controlled-launch.md`, a `.github/workflows/ci.yml`
+split into a named "Track B — canonical Product/Business E2E" step
+(`cargo test -p eltanin-cli --test canonical_e2e`) followed by "Track A —
+full hardware-free suite" (`cargo test --workspace`), and 4 more
+`qa_governance_sync.rs` tests pinning the Track B index against
+`canonical_e2e.rs`'s own `COVERS` const. Deliberately reused HORO-847's
+existing `canonical_e2e.rs` scenario (the one real Track B journey this
+repo has) and HORO-810's drift-guard test pattern — no new
+scenario-automation tooling invented where none was needed.
 
-Everything else remaining (F-M1-002/HORO-785, F-M1-007/HORO-789,
-HORO-790) stays hardware-blocked (see "Dependency blockers"); HORO-781
-stays intentionally `In Progress`, parked on the founder's LICENSE choice
-(see "Required human decisions outstanding") — not additional
-implementation work.
+**All hardware-independent MVP 1.0 work is now complete.** Every Feature
+that can be implemented and QA-verified without physical hardware
+(F-M1-001/003/004/005/006/008/009) is done, and every governance Task
+under HORO-772 that doesn't require bare-metal hardware (HORO-814/819/
+820/810/811) is done.
+
+**What remains — both require a founder decision, neither is decidable
+by this campaign autonomously:**
+
+1. **Bare-metal Linux/NVIDIA hardware provisioning** (a paid external
+   resource — see `.claude/CLAUDE.md`'s "Escalation" section). Blocks:
+   F-M1-002/HORO-785 (NVIDIA protected resource discovery), F-M1-007/
+   HORO-789 (Linux protected-device enforcement), HORO-790 (MVP 1.0 READY
+   hardware proof), and by extension the final MVP 1.0 release gate in
+   HORO-772. No hardware-free subtask work remains identified for either
+   Feature — see "Dependency blockers" and "Required human decisions
+   outstanding" above.
+2. **LICENSE choice for the public `horonomy/eltanin` repo** (HORO-781).
+   The repo currently ships a placeholder LICENSE; `deny.toml` exempts
+   this workspace's own unpublished crates from the license check in the
+   meantime so CI isn't blocked, but HORO-781 stays intentionally
+   `In Progress` pending this choice.
+
+Neither blocker has a hardware-free workaround. A fresh session resuming
+this campaign should raise both to the founder rather than search for
+further autonomous work — there is none left in scope until one or both
+are resolved.
