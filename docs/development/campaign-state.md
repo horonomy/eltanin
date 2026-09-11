@@ -51,9 +51,12 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-814 | Claude Code project gate (`.claude/CLAUDE.md`) + Codex adapter (`AGENTS.md`) — the only concrete gap found, everything else already existed from HORO-781/782/783; 5 review-driven fixes (branch-format statement, CONTRIBUTING.md dedup, escalation-section gaps, DoD pointer) | #25 | `2f21164` |
 | HORO-814 | campaign-state.md sync after PR #24/#25 | #26 | `59d6acd` |
 | HORO-819 | Formalized feature-level QA verification governance (`docs/qa/README.md`, `docs/qa/feature-verification/TEMPLATE.md`) — Feature Definition, Feature inventory, release-gate contract, distilled from existing practice; 5 review-driven fixes (2 overclaims of template universality corrected, one deferred AC named, 2 inventory-table clarity fixes) | #27 | `0b5b980` |
+| HORO-819 | campaign-state.md sync after PR #26/#27 | #28 | `28fccfd` |
+| HORO-820 | Documentation governance (`docs/development/documentation-governance.md`) — User/Operator-vs-Contributor audience split, Change-to-Docs rule table, the only concrete gap found; amended `docs/qa/README.md`'s release-gate item 6 and added a PR-template pointer; 3 review-driven fixes (1 blocking false citation fixed by making it true, 2 medium: coverage overclaim, missing PR-template pointer) | #29 | `4cfd56c` |
 
-Current `main` HEAD: `0b5b980`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
-F-M1-006, F-M1-008, F-M1-009 are done.
+Current `main` HEAD: `4cfd56c`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820 (governance)
+are done.
 
 ## Active worktrees
 
@@ -141,18 +144,36 @@ HORO-814 (Claude Code project gate + Codex adapter) merged as PR #25,
 `2f21164` — `.claude/CLAUDE.md` and `AGENTS.md` now exist; a fresh
 session should read `.claude/CLAUDE.md` first.
 
-With all hardware-free Feature work done, the campaign is now working
-through the remaining Highest-priority governance Tasks under HORO-772
-that don't require bare-metal hardware. HORO-819 (feature-level QA
-verification/DoD) merged as PR #27, `0b5b980` —
-[`docs/qa/README.md`](../qa/README.md) formalizes the Feature
-Verification Record convention this campaign already follows, plus a
-Feature Verification Record template
-([`docs/qa/feature-verification/TEMPLATE.md`](../qa/feature-verification/TEMPLATE.md)).
-Next: HORO-820 (documentation architecture/Docs Impact governance, due
-2026-09-14; likely substantially already satisfied — verify rather than
-redo), then HORO-810/HORO-811 (versioned QA test plans /
-business-scenario E2E suite, due 2026-10-03). HORO-781 remains
-intentionally `In Progress` — its only open AC is the founder's LICENSE
-choice (see "Required human decisions outstanding"), not additional
-implementation work.
+With all hardware-free Feature work done, the campaign worked through
+the remaining Highest-priority governance Tasks under HORO-772 that
+don't require bare-metal hardware:
+
+- HORO-814 (Claude Code project gate + Codex adapter) — PR #25, `2f21164`.
+- HORO-819 (feature-level QA verification/DoD) — PR #27, `0b5b980`.
+  [`docs/qa/README.md`](../qa/README.md) formalizes the Feature
+  Verification Record convention this campaign already follows, plus a
+  template ([`docs/qa/feature-verification/TEMPLATE.md`](../qa/feature-verification/TEMPLATE.md))
+  and an MVP 1.0 Feature inventory.
+- HORO-820 (documentation architecture/Docs Impact governance) — PR
+  #29, `4cfd56c`. [`docs/development/documentation-governance.md`](documentation-governance.md)
+  states the User/Operator-vs-Contributor audience split and a
+  Change-to-Docs rule table — the one concrete gap; everything else
+  HORO-820 asked for already existed.
+
+**HORO-814/819/820 are all Done.** Every remaining Highest-priority
+governance Task due 2026-09-13/14 has landed.
+
+**Next unblocked work**: HORO-810 (versioned QA/Security test-plan
+system) and HORO-811 (business-scenario E2E automation framework), both
+due 2026-10-03. Both are meaningfully larger in scope than HORO-814/819/
+820 — they ask for new directory structures (`qa/test-plans/`,
+`qa/security/`, `scenarios/`), automation tooling, and report
+generators, not just documentation — and lower urgency (3+ weeks out).
+Recommend giving each its own well-resourced session rather than
+starting them with reduced context; if genuinely large/architecturally
+significant once scoped, delegate initial design to `opus-architect`
+before implementing. Everything else remaining (F-M1-002/HORO-785,
+F-M1-007/HORO-789, HORO-790) stays hardware-blocked (see "Dependency
+blockers"); HORO-781 stays intentionally `In Progress`, parked on the
+founder's LICENSE choice (see "Required human decisions outstanding") —
+not additional implementation work.
