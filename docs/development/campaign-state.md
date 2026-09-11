@@ -41,15 +41,16 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-836 | F-M1-005: `ComputeLease`/`LeaseIssuer` scoped expiring authorization artifact (`crates/eltanin-core/src/lease.rs`), review-driven `compare_executable`/`ExecutableMismatch` fix | #15 | `e822bfd` |
 | HORO-837 | F-M1-005: renewal-boundary regression coverage, third Feature Verification Record | #16 | `f0457ae` |
 | HORO-838 | F-M1-006: versioned local IPC protocol types (`crates/eltanin-protocol`) — `RequestId`/`ClientRequest`/`AgentResponse`/framing, opus-architect-designed, review-driven `AgentStatus` unit-variant `deny_unknown_fields` fix | #17 | `93ebfd4` |
-| HORO-839 | F-M1-006: privileged local agent lifecycle — UDS listener (`BoundSocket`), `SO_PEERCRED` peer credential collection (`eltanin_linux::peer`, `rustix`-based per founder decision to preserve `#![forbid(unsafe_code)]`), bounded single-request connection handling, `RequestHandler` seam, graceful shutdown/drain | in progress | — |
+| HORO-839 | F-M1-006: privileged local agent lifecycle — UDS listener (`BoundSocket`), `SO_PEERCRED` peer credential collection (`eltanin_linux::peer`, `rustix`-based per founder decision to preserve `#![forbid(unsafe_code)]`), bounded single-request connection handling, `RequestHandler` seam, graceful shutdown/drain, review-driven `test-support`-feature-gating and accept-loop spawn-panic fixes | #18 | `86b29bd` |
+| HORO-840 | F-M1-006: policy/lease/backend integration (`eltanin-agent::authz`), lease-binding-subject decision (connecting peer process, not cgroup), `ReleaseLease` cross-client/execve-substitution discharge, `eltanin-agentd` daemon binary, `SIGTERM`/`SIGINT` wiring (`signal-hook` per founder decision D2), fourth Feature Verification Record (F-M1-006, closing HORO-788) | in progress | — |
 
-Current `main` HEAD: `93ebfd4`. F-M1-001, F-M1-003, F-M1-004, F-M1-005 are
-done; F-M1-006's protocol type layer (HORO-838) is done.
+Current `main` HEAD: `86b29bd`. F-M1-001, F-M1-003, F-M1-004, F-M1-005 are
+done; F-M1-006's protocol and transport layers (HORO-838/839) are done.
 
 ## Active worktrees
 
-- `eltanin-mvp-1.0-HORO-839-agent_uds` (branch
-  `mvp-1.0/HORO-839/agent_uds`), off `93ebfd4`, in progress.
+- `eltanin-mvp-1.0-HORO-840-agent_integration` (branch
+  `mvp-1.0/HORO-840/agent_integration`), off `86b29bd`, in progress.
 
 ## Dependency blockers
 
@@ -62,13 +63,14 @@ formally raised as its own escalation beyond the note in
 
 ## Feature QA states
 
-F-M1-003 (HORO-786), F-M1-004 (HORO-787), and F-M1-005 (HORO-822): Done,
-Feature Verification Record PASS —
+F-M1-003 (HORO-786), F-M1-004 (HORO-787), F-M1-005 (HORO-822), and
+F-M1-006 (HORO-788): Done, Feature Verification Record PASS —
 `docs/qa/feature-verification/F-M1-003.md` (HORO-833), `F-M1-004.md`
-(HORO-835), `F-M1-005.md` (HORO-837). All other F-M1-001/002/006..009 —
-no Feature Verification Record yet. Governance/foundation work
-(HORO-780/781/782/783/821) is done; F-M1-001 (HORO-784/825/826/827) is
-functionally complete but has no formal record yet.
+(HORO-835), `F-M1-005.md` (HORO-837), `F-M1-006.md` (HORO-840). All
+other F-M1-001/002/007..009 — no Feature Verification Record yet.
+Governance/foundation work (HORO-780/781/782/783/821) is done;
+F-M1-001 (HORO-784/825/826/827) is functionally complete but has no
+formal record yet.
 
 ## Required human decisions outstanding
 
@@ -102,17 +104,15 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001, F-M1-003, F-M1-004, F-M1-005 are done; F-M1-006's protocol type
-layer (HORO-838) is done. Currently in progress: HORO-839 (F-M1-006's
-agent transport — UDS listener, peer credentials, connection lifecycle).
-D1 (rustix vs. hand-written unsafe libc for `SO_PEERCRED`) was raised to
-the founder and resolved: use `rustix`, preserving
-`#![forbid(unsafe_code)]` workspace-wide. HORO-839 resolves the
-`eltanin run` launch-model question by construction (peer context is
-derived at connect time regardless of launch model) but explicitly
-leaves the lease-binding-subject question (pid vs. cgroup) and the
-`ReleaseLease` cross-client revocation-check implementation open for
-HORO-840, which also owns wiring `SIGTERM` to the shutdown mechanism and
-shipping the actual daemon binary. Next after HORO-839 merges: HORO-840
-(integrate agent with workload identity, policy, lease, backend
-lifecycle), closing out F-M1-006/HORO-788 entirely.
+F-M1-001, F-M1-003, F-M1-004, F-M1-005 are done; F-M1-006's protocol and
+transport layers (HORO-838/839) are done. Currently in progress:
+HORO-840 (F-M1-006's final subtask — policy/lease/backend integration,
+closing out F-M1-006/HORO-788 entirely). D2 (`signal-hook` vs.
+hand-written unsafe `libc` `sigaction` for `SIGTERM`/`SIGINT`) was raised
+to the founder and resolved: use `signal-hook`, same
+`#![forbid(unsafe_code)]`-preserving trade-off as D1. HORO-840 resolves
+the lease-binding-subject question (connecting peer process, not
+cgroup) and discharges the `ReleaseLease` cross-client revocation-check
+obligation both HORO-838/839 left open. Next after HORO-840 merges:
+F-M1-009 (HORO-824, Audit & Explain) and F-M1-008 (HORO-823, `eltanin
+run` CLI) — both still hardware-independent and not yet started.

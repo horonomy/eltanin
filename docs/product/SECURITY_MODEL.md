@@ -94,16 +94,19 @@ client presenting a response it holds. This closes the "no permanent
 plaintext local bearer credential merely for convenience" requirement by
 construction rather than by convention.
 
-**Named obligation on HORO-840**: `ReleaseLease` is a wire operation
-naming another lease by id. `eltanin-core`'s `LeaseIssuer::revoke` alone
-only checks issuer identity and sequence range — sequence numbers are
-enumerable, so nothing in `eltanin-core` stops a client from naming a
-lease it doesn't own. HORO-840's release handler must additionally
-compare the stored lease's workload identity against the freshly derived
-peer identity (`compare_process` and `compare_executable`, both
-reporting `Same`) before calling `revoke`, and report every other case
-as a client-facing `Refused` — never a distinction that would let a
-client enumerate other clients' leases.
+**Discharged by HORO-840**: `ReleaseLease` is a wire operation naming
+another lease by id. `eltanin-core`'s `LeaseIssuer::revoke` alone only
+checks issuer identity and sequence range — sequence numbers are
+enumerable, so nothing in `eltanin-core` alone stops a client from naming
+a lease it doesn't own. `eltanin-agent::authz::AuthorizationHandler`'s
+release path calls `LeaseIssuer::validate` (which itself calls
+`compare_process` and `compare_executable`, both required `Same`) before
+ever calling `revoke`, and reports every non-`Valid` case — unknown
+lease id, foreign issuer, cross-client mismatch, execve substitution,
+already revoked, expired — identically as `ReleaseOutcome::Refused`, so
+the wire response can never be used to enumerate other clients' leases.
+See `docs/architecture/domain-model.md`'s "Local authorization agent
+integration" section and `crates/eltanin-agent/tests/authz_release.rs`.
 
 ## Enforcement mechanism (validated, not assumed)
 
