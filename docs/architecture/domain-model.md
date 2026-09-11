@@ -489,12 +489,92 @@ decision (D2) made on the same basis as HORO-839's D1: `signal-hook`
 over hand-written unsafe `libc` `sigaction`, to keep
 `#![forbid(unsafe_code)]` intact workspace-wide.
 
+## Local audit & explain evidence (F-M1-009, HORO-824) — `eltanin-audit`
+
+A dedicated crate, not a module of `eltanin-agent`: `Eltanin::Audit` is
+its own Jira Component, and `eltanin-agentd` (a `[[bin]]` inside
+`eltanin-agent`) must select the audit sink at startup, so `eltanin-audit`
+cannot depend on `eltanin-agent` without a cycle. It also has no
+dependency on `eltanin-linux` — its record schema embeds
+`eltanin_core::identity::ExecutionContext` directly (already an
+observation record, already `Deserialize`), keeping the crate portable
+and mechanically unable to leak a vendor/platform concern; enforced by
+`crates/eltanin-audit/tests/architecture_no_vendor_leak.rs`.
+
+**Schema (`eltanin_audit::record`)**: `AuditRecord{event_id, recorded_at,
+operation, requested, peer, outcome, response}`, wrapped in
+`Versioned<T>` (the same envelope from F-M1-001) for forward-compatible
+reads. `AuditEventId{instance: IssuerInstanceId, sequence: u64}` is minted
+only by the sink — never caller-forgeable. Every authority-bearing
+`eltanin-core`/`eltanin-agent` type consumed here
+(`PolicyDecision`/`DecisionReason`, `ComputeLease`-derived outcomes,
+`AuthorizationOutcome`, `PeerConsistency`) is `Serialize`-only or has no
+`serde` derive at all by design (see "Compute Lease" and "Authorization
+policy" above) — so `eltanin-audit::record` hand-mirrors each one as a
+plain `Deserialize`-safe `Recorded*` type. This is the compiler-enforced
+mechanism behind "an edited or replayed log line can never mint
+authorization": nothing in the codebase constructs a real `ComputeLease`
+or `PolicyDecision` from a `Recorded*` value.
+
+**Sink (`eltanin_audit::sink::AuditFileSink`)**: append-only NDJSON,
+opened at file mode `0600` (Unix). `append()` reserves the next sequence
+number unconditionally *before* attempting the write, so a failed write
+still advances the sequence space — the structural basis for gap
+detection below — and is never reused. Best-effort durability is an
+explicit founder decision (D-A): a write failure is reported to the
+caller and counted (`failed_writes()`), never fed back into the
+already-computed `AgentResponse`; see
+`docs/product/SECURITY_MODEL.md`'s "Audit & explain evidence" section for
+the full rationale and the regression test that proves it
+(`crates/eltanin-agent/tests/audit_sink.rs`). Internally the sink writes
+through `Mutex<Box<dyn Write + Send>>`, not a concrete `File` — this
+generalization exists specifically so a test can inject a writer that
+reliably fails (real filesystem fault injection — deleting or replacing
+an already-open log file — proved unreliable across platforms, since a
+write to an already-open fd doesn't re-check its unlinked path).
+
+**Adapter (`eltanin_agent::authz::audit::AuditEventSink`)**: implements
+`eltanin-agent`'s existing `EventSink` trait (the F-M1-009 correlation
+seam HORO-840 left open, see above) and converts `AuthorizationEvent` /
+`eltanin_linux::peer` types into the `Recorded*` mirrors, since
+`eltanin-audit` cannot depend on either crate. `eltanin-agentd` selects
+it when `ELTANIN_AUDIT_LOG` is set, falling back to the existing
+`StderrSink` otherwise — no behavior change for a deployment that hasn't
+opted in.
+
+**Reader (`eltanin_audit::explain`)**: `read_log()` parses every NDJSON
+line, reporting a version-mismatched or malformed line as
+`UnreadableLine` rather than aborting the scan (checking the envelope's
+`version` field via `Versioned<serde_json::Value>` before attempting the
+full `AuditRecord` parse, so a version mismatch is never misreported as
+generic malformation). `LogScan::gaps` finds, per issuer instance, every
+sequence number strictly between the lowest and highest observed that
+never appeared as a record — the honest signal that a write may have
+failed there. `Selector::{Event, Lease, Pid}` + `select()` resolve to
+`Found`/`NotFound`/`PossiblyLost`; a `Lease` selector is how a grant
+record and its later release record correlate (both name the same
+`LeaseId`, one as the outcome, one as the request — see
+`AuditRecord::lease_id()`). The reader never runs inside `eltanin-agent`
+— `crates/eltanin-agent/tests/audit_reader_isolation.rs` mechanically
+guards that the writer and reader stay separated. A standalone
+`eltanin-explain` binary (`--log`/`--event`/`--lease`/`--pid`) exposes
+this for interactive inspection.
+
+**Forward obligation on F-M1-008 (`eltanin run`, HORO-823)**:
+`eltanin-protocol`'s `RequestId` (the wire correlation id a client
+supplies) is deliberately **not** recorded in `AuditRecord` — the agent
+mints its own `AuditEventId` instead, since a caller-supplied id is not
+authoritative and correlating by it would let a hostile client influence
+audit correlation. If F-M1-008 needs to correlate a CLI invocation with
+its audit trail, it must do so via the `LeaseId` the grant already
+returns, not by threading `RequestId` through the audit schema.
+
 ## Not yet implemented
 
-F-M1-001/003/004/005 (`eltanin-core`) and all of F-M1-006
-(`eltanin-protocol` HORO-838, `eltanin-agent` HORO-839/HORO-840) are
-implemented. Remaining work: F-M1-007 enforcement (including the named
-cgroup-reconciliation and expiry-driven-teardown obligations above),
-F-M1-008 CLI (including the named same-process-connects obligation
-above), F-M1-009 audit (consuming the `authz::event` correlation seam)
-— tracked in `docs/development/campaign-state.md`.
+F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`
+HORO-838, `eltanin-agent` HORO-839/HORO-840), and F-M1-009
+(`eltanin-audit`, HORO-824) are implemented. Remaining work: F-M1-007
+enforcement (including the named cgroup-reconciliation and
+expiry-driven-teardown obligations above), F-M1-008 CLI (including the
+named same-process-connects and `RequestId`-correlation obligations
+above) — tracked in `docs/development/campaign-state.md`.
