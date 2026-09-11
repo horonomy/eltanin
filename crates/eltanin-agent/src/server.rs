@@ -118,18 +118,33 @@ impl AgentServer {
             let handler = Arc::clone(&self.handler);
             let peers = Arc::clone(&self.peers);
             let slot = Arc::clone(&active);
-            connection_threads.push(thread::spawn(move || {
-                struct SlotGuard(Arc<AtomicUsize>);
-                impl Drop for SlotGuard {
-                    fn drop(&mut self) {
-                        self.0.fetch_sub(1, Ordering::SeqCst);
+            // thread::spawn itself can panic (e.g. the OS refuses to
+            // create a thread under resource exhaustion) — that panic
+            // happens on *this* accept-loop thread, before any
+            // SlotGuard exists to release the slot just reserved above.
+            // Wrapped in catch_unwind so a single failed spawn refuses
+            // one connection rather than unwinding the whole accept
+            // loop and taking the server down.
+            let spawned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                thread::spawn(move || {
+                    struct SlotGuard(Arc<AtomicUsize>);
+                    impl Drop for SlotGuard {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::SeqCst);
+                        }
                     }
-                }
-                let _slot_guard = SlotGuard(slot);
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    serve_connection(stream, io_timeout, handler.as_ref(), peers.as_ref());
-                }));
+                    let _slot_guard = SlotGuard(slot);
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        serve_connection(stream, io_timeout, handler.as_ref(), peers.as_ref());
+                    }));
+                })
             }));
+            match spawned {
+                Ok(join_handle) => connection_threads.push(join_handle),
+                Err(_) => {
+                    active.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
         }
 
         Ok(drain(connection_threads, self.config.drain_timeout()))
