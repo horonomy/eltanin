@@ -6,6 +6,7 @@ members = [
     "crates/eltanin-linux",
     "crates/eltanin-protocol",
     "crates/eltanin-agent",
+    "crates/eltanin-audit",
     "crates/eltanin-cli",
 ]
 
@@ -18,6 +19,7 @@ members = [
 # workspace by the Feature ticket that first needs them (F-M1-002/007),
 # not here — see docs/development/campaign-state.md.
 # crates/eltanin-linux was added by F-M1-003/HORO-832.
+# crates/eltanin-audit was added by F-M1-009/HORO-824.
 
 [workspace.package]
 version = "0.1.0"
