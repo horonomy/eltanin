@@ -101,13 +101,15 @@ current unverified state.
 Where a canonical scenario and a doc's example commands can be made
 byte-identical, they are — `crates/eltanin-cli/tests/docs_sync.rs`'s
 pinning assertions are the working example (`POLICY_EXAMPLES.md`,
-`QUICKSTART.md`). This is deliberately narrow, hand-written per-doc
-pinning, **not** a general link/snippet/version-consistency linter
-across all of `docs/` — Jira's AC asks for the latter ("CI checks
-links/snippets/version consistency where technically feasible") and it
-does not exist yet. Named as an accepted gap rather than silently
-unaddressed; a general doc-linter is more naturally scoped under HORO-810
-(versioned QA/Security test-plan automation) than invented ad hoc here.
+`QUICKSTART.md`). HORO-810 additionally added
+`crates/eltanin-cli/tests/qa_governance_sync.rs`, which pins QA-inventory
+and test-plan evidence paths against drift. Neither is a general
+link/snippet/version-consistency linter across all of `docs/` — Jira's
+AC asks for the latter ("CI checks links/snippets/version consistency
+where technically feasible") and it still does not exist. Named as an
+accepted gap, deferred to its own future ticket rather than folded into
+HORO-810 (QA-evidence governance is a distinct concern from a general
+documentation linter).
 
 ## What already existed before this document
 
