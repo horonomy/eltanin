@@ -16,10 +16,27 @@
 //! points the pid could have been reused by an unrelated process (the
 //! peer exited and something else got the same pid), or — on a
 //! namespace-unaware kernel path — describe a process this agent cannot
-//! actually see. Neither failure mode is hypothetical: it is the same
-//! PID-reuse threat `eltanin_core::identity::WorkloadIdentity::compare_process`
-//! already exists to catch, applied one layer earlier, before a
-//! `WorkloadIdentity` value is ever constructed for the wrong process.
+//! actually see.
+//!
+//! **What this cross-check does and does not catch, precisely.** The
+//! uid comparison in [`PeerConsistency`] only ever *reduces confidence*
+//! that a PID-reuse race happened — it detects it exclusively when the
+//! recycled pid landed on a process running as a **different** uid than
+//! the original peer. In this crate's MVP 1.0 primary deployment
+//! (`eltanin-agent`'s own docs: agent and every workload run as the
+//! same uid), a recycled pid almost always still belongs to that same
+//! uid, so [`PeerConsistency::Consistent`] provides essentially no
+//! protection against a same-uid PID-reuse race in that mode — it is
+//! real defense-in-depth for a multi-uid host, not a general PID-reuse
+//! guard. `SO_PEERCRED` carries no start-time field, so nothing derived
+//! from it alone can be cross-checked against a `ProcessStartToken`
+//! atomically captured at `connect()` time; closing this residually
+//! requires either an OS-level atomic peer handle (e.g. a `pidfd`
+//! obtained immediately post-accept) or accepting the same PID-reuse
+//! race `WorkloadIdentity::compare_process` already documents for every
+//! other `/proc`-based collector in this crate. Left as a named,
+//! honestly-scoped limitation rather than an unstated assumption; not
+//! closed by this module.
 //!
 //! # Real vs. effective uid
 //!
@@ -64,16 +81,14 @@ pub struct PeerCredential {
 }
 
 impl PeerCredential {
-    /// Construct a credential directly — for test doubles only in
-    /// practice. Unlike `eltanin_core::lease::ComputeLease` (which
-    /// exists to make a serialized authorization artifact unforgeable),
-    /// [`PeerCredential`]/[`PeerContext`] are observation records, the
-    /// same category as `eltanin_core::identity::WorkloadIdentity` —
-    /// their fields are private for encapsulation, not to enforce a
-    /// "never reconstructed outside kernel derivation" invariant, so a
-    /// public constructor here doesn't weaken anything the rest of this
-    /// module's docs claim. Production code has exactly one way to
-    /// obtain a real one: [`collect_peer_context`].
+    /// Construct a credential directly — for test doubles only. Gated
+    /// behind the `test-support` feature (not merely documented as
+    /// test-only) so that no production code path — in this crate or
+    /// any downstream one — can construct a [`PeerContext`] that
+    /// bypasses kernel derivation entirely and still satisfy
+    /// [`PeerContext::authorizable`]. Production code has exactly one
+    /// way to obtain a real one: [`collect_peer_context`].
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn new(pid: u32, uid: u32, gid: u32) -> Self {
         Self {
@@ -134,9 +149,11 @@ pub enum PeerConsistency {
 
 /// A connected peer's credential plus what `/proc` observed about it,
 /// and whether the two agree. Production code obtains one real way:
-/// [`collect_peer_context`]; [`PeerContext::new`] exists for test
-/// doubles — see [`PeerCredential::new`]'s doc comment for why that
-/// doesn't weaken this type's guarantees.
+/// [`collect_peer_context`]; `PeerContext::new` exists for test doubles
+/// only, behind the `test-support` feature (not linked — conditionally
+/// compiled, so an intra-doc link to it would fail to resolve whenever
+/// this crate is documented without that feature) — see
+/// `PeerCredential::new`'s doc comment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerContext {
     credential: PeerCredential,
@@ -145,6 +162,7 @@ pub struct PeerContext {
 }
 
 impl PeerContext {
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn new(
         credential: PeerCredential,
