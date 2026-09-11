@@ -3,7 +3,7 @@ name = "eltanin-agent"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Eltanin privileged local authorization coordinator (MVP 1.0, F-M1-006 / HORO-788/838/839/840)."
+description = "Eltanin privileged local authorization coordinator (MVP 1.0, F-M1-006 / HORO-788/838/839/840, F-M1-009 / HORO-824 audit adapter)."
 
 [lints]
 workspace = true
@@ -17,6 +17,9 @@ eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
 eltanin-linux = { path = "../eltanin-linux", version = "0.1.0" }
 eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
 eltanin-backend = { path = "../eltanin-backend", version = "0.1.0" }
+# F-M1-009/HORO-824's AuditEventSink adapter. eltanin-audit itself never
+# depends back on eltanin-agent or eltanin-linux — see its crate docs.
+eltanin-audit = { path = "../eltanin-audit", version = "0.1.0" }
 thiserror = { workspace = true }
 # Promoted from a dev-dependency (HORO-839) to a real one: the daemon
 # binary loads a PolicyDocument from a JSON file at startup (HORO-840).
