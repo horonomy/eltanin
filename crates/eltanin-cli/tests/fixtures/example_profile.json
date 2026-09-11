@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "payload": {
+    "resource": {
+      "vendor": "fake",
+      "kind": "gpu",
+      "local_id": "gpu-0"
+    },
+    "action": "compute"
+  }
+}
