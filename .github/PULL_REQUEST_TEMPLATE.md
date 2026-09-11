@@ -16,6 +16,9 @@
 
 ## Docs Impact
 
+<!-- See docs/development/documentation-governance.md's "Change-to-Docs
+     rules" table for what this change likely needs to update, and what
+     counts as a defensible "None" reason. -->
 - [ ] User Docs
 - [ ] Contributor Docs
 - [ ] Both
