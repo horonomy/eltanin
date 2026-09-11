@@ -10,3 +10,14 @@ workspace = true
 
 [dependencies]
 eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+thiserror = { workspace = true }
+
+# SO_PEERCRED access (crate::peer) is Linux-only and needed on no other
+# target, so it is declared as a target-specific dependency rather than
+# an unconditional one — kept out of the dependency graph entirely on
+# any non-Linux build. rustix wraps the getsockopt(SO_PEERCRED) call in
+# safe Rust, preserving this workspace's #![forbid(unsafe_code)] on
+# every crate rather than requiring hand-written unsafe libc FFI (see
+# ADR 0004, which reserves unsafe code for HORO-828 only).
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "net"] }
