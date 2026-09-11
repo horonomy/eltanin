@@ -47,9 +47,10 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-845 | F-M1-008 subtask 1/3: `eltanin run` CLI contract — [ADR 0005](../adr/0005-eltanin-run-process-topology.md) (supervisor process topology), argv/profile/exit/failure/sequence types (`crates/eltanin-cli`), founder decision D-B (workload-executable-identity gap accepted for MVP 1.0, HORO-988 filed), 5 review-driven fixes (exit-code overlap-claim corrections, doc/code sync test tightening, 126/127 ambiguity documented, profile control-character rejection) | #21 | `198dff9` |
 | HORO-846 | F-M1-008 subtask 2/3: `eltanin run` launch/exit/cleanup lifecycle — UDS client (`crate::client`, connect-per-request), profile filesystem loader (`crate::profile`), governed-execution-context seam (`crate::context::NullContext`), signal forwarding (`crate::signals`), spawn/supervise/renew/release driver (`crate::supervise`), S0-S11 orchestrator (`crate::launch`); `eltanin-protocol::framing` gained the client-direction `encode_request`/`decode_response` mirror pair; `eltanin-agent/tests/authz_renewal.rs` pins the server-side renewal semantics the design depends on; 6 review-driven fixes (2 HIGH `Instant+Duration` overflow-panic fixes via `safe_deadline`, architecture-guard heuristic-limitation doc fix + expanded shell-pattern list, renewal-denial test strengthening, timing-margin widening, `spawn_failure_code` taxonomy note) | #22 | `d395017` |
 | HORO-847 | F-M1-008 subtask 3/3: canonical Product/Business E2E scenario `E2E-F-M1-008-controlled-launch-v1` (`crates/eltanin-cli/tests/canonical_e2e.rs`, real `eltanin-agentd`+`eltanin` binaries, real UDS socket and on-disk policy, Linux-only) plus `docs/product/QUICKSTART.md` and the Track B record `docs/qa/e2e/F-M1-008-controlled-launch.md`; `docs_sync.rs` gained 5 new pinning assertions; 9 review-driven fixes plus a 10th real bug caught by CI (`eltanin-agentd` never seeded `FakeBackend` with any resource — fixed via new `PolicySet::resources()`) | #23 | `5cedf83` |
-| HORO-823 | F-M1-008 rollup: single Feature Verification Record (`docs/qa/feature-verification/F-M1-008.md`) once all three subtasks landed | (this PR) | n/a (docs only) |
+| HORO-823 | F-M1-008 rollup: single Feature Verification Record (`docs/qa/feature-verification/F-M1-008.md`) once all three subtasks landed | #24 | `fd42434` |
+| HORO-814 | Claude Code project gate (`.claude/CLAUDE.md`) + Codex adapter (`AGENTS.md`) — the only concrete gap found, everything else already existed from HORO-781/782/783; 5 review-driven fixes (branch-format statement, CONTRIBUTING.md dedup, escalation-section gaps, DoD pointer) | #25 | `2f21164` |
 
-Current `main` HEAD: `5cedf83`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+Current `main` HEAD: `2f21164`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
 F-M1-006, F-M1-008, F-M1-009 are done.
 
 ## Active worktrees
@@ -112,10 +113,10 @@ gated yet since no Feature work has started.
 
 ## Next planned action
 
-F-M1-001, F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-009 are done.
-HORO-845 (F-M1-008 subtask 1/3 — CLI contract) merged as PR #21,
-`198dff9`. HORO-846 (F-M1-008 subtask 2/3 — launch lifecycle) merged
-as PR #22, `d395017`. Next: HORO-847 (F-M1-008 subtask 3/3).
+F-M1-001, F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-008, F-M1-009 are
+done. F-M1-002 (HORO-785) and F-M1-007 (HORO-789), plus HORO-790 (MVP
+1.0 READY hardware proof), remain blocked on bare-metal Linux/NVIDIA
+hardware access — see "Dependency blockers".
 
 D-B (workload-executable-identity gap) was raised to the founder during
 HORO-845's design and resolved: `eltanin run` stays alive as the
@@ -134,7 +135,17 @@ run`-specific example was added that deliberately omits any
 executable-identity condition. HORO-988 (new ticket) tracks properly
 threat-modeling and closing the gap later — no mechanism pre-selected.
 
-Next after HORO-846 merges: HORO-847 (canonical Product E2E fixtures +
-user docs, testing only what MVP 1.0 actually enforces per the founder's
-instruction), then HORO-823 itself to Done, with a single F-M1-008
-Feature Verification Record once all three subtasks have landed.
+HORO-814 (Claude Code project gate + Codex adapter) merged as PR #25,
+`2f21164` — `.claude/CLAUDE.md` and `AGENTS.md` now exist; a fresh
+session should read `.claude/CLAUDE.md` first.
+
+With all hardware-free Feature work done, the campaign is now working
+through the remaining Highest-priority governance Tasks under HORO-772
+that don't require bare-metal hardware: HORO-819 (feature-level QA
+verification/DoD, due 2026-09-14) next, then HORO-820 (documentation
+architecture/Docs Impact governance, due 2026-09-14; likely
+substantially already satisfied — verify rather than redo), then
+HORO-810/HORO-811 (versioned QA test plans / business-scenario E2E
+suite, due 2026-10-03). HORO-781 remains intentionally `In Progress` —
+its only open AC is the founder's LICENSE choice (see "Required human
+decisions outstanding"), not additional implementation work.
