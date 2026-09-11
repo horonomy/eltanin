@@ -48,6 +48,13 @@ dependencies = [
 [[package]]
 name = "eltanin-cli"
 version = "0.1.0"
+dependencies = [
+ "eltanin-core",
+ "eltanin-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "eltanin-core"
