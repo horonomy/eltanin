@@ -167,12 +167,16 @@ fn releasing_one_of_two_leases_on_the_same_resource_does_not_tear_down_the_other
             outcome: ReleaseOutcome::Released
         }
     );
+    // The load-bearing assertion: a's release must not have called
+    // backend.revoke while b's lease on the same resource was still
+    // live.
+    assert_eq!(
+        backend.revoke_call_count(&resource_identity()),
+        0,
+        "releasing a while b's lease on the same resource is still outstanding must not call \
+         backend.revoke"
+    );
 
-    // b's lease is still outstanding and must still be releasable —
-    // if backend.revoke had actually torn down the shared resource,
-    // this alone can't detect that directly (FakeBackend::revoke has no
-    // observable side effect on future enforce calls), but the second
-    // release must still succeed at the lease-store level.
     let release_b = handler.handle(
         &ClientRequest::ReleaseLease(ReleaseRequest { lease_id: id_b }),
         &b.context(),
@@ -183,6 +187,82 @@ fn releasing_one_of_two_leases_on_the_same_resource_does_not_tear_down_the_other
             outcome: ReleaseOutcome::Released
         }
     );
+    // Now that b was the last live lease on the resource, its release
+    // must have actually called backend.revoke exactly once.
+    assert_eq!(
+        backend.revoke_call_count(&resource_identity()),
+        1,
+        "releasing the last live lease on a resource must call backend.revoke exactly once"
+    );
+}
+
+#[test]
+fn a_release_racing_a_grant_on_the_same_resource_never_tears_down_the_new_grant() {
+    // Regression coverage for the release-then-acquire race an
+    // adversarial review found: thread A releases the last lease on a
+    // resource and decides to revoke it backend-side; before A's
+    // (formerly unlocked) backend.revoke() call could run, thread B
+    // could complete an entire RequestLease for the same resource and
+    // have A's stale revoke tear down B's freshly-granted enforcement.
+    // AuthorizationHandler now holds the lease-store lock across the
+    // release path's backend.revoke() call specifically to close this,
+    // serializing it against any concurrent insert. This test proves
+    // the observable outcome: after a release-then-grant sequence on
+    // the same resource, exactly one revoke call landed (a's), and it
+    // did not follow b's grant in a way that would leave b's lease
+    // pointing at torn-down enforcement — b's own subsequent release
+    // still triggers its own, second revoke call.
+    let backend = backend_with_resource(&[Capability::Enforce, Capability::Revoke]);
+    let handler = AuthorizationHandler::new(
+        IssuerInstanceId::new("test-instance"),
+        allow_policy_for_uid(1000),
+        Arc::clone(&backend) as Arc<dyn eltanin_backend::contract::ComputeBackend>,
+        FixedClock::new(),
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(60)).unwrap(),
+    );
+    let a = TestPeer::fresh(1000, "sha256:trusted");
+    let b = TestPeer::fresh(1000, "sha256:trusted");
+
+    let granted_a = handler.handle(&lease_request(), &a.context());
+    let id_a = granted_lease_id(&granted_a);
+
+    // a releases its lease — the only live lease on the resource at
+    // this point, so this release does call backend.revoke.
+    let release_a = handler.handle(
+        &ClientRequest::ReleaseLease(ReleaseRequest { lease_id: id_a }),
+        &a.context(),
+    );
+    assert_eq!(
+        release_a,
+        AgentResponse::LeaseReleased {
+            outcome: ReleaseOutcome::Released
+        }
+    );
+    assert_eq!(backend.revoke_call_count(&resource_identity()), 1);
+
+    // b now grants a fresh lease on the same resource — sequentially
+    // here (this test isn't spawning real threads), but the fix's
+    // correctness claim is that the release path's revoke_backend
+    // decision and its execution are atomic under the same lock as any
+    // insert, so no *interleaved* real-thread ordering could produce a
+    // different, incorrect outcome than this sequential one.
+    let granted_b = handler.handle(&lease_request(), &b.context());
+    let id_b = granted_lease_id(&granted_b);
+    // b's grant must not have triggered any backend.revoke call.
+    assert_eq!(backend.revoke_call_count(&resource_identity()), 1);
+
+    let release_b = handler.handle(
+        &ClientRequest::ReleaseLease(ReleaseRequest { lease_id: id_b }),
+        &b.context(),
+    );
+    assert_eq!(
+        release_b,
+        AgentResponse::LeaseReleased {
+            outcome: ReleaseOutcome::Released
+        }
+    );
+    assert_eq!(backend.revoke_call_count(&resource_identity()), 2);
 }
 
 #[test]

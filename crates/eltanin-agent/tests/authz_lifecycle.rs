@@ -153,6 +153,47 @@ fn a_request_beyond_max_outstanding_leases_fails_safely_without_granting() {
 }
 
 #[test]
+fn concurrent_requests_never_overshoot_max_outstanding_leases() {
+    // Regression coverage for a race an adversarial review found: the
+    // capacity check and the eventual store insert happen under
+    // separate lock acquisitions (enforce() runs unlocked in between),
+    // so without a reservation held for the whole window, N concurrent
+    // RequestLease calls could all observe capacity as free before any
+    // of them inserts, overshooting max_outstanding_leases. Each
+    // connection is served on its own thread in the real server, so
+    // this is a genuine cross-thread scenario.
+    let handler = Arc::new(AuthorizationHandler::new(
+        IssuerInstanceId::new("instance-a"),
+        allow_policy_for_uid(1000),
+        backend_with_resource(&[Capability::Enforce]),
+        FixedClock::new(),
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(60))
+            .unwrap()
+            .with_max_outstanding_leases(5),
+    ));
+
+    let threads: Vec<_> = (0..20)
+        .map(|_| {
+            let handler = Arc::clone(&handler);
+            let peer = TestPeer::fresh(1000, "sha256:trusted");
+            std::thread::spawn(move || handler.handle(&lease_request(), &peer.context()))
+        })
+        .collect();
+
+    let granted = threads
+        .into_iter()
+        .map(|t| t.join().unwrap())
+        .filter(|r| matches!(r, AgentResponse::LeaseGranted { .. }))
+        .count();
+
+    assert!(
+        granted <= 5,
+        "expected at most 5 leases granted under the configured cap, got {granted}"
+    );
+}
+
+#[test]
 fn an_expired_leases_slot_is_reclaimed_by_prune_before_the_capacity_check() {
     let clock = FixedClock::new();
     let handler = AuthorizationHandler::new(
