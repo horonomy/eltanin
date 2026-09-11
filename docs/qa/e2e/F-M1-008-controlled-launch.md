@@ -52,6 +52,26 @@ would violate — so a CI failure here identifies the user-visible
 Quickstart step and the security property at risk without needing to
 read the test body.
 
+## North Star assertions
+
+Not every `NORTH_STAR.md` invariant this scenario touches is proven the
+same way. Stated honestly rather than blanket-claimed (HORO-811):
+
+| Invariant | How this scenario relates to it |
+|---|---|
+| 1 — Authorization before consumption | **Machine-asserted.** `allow_journey_authorizes_and_runs_the_workload` proves the ALLOW leg reaches `SpawnWorkload` only after `RequestLease` succeeds; `deny_journey_never_spawns_the_workload` proves the DENY leg never does. |
+| 2 — Allocation != Authorization | **N/A for MVP 1.0.** No scheduler/orchestrator exists yet to test the distinction against — the invariant has nothing to violate until one does. |
+| 4 — Contextual signals are not authority | **Track-A-only.** This scenario's two legs differ only by uid — it never attempts a spoofed/forged signal. The adversarial cases (forged PID, replayed decision, multi-vector spoof) are `crates/eltanin-core/tests/{policy_spoof_signals,identity_adversarial,policy_replay}.rs`, per `docs/qa/test-plans/mvp-1.0.md`'s invariant map. |
+| 5 — Remember authorization intent, never possession | **Documentation-level.** True by the `ComputeLease`/`LeaseIssuer` design (`docs/adr/`), but this scenario's assertions don't independently exercise "intent vs. possession" as a distinct claim — it only proves a lease is issued and released. |
+| 6 — A lease is scoped and expiring | **Machine-asserted.** The ALLOW leg's lease is issued, then released on workload exit — both observed directly. |
+| 7 — Locally observable caller identity is not overridable | **Machine-asserted.** The connecting `eltanin` process's real `SO_PEERCRED` uid — not a client-supplied claim — is what the ALLOW/DENY decision actually conditions on. |
+
+Invariants 3, 8, and 9 are addressed elsewhere: 3 ("Monitoring !=
+Security") by `deny_journey_is_explainable_via_the_audit_log` (already
+in the coverage table above); 8 and 9 have no Track B claim in this
+scenario and are tracked as structural-only in
+`docs/qa/test-plans/mvp-1.0.md`'s invariant map, not restated here.
+
 ## Named limitations (not silently closed)
 
 - **Runs against `FakeBackend`.** This scenario proves the
