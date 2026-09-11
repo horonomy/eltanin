@@ -1,16 +1,19 @@
-//! Architecture test: `eltanin-agent` is transport/runtime only
-//! (F-M1-006, HORO-839) — it must never name `eltanin-core`'s
-//! policy/lease *evaluation* API, and its source must contain no
-//! `unsafe` code. Same blunt lexical-scan idiom as
-//! `eltanin-core`'s `architecture_no_vendor_leak.rs` and
-//! `eltanin-protocol`'s `protocol_no_self_asserted_identity.rs`:
-//! comment lines are stripped, string literals are not specially
-//! handled.
+//! Architecture test: `eltanin-agent`'s transport modules stay
+//! transport/runtime only (F-M1-006, HORO-839/HORO-840) — they must
+//! never name `eltanin-core`'s policy/lease *evaluation* API. The
+//! `authz` module is the one named, auditable exception: HORO-840
+//! implements policy evaluation and lease issue/release there, behind
+//! [`eltanin_agent::handler::RequestHandler`], never in a transport
+//! module. Source must contain no `unsafe` code anywhere, `authz`
+//! included. Same blunt lexical-scan idiom as `eltanin-core`'s
+//! `architecture_no_vendor_leak.rs` and `eltanin-protocol`'s
+//! `protocol_no_self_asserted_identity.rs`: comment lines are stripped,
+//! string literals are not specially handled.
 //!
-//! HORO-840 implements policy evaluation and lease issue/release
-//! *behind* [`eltanin_agent::handler::RequestHandler`] — in its own
-//! code, not this crate's. This test makes that boundary mechanically
-//! checkable rather than a review promise.
+//! The exemption for `authz` is a fixed hole, not an escape hatch:
+//! [`REQUIRED_SCANNED`] asserts every transport module file was actually
+//! scanned, so moving transport code into `authz/` to dodge the product-
+//! logic scan fails this test instead of silently succeeding.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +28,27 @@ const FORBIDDEN_PRODUCT_LOGIC: &[&str] = &[
     ".issue(",
     ".revoke(",
 ];
+
+/// Every transport-module source file that must actually be scanned by
+/// [`agent_source_never_names_policy_or_lease_evaluation_logic`]. If a
+/// new transport file is added under `src/` without being named here,
+/// this test fails loudly rather than silently widening the exemption.
+const REQUIRED_SCANNED: &[&str] = &[
+    "lib.rs",
+    "config.rs",
+    "connection.rs",
+    "daemon.rs",
+    "handler.rs",
+    "listener.rs",
+    "peer.rs",
+    "runtime.rs",
+    "server.rs",
+    "eltanin-agentd.rs",
+];
+
+/// Path component that marks a file as belonging to the one exempted
+/// module — HORO-840's policy/lease integration.
+const PRODUCT_LOGIC_DIR: &str = "authz";
 
 fn strip_comment_lines(source: &str) -> String {
     source
@@ -46,8 +70,13 @@ fn code_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+fn is_authz_file(path: &Path) -> bool {
+    path.components()
+        .any(|c| c.as_os_str() == PRODUCT_LOGIC_DIR)
+}
+
 #[test]
-fn agent_source_never_names_policy_or_lease_evaluation_logic() {
+fn agent_source_never_names_policy_or_lease_evaluation_logic_outside_authz() {
     let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     code_files(&src_dir, &mut files);
@@ -56,8 +85,38 @@ fn agent_source_never_names_policy_or_lease_evaluation_logic() {
         "expected to find eltanin-agent source files to scan"
     );
 
+    let transport_files: Vec<&PathBuf> = files.iter().filter(|f| !is_authz_file(f)).collect();
+
+    // The exemption is a fixed hole, not an escape hatch: every named
+    // transport file must actually have been scanned below. A file
+    // moved into authz/ to dodge the scan, or a new transport file added
+    // without updating REQUIRED_SCANNED, fails here instead of silently
+    // widening what's exempt.
+    for required in REQUIRED_SCANNED {
+        assert!(
+            transport_files
+                .iter()
+                .any(|f| f.file_name().is_some_and(|n| n == *required)),
+            "expected src/{required} to be scanned as a transport module, but it was not found \
+             (renamed? moved into authz/?)"
+        );
+    }
+    assert_eq!(
+        transport_files.len(),
+        REQUIRED_SCANNED.len(),
+        "a transport-module file exists under src/ that REQUIRED_SCANNED does not name — add it \
+         explicitly rather than widening the authz/ exemption"
+    );
+
+    let authz_dir = src_dir.join(PRODUCT_LOGIC_DIR);
+    assert!(
+        authz_dir.is_dir() && files.iter().any(|f| is_authz_file(f)),
+        "expected a non-empty src/authz/ module — HORO-840's policy/lease integration must live \
+         in the one named, auditable place this test exempts, not scattered elsewhere"
+    );
+
     let mut violations = Vec::new();
-    for file in &files {
+    for file in &transport_files {
         let contents = fs::read_to_string(file).expect("read source file");
         let code_only = strip_comment_lines(&contents);
         for term in FORBIDDEN_PRODUCT_LOGIC {
@@ -72,8 +131,8 @@ fn agent_source_never_names_policy_or_lease_evaluation_logic() {
 
     assert!(
         violations.is_empty(),
-        "eltanin-agent must stay transport/runtime only — policy evaluation and lease \
-         issue/revoke belong behind RequestHandler in HORO-840's own crate/module, but found:\n{}",
+        "eltanin-agent's transport modules must stay policy/lease-evaluation-free — that logic \
+         belongs in src/authz/, behind RequestHandler, but found:\n{}",
         violations.join("\n")
     );
 }
@@ -83,7 +142,9 @@ fn agent_source_contains_no_unsafe_code() {
     // Belt-and-suspenders alongside #![forbid(unsafe_code)] in lib.rs:
     // this also catches an `unsafe` block appearing anywhere the forbid
     // attribute wouldn't apply (e.g. a future submodule that
-    // accidentally overrides it with `#[allow(unsafe_code)]`).
+    // accidentally overrides it with `#[allow(unsafe_code)]`). Scans
+    // everything, authz/ and src/bin/ included — this exemption has no
+    // carve-out.
     let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     code_files(&src_dir, &mut files);
@@ -108,8 +169,8 @@ fn agent_source_contains_no_unsafe_code() {
 
     assert!(
         violations.is_empty(),
-        "eltanin-agent must contain no unsafe code (SO_PEERCRED access is isolated in \
-         eltanin-linux via the safe rustix wrapper), but found it in:\n{}",
+        "eltanin-agent must contain no unsafe code (SO_PEERCRED/signal handling are isolated in \
+         eltanin-linux/signal-hook via safe wrappers), but found it in:\n{}",
         violations.join("\n")
     );
 }

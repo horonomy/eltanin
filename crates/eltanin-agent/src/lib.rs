@@ -1,13 +1,18 @@
 //! `eltanin-agent` — privileged local authorization coordinator
-//! (F-M1-006, HORO-839).
+//! (F-M1-006, HORO-839/HORO-840).
 //!
-//! This crate is transport/runtime only: socket lifecycle, peer
-//! credential derivation, and bounded request framing. It contains no
-//! policy evaluation, lease issuance, or backend integration logic —
-//! see [`handler::RequestHandler`] for the seam HORO-840 implements
-//! that logic behind, and `tests/agent_architecture_guard.rs` for the
-//! lexical guard making that boundary mechanically checkable rather
-//! than a review promise.
+//! This crate has two parts, kept structurally separate and mechanically
+//! enforced by `tests/agent_architecture_guard.rs`:
+//!
+//! - **Transport** (`config`, `connection`, `daemon`, `handler`,
+//!   `listener`, `peer`, `runtime`, `server`): socket lifecycle, peer
+//!   credential derivation, bounded request framing. Contains no policy
+//!   evaluation, lease issuance, or backend integration logic.
+//! - **[`authz`]**: the one place in this crate policy/lease evaluation
+//!   logic may appear (HORO-840) — implements [`handler::RequestHandler`]
+//!   by wiring `eltanin-core`'s policy/lease contracts and an
+//!   `eltanin-backend::ComputeBackend` together. Never touches sockets or
+//!   framing.
 //!
 //! # Privilege requirements
 //!
@@ -34,19 +39,21 @@
 //!
 //! # Known limitations, named obligations
 //!
-//! - **No SIGTERM wiring.** This crate ships [`server::ShutdownHandle`]
-//!   as a fully testable mechanism, but installs no signal handler and
-//!   ships no daemon binary — wiring `SIGTERM` to
-//!   `ShutdownHandle::shutdown` is HORO-840's obligation, alongside the
-//!   daemon binary itself.
 //! - **The `eltanin run` launch-model question is resolved by
 //!   construction, not settled by policy.** This transport derives
 //!   context for *the connecting peer at connect time*, a fact
 //!   identical under fork+exec or exec-in-place — there is no
-//!   target-pid field for a launch model to change. What a lease's
-//!   *binding subject* should be (pid vs. cgroup) remains an open
-//!   architecture question for F-M1-007/HORO-840, not this crate's to
-//!   resolve.
+//!   target-pid field for a launch model to change. **The lease binding
+//!   subject is the connecting peer process**, decided in HORO-840: pid
+//!   and `ProcessStartToken` and executable, via
+//!   [`eltanin_core::lease::LeaseIssuer::validate`]. A cgroup-scoped
+//!   enforcement layer (F-M1-007) must reconcile a process-bound lease
+//!   with cgroup-scoped device-BPF; see
+//!   `docs/architecture/domain-model.md`. **Cross-ticket obligation on
+//!   F-M1-008**: because the lease binds to the connecting peer,
+//!   `eltanin run` must arrange for the workload process itself to
+//!   connect — a CLI that connects and then forks the workload would
+//!   bind the lease to the CLI, which then exits.
 //! - **`ErrorCode::UnknownOperation` is unreachable from this crate.**
 //!   `eltanin_protocol::framing::decode_request` collapses an
 //!   unrecognized operation into `ProtocolError::Malformed`; a client
@@ -64,8 +71,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod authz;
 pub mod config;
 pub mod connection;
+pub mod daemon;
 pub mod handler;
 pub mod listener;
 pub mod peer;
