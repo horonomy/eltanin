@@ -46,3 +46,43 @@ fn eltanin_cli_source_never_names_a_shell_interpreter_or_system_call() {
          never a shell — found: {violations:?}"
     );
 }
+
+fn find_spawn_call_sites(dir: &Path, sites: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            find_spawn_call_sites(&path, sites);
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if contents.contains(".spawn(") {
+            sites.push(path.display().to_string());
+        }
+    }
+}
+
+/// "Never start the workload before an observed `LeaseGranted`"
+/// (HORO-823's security requirement) is provable exactly because
+/// there is exactly one `Command::spawn` call site in this crate, and
+/// it's textually and control-flow-wise inside `launch::run`'s
+/// `LeaseGranted` match arm — not because of an injected `Spawner`
+/// seam production code doesn't otherwise need.
+#[test]
+fn there_is_exactly_one_command_spawn_call_site() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sites = Vec::new();
+    find_spawn_call_sites(&src, &mut sites);
+    assert_eq!(
+        sites,
+        vec![src.join("launch.rs").display().to_string()],
+        "expected exactly one Command::spawn call site, in launch.rs — found: {sites:?}"
+    );
+}
