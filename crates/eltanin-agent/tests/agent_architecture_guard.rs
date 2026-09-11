@@ -70,9 +70,17 @@ fn code_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn is_authz_file(path: &Path) -> bool {
-    path.components()
-        .any(|c| c.as_os_str() == PRODUCT_LOGIC_DIR)
+/// `true` only for a file directly under `src/authz/` — anchored to the
+/// *first* path component under `src/`, not merely "some component of
+/// this path is named `authz` anywhere." An unanchored `.any()` over
+/// every component would also exempt e.g. a hypothetical
+/// `src/transport/authz/leak.rs`, which is not the one named module this
+/// test's exemption is supposed to cover.
+fn is_authz_file(path: &Path, src_dir: &Path) -> bool {
+    path.strip_prefix(src_dir)
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .is_some_and(|first| first.as_os_str() == PRODUCT_LOGIC_DIR)
 }
 
 #[test]
@@ -85,7 +93,10 @@ fn agent_source_never_names_policy_or_lease_evaluation_logic_outside_authz() {
         "expected to find eltanin-agent source files to scan"
     );
 
-    let transport_files: Vec<&PathBuf> = files.iter().filter(|f| !is_authz_file(f)).collect();
+    let transport_files: Vec<&PathBuf> = files
+        .iter()
+        .filter(|f| !is_authz_file(f, &src_dir))
+        .collect();
 
     // The exemption is a fixed hole, not an escape hatch: every named
     // transport file must actually have been scanned below. A file
@@ -110,7 +121,7 @@ fn agent_source_never_names_policy_or_lease_evaluation_logic_outside_authz() {
 
     let authz_dir = src_dir.join(PRODUCT_LOGIC_DIR);
     assert!(
-        authz_dir.is_dir() && files.iter().any(|f| is_authz_file(f)),
+        authz_dir.is_dir() && files.iter().any(|f| is_authz_file(f, &src_dir)),
         "expected a non-empty src/authz/ module — HORO-840's policy/lease integration must live \
          in the one named, auditable place this test exempts, not scattered elsewhere"
     );
