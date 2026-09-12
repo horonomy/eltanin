@@ -101,7 +101,20 @@ Stop and ask (do not decide silently) when a change would:
 Ordinary implementation, test, docs, and review decisions within an
 already-accepted design do not require stopping.
 
-## 6. Other coding agents (Codex, etc.)
+## 6. Privileged enforcement testing — mandatory pre-test gate
+
+Before running any test that attaches cgroup/eBPF/device-node
+enforcement or revoke, or any physical-hardware adversarial/E2E
+scenario (Linux/NVIDIA or Apple Silicon), read and satisfy
+[`docs/qa/privileged-enforcement-testing.md`](../docs/qa/privileged-enforcement-testing.md)
+in full. Its core rule: **only a new disposable workload created for
+the test may be denied/killed/constrained — never the orchestrator,
+the current agent session, another agent/sub-agent, the controlling
+shell/tmux/SSH session, or any other pre-existing process.** This
+governs HORO-841, HORO-844, HORO-790, and HORO-1015 at minimum, and
+applies by default to any future privileged-enforcement test.
+
+## 7. Other coding agents (Codex, etc.)
 
 [`AGENTS.md`](../AGENTS.md) at the repo root is a thin adapter pointing
 back to the same canonical docs this file points to. Do not fork policy
