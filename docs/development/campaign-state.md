@@ -56,10 +56,14 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-810 | Versioned MVP 1.0 QA/Security test plan (`docs/qa/test-plans/mvp-1.0.md` — 10-layer quality model, North Star invariant→test-file map, honest hardware-evidence section), `docs/qa/reports/TEMPLATE.md`, `crates/eltanin-cli/tests/qa_governance_sync.rs` (4 mechanical drift-guard tests extending the `docs_sync.rs` pattern); 4 review-driven fixes (H1 dangling-link, M1 tokenizer prefix-escape, M2 path-escape, M3 `.md`-vs-`.yaml` FVR reconciliation) | #31 | `e1493a4` |
 | HORO-810 | campaign-state.md sync after PR #31 | #32 | `1de70f3` |
 | HORO-811 | Track B scenario index (`docs/qa/e2e/README.md` — scenario manifest, per-Feature coverage table, release-gate notes), North Star assertions table added to `docs/qa/e2e/F-M1-008-controlled-launch.md`, `.github/workflows/ci.yml` split into named Track B (`canonical_e2e`) then Track A (`--workspace`) steps, `qa_governance_sync.rs` extended with 4 Track B drift-guard tests; 5 review-driven fixes (H1 wrong-crate citation, M2 one-directional→set-equality coverage checks, M3 `../`-escape guard, M4 `.rs`-link existence check, L5 magic-number removal) | #33 | `660c87e` |
+| HORO-811 | campaign-state.md sync after PR #33 | #34 | `d8bc5a5` |
+| HORO-781 | Adopted Apache License 2.0 (founder decision) — `LICENSE`/`NOTICE`, `license.workspace = true` on every crate, `deny.toml` comment reconciled, `README.md`/`bootstrap-reconciliation.md` updated (historical "License (MAJOR DECISION)" note left as written, dated resolution pointer added below it) | #35 | `3e44a16` |
+| HORO-790 | Hardware-validation runbook (`docs/development/hardware-validation-runbook.md`) for F-M1-002/HORO-785, F-M1-007/HORO-789, and this ticket — GPU/kernel/driver/capability requirements, own-workstation-vs-rented-hardware guidance, exact setup/test/cleanup commands, expected evidence; `scripts/hardware-preflight-check.sh` and `scripts/hardware-evidence-capture.sh` (read-mostly, shellcheck-clean automation). Preparation only — no hardware provisioned, no evidence exists, no AC weakened | #36 | `dcb5036` |
 
-Current `main` HEAD: `660c87e`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
-F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811
-(governance) are done.
+Current `main` HEAD: `dcb5036`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811/781
+(governance + license) are done. HORO-790's hardware-validation runbook
+is ready and waiting on the founder to provide real hardware.
 
 ## Active worktrees
 
@@ -92,13 +96,14 @@ subtask work remains identified for either as of this pass.
 ## Required human decisions outstanding
 
 1. Bare-metal Linux/NVIDIA hardware provisioning for F-M1-002/007/HORO-841/
-   MVP 1.0 READY (not yet formally raised as its own escalation — next
-   action once hardware-free Feature work is further along).
+   MVP 1.0 READY. A complete setup/test/cleanup runbook is ready
+   ([`docs/development/hardware-validation-runbook.md`](hardware-validation-runbook.md))
+   so the founder's actual provisioning decision is the only remaining
+   step — see that runbook's §1 for the own-workstation-vs-rented-hardware
+   recommendation.
 
 License choice for `horonomy/eltanin` (HORO-781) was resolved
-2026-09-12: **Apache License 2.0**, founder decision. See "Next planned
-action" below (the Completed table above gets its HORO-781 row in the
-usual campaign-state follow-up PR, once this PR's merge commit exists).
+2026-09-12: **Apache License 2.0**, founder decision (PR #35, `3e44a16`).
 
 ## Hardware evidence state
 
@@ -124,6 +129,16 @@ gated yet since no Feature work has started.
   name against the Jira Component table on HORO-772/780 and any Feature
   ticket that names a "Primary package" path — that's the authoritative
   source, not a Task-ticket's own initial proposal.**
+- `crates/eltanin-cli/tests/launch_lifecycle.rs`'s
+  `a_renewal_denial_does_not_terminate_the_workload_early` failed once
+  on real GitHub Actions CI (PR #35) with a `sleep 1.7s` vs. 2s
+  renewal-deadline margin — passed clean on an immediate re-run,
+  confirming it's a timing-margin-sensitive flake on a shared CI
+  runner, not a regression (that PR touched zero Rust source). Not
+  fixed here — out of scope for a license PR — but worth a future
+  ticket if it recurs: widen the margin or make the assertion
+  timing-independent (e.g. assert on the renewal count/sequence rather
+  than wall-clock-adjacent exit-code timing).
 
 ## Next planned action
 
@@ -201,40 +216,44 @@ under HORO-772 that doesn't require bare-metal hardware (HORO-814/819/
 820/810/811) is done.
 
 **HORO-781 (license) is resolved.** Founder decision 2026-09-12: Apache
-License 2.0. `LICENSE` now carries the full unmodified Apache-2.0 text;
-`NOTICE` carries the copyright line (`Copyright 2026 Horonom`); the root
-`Cargo.toml`'s `[workspace.package]` and every crate's `Cargo.toml` now
-declare `license = "Apache-2.0"` (via `license.workspace = true`);
-`deny.toml`'s `[licenses.private]` comment updated to explain `ignore =
-true` is now about `publish = false`, not an undecided license;
-`README.md`'s License section states the license plainly.
-`bootstrap-reconciliation.md`'s original "License (MAJOR DECISION)" note
-is left as written (it accurately recorded an open decision at the time)
-with a dated resolution pointer added directly below it — historical
-record, not rewritten.
+License 2.0 (PR #35, `3e44a16`). `LICENSE` now carries the full
+unmodified Apache-2.0 text; `NOTICE` carries the copyright line
+(`Copyright 2026 Horonom`); the root `Cargo.toml`'s `[workspace.package]`
+and every crate's `Cargo.toml` declare `license = "Apache-2.0"` (via
+`license.workspace = true`); `deny.toml`'s `[licenses.private]` comment
+is reconciled; `README.md`'s License section states the license
+plainly. `bootstrap-reconciliation.md`'s original "License (MAJOR
+DECISION)" note is left as written (accurate historical record at the
+time) with a dated resolution pointer added below it, not rewritten.
 
-**What remains — one blocker, not decidable by this campaign
-autonomously:**
+**The HORO-790 hardware-validation runbook is ready** (PR #36,
+`dcb5036`) — see
+[`docs/development/hardware-validation-runbook.md`](hardware-validation-runbook.md).
+Founder direction: obtain real hardware evidence rather than waive or
+fabricate it, with the complete package prepared *before* provisioning
+so the paid/physical execution window is short. The runbook covers
+GPU/kernel/driver/capability requirements, the own-workstation-vs-
+rented-hardware decision (a genuine bare-metal workstation is
+recommended over most "cloud GPU" products, which are virtualized and
+do not satisfy HORO-790's AC), exact setup/test/cleanup commands, and
+two read-mostly automation scripts. It is preparation only — no
+hardware has been provisioned and no hardware evidence exists; nothing
+in it is fabricated or simulated execution output, and no Acceptance
+Criteria on HORO-785/789/841/790 have been weakened or reinterpreted.
+Jira comments (not status transitions) were added to HORO-790, HORO-785,
+HORO-789, and HORO-841 pointing at it.
 
-**Bare-metal Linux/NVIDIA hardware provisioning** (a paid external
-resource — see `.claude/CLAUDE.md`'s "Escalation" section). Blocks:
-F-M1-002/HORO-785 (NVIDIA protected resource discovery), F-M1-007/
-HORO-789 (Linux protected-device enforcement), HORO-790 (MVP 1.0 READY
-hardware proof), and by extension the final MVP 1.0 release gate in
-HORO-772. No hardware-free subtask work remains identified for either
-Feature — see "Dependency blockers" and "Required human decisions
-outstanding" above.
-
-The founder has stated intent to obtain real hardware evidence (not
-waive or fabricate it) and asked for a complete hardware-validation
-runbook prepared *before* provisioning, so the paid/physical execution
-window is as short as possible. This session is preparing that runbook
-as a separate, immediately following piece of work — see the next
-Completed-table entry once it lands. It is preparation only: no
-hardware has been provisioned and no hardware evidence exists yet;
-nothing in it is fabricated or simulated execution output.
+**Both HORO-781 and this runbook are now done. All hardware-independent
+MVP 1.0 work, all hardware-free governance Tasks, and the license
+decision are complete.** The only remaining blocker in this campaign's
+entire scope is the founder actually providing a real bare-metal
+Linux/NVIDIA environment (own workstation strongly recommended per the
+runbook's §1, or a genuinely dedicated — not virtualized-cloud —
+physical server). There is no further hardware-free implementation,
+governance, or documentation work identified as of this pass.
 
 A fresh session resuming this campaign should raise hardware
-provisioning to the founder (pointing at the runbook once it exists)
-rather than search for further autonomous work — there is none left in
-scope until the founder provides a real hardware environment.
+provisioning to the founder (pointing at the runbook) rather than
+search for further autonomous work. Once a real environment is
+provided, follow the runbook directly — it is written to be executed,
+not re-derived.
