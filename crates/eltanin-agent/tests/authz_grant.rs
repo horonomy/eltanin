@@ -46,7 +46,7 @@ fn an_authorized_request_is_granted_end_to_end_with_the_fake_backend() {
     let peer = TestPeer::fresh(1000, "sha256:trusted");
     let handler = handler_with(
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce, Capability::Revoke]),
+        backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]),
     );
 
     let response = handler.handle(&lease_request(), &peer.context());
@@ -63,7 +63,7 @@ fn a_request_denied_by_policy_cannot_mint_a_lease() {
     // Policy only allows uid 1000; this peer is uid 2000.
     let handler = handler_with(
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
     );
 
     let response = handler.handle(&lease_request(), &peer.context());
@@ -81,7 +81,7 @@ fn an_empty_policy_denies_every_request() {
     let peer = TestPeer::fresh(1000, "sha256:trusted");
     let handler = handler_with(
         deny_all_policy(),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
     );
 
     let response = handler.handle(&lease_request(), &peer.context());
@@ -100,7 +100,7 @@ fn a_non_authorizable_peer_is_denied_never_evaluated_against_policy() {
     // Would be allowed if `authorizable()` were bypassed.
     let handler = handler_with(
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
     );
 
     let response = handler.handle(&lease_request(), &peer.inconsistent_context());

@@ -18,10 +18,10 @@ fn sample_resource() -> ProtectedResource {
             local_id: "fake-gpu-0".to_string(),
         },
         capabilities: ResourceCapabilities::new([
-            Capability::Discover,
-            Capability::Observe,
+            Capability::DiscoverResource,
+            Capability::ObserveResource,
             Capability::Authorize,
-            Capability::Enforce,
+            Capability::DeviceEnforce,
         ]),
     }
 }
@@ -91,15 +91,15 @@ fn arbitrary_vendor_tag_round_trips_without_data_loss() {
 
 #[test]
 fn capability_check_reflects_actual_support_not_assumption() {
-    let caps = ResourceCapabilities::new([Capability::Discover, Capability::Observe]);
-    assert!(caps.supports(Capability::Discover));
-    assert!(!caps.supports(Capability::Enforce));
+    let caps = ResourceCapabilities::new([Capability::DiscoverResource, Capability::ObserveResource]);
+    assert!(caps.supports(Capability::DiscoverResource));
+    assert!(!caps.supports(Capability::DeviceEnforce));
 }
 
 #[test]
 fn enforcement_result_unsupported_is_distinct_from_allowed() {
     let downgraded = EnforcementResult::Unsupported {
-        capability: Capability::Enforce,
+        capability: Capability::DeviceEnforce,
     };
     let json = serde_json::to_string(&downgraded).unwrap();
     assert_eq!(json, r#"{"outcome":"unsupported","capability":"enforce"}"#);

@@ -36,7 +36,7 @@ fn make_handler(instance: &str, ttl: Duration) -> AuthorizationHandler {
     AuthorizationHandler::new(
         IssuerInstanceId::new(instance),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce, Capability::Revoke]),
+        backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]),
         FixedClock::new(),
         Arc::new(NullSink),
         &AuthorizationConfig::new(ttl).unwrap(),
@@ -102,7 +102,7 @@ fn an_expired_lease_is_pruned_and_no_longer_releasable() {
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("instance-a"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
         Arc::clone(&clock) as Arc<dyn eltanin_agent::authz::Clock>,
         Arc::new(NullSink),
         &AuthorizationConfig::new(Duration::from_secs(5)).unwrap(),
@@ -130,7 +130,7 @@ fn a_request_beyond_max_outstanding_leases_fails_safely_without_granting() {
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("instance-a"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
         FixedClock::new(),
         Arc::new(NullSink),
         &AuthorizationConfig::new(Duration::from_secs(60))
@@ -165,7 +165,7 @@ fn concurrent_requests_never_overshoot_max_outstanding_leases() {
     let handler = Arc::new(AuthorizationHandler::new(
         IssuerInstanceId::new("instance-a"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
         FixedClock::new(),
         Arc::new(NullSink),
         &AuthorizationConfig::new(Duration::from_secs(60))
@@ -199,7 +199,7 @@ fn an_expired_leases_slot_is_reclaimed_by_prune_before_the_capacity_check() {
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("instance-a"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
         Arc::clone(&clock) as Arc<dyn eltanin_agent::authz::Clock>,
         Arc::new(NullSink),
         &AuthorizationConfig::new(Duration::from_secs(5))

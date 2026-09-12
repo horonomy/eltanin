@@ -109,18 +109,43 @@ pub struct ResourceIdentity {
     pub local_id: String,
 }
 
-/// A capability a backend may support for a given resource. Mirrors the
-/// backend capability set named in HORO-784 (DISCOVER/OBSERVE/ATTRIBUTE/
-/// AUTHORIZE/ENFORCE/REVOKE/ATTEST).
+/// A capability a backend may support for a given resource.
+///
+/// Nine independently-evaluated semantic dimensions, per the MVP 1.0
+/// Apple Silicon scope amendment (HORO-1011) — the original HORO-784
+/// set (DISCOVER/OBSERVE/ATTRIBUTE/AUTHORIZE/ENFORCE/REVOKE/ATTEST)
+/// conflated "the backend can launch/observe a workload" with "the
+/// backend can enforce/revoke device-level access to it," which no
+/// longer holds once a backend (e.g. an Apple Silicon adapter) can be
+/// `Supported` on the former while remaining `Unsupported` on the
+/// latter. `ControlledLaunch` supported must never be read as implying
+/// `DeviceEnforce`/`DeviceRevoke` supported — see
+/// `docs/adr/0006-cross-accelerator-capability-and-memory-model.md`.
+///
+/// Declaration order is load-bearing: [`ResourceCapabilities`] stores
+/// these as `BTreeMap` keys, so this order fixes serialized key order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
-    Discover,
-    Observe,
-    Attribute,
+    /// Can the backend enumerate this resource exists at all.
+    DiscoverResource,
+    /// Can the backend observe this resource's own state (e.g. utilization).
+    ObserveResource,
+    /// Can the backend observe a workload running against this resource.
+    ObserveWorkload,
+    /// Can the backend attribute an observed workload to a requester.
+    AttributeWorkload,
+    /// Can the backend evaluate an authorization decision for this resource.
     Authorize,
-    Enforce,
-    Revoke,
+    /// Can the backend launch a workload under a controlled/observed
+    /// context. Functional capability only — never implies device-level
+    /// enforcement or revoke.
+    ControlledLaunch,
+    /// Can the backend deny/kill access at the device level.
+    DeviceEnforce,
+    /// Can the backend revoke already-granted device-level access.
+    DeviceRevoke,
+    /// Can the backend produce a verifiable attestation of the above.
     Attest,
 }
 
@@ -184,7 +209,7 @@ pub struct ComputeRequest {
 /// The outcome of attempting to enforce an authorization decision at the
 /// device/backend layer. `Unsupported` is a distinct, first-class
 /// variant — see the module doc and HORO-784's AC: a backend that lacks
-/// `Capability::Enforce` must report `Unsupported`, never silently
+/// `Capability::DeviceEnforce` must report `Unsupported`, never silently
 /// report `Allowed` as if enforcement had actually happened.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]

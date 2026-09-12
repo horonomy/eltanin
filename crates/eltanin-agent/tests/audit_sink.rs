@@ -43,7 +43,7 @@ fn a_granted_and_released_lease_produce_correlated_distinct_records() {
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("i"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce, Capability::Revoke]),
+        backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]),
         FixedClock::new(),
         sink,
         &AuthorizationConfig::new(Duration::from_secs(60)).unwrap(),
@@ -81,7 +81,7 @@ fn a_non_authorizable_peer_record_still_carries_the_discriminating_consistency()
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("i"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
         FixedClock::new(),
         sink,
         &AuthorizationConfig::new(Duration::from_secs(60)).unwrap(),
@@ -123,7 +123,7 @@ fn an_audit_write_failure_never_changes_the_already_computed_response() {
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("i"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce]),
+        backend_with_resource(&[Capability::DeviceEnforce]),
         FixedClock::new(),
         Arc::clone(&sink) as Arc<dyn eltanin_agent::authz::event::EventSink>,
         &AuthorizationConfig::new(Duration::from_secs(60)).unwrap(),

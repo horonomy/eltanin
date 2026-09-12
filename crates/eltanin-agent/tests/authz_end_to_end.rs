@@ -87,7 +87,7 @@ fn a_real_peer_over_a_real_socket_is_granted_a_lease_via_the_fake_backend() {
     let backend = Arc::new(FakeBackend::new());
     backend.insert(ProtectedResource {
         identity: resource_identity(),
-        capabilities: ResourceCapabilities::new([Capability::Enforce, Capability::Revoke]),
+        capabilities: ResourceCapabilities::new([Capability::DeviceEnforce, Capability::DeviceRevoke]),
     });
     let handler = Arc::new(AuthorizationHandler::new(
         IssuerInstanceId::new("end-to-end-instance"),

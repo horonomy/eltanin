@@ -30,7 +30,7 @@ fn lease_request() -> ClientRequest {
 
 #[test]
 fn a_same_peer_second_request_lease_mints_an_independent_lease_and_the_old_one_stays_releasable() {
-    let backend = backend_with_resource(&[Capability::Enforce, Capability::Revoke]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]);
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("test-instance"),
         allow_policy_for_uid(1000),

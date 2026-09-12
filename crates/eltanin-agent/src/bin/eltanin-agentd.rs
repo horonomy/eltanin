@@ -88,13 +88,13 @@ fn run() -> Result<(), String> {
     // nothing to `enforce` on unless something seeds it — every resource
     // this policy names is seeded here, with the capabilities a real
     // backend would need for the authorization path to actually work
-    // end to end (`Capability::Enforce`/`Revoke`; `discover`/`observe`
+    // end to end (`Capability::DeviceEnforce`/`Revoke`; `discover`/`observe`
     // are always supported by `FakeBackend` regardless).
     let backend = Arc::new(FakeBackend::new());
     for resource in policy.resources() {
         backend.insert(ProtectedResource {
             identity: resource,
-            capabilities: ResourceCapabilities::new([Capability::Enforce, Capability::Revoke]),
+            capabilities: ResourceCapabilities::new([Capability::DeviceEnforce, Capability::DeviceRevoke]),
         });
     }
 

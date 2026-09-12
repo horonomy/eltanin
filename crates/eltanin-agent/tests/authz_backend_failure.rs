@@ -37,7 +37,7 @@ fn granted_lease_id(response: &AgentResponse) -> eltanin_core::lease::LeaseId {
 
 #[test]
 fn a_scripted_backend_denial_never_grants_a_lease() {
-    let backend = backend_with_resource(&[Capability::Enforce]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce]);
     backend.script_enforcement(
         resource_identity(),
         EnforcementResult::Denied {
@@ -66,7 +66,7 @@ fn a_scripted_backend_denial_never_grants_a_lease() {
 
 #[test]
 fn a_scripted_backend_error_never_grants_a_lease_and_compensates() {
-    let backend = backend_with_resource(&[Capability::Enforce]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce]);
     backend.script_enforcement(
         resource_identity(),
         EnforcementResult::Error {
@@ -112,7 +112,7 @@ fn a_scripted_backend_error_never_grants_a_lease_and_compensates() {
 
 #[test]
 fn resource_disappearing_mid_session_fails_safely() {
-    let backend = backend_with_resource(&[Capability::Enforce]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce]);
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("test-instance"),
         allow_policy_for_uid(1000),
@@ -141,7 +141,7 @@ fn releasing_one_of_two_leases_on_the_same_resource_does_not_tear_down_the_other
     // reachable state) both hold a lease on the same resource. Release
     // by one must not call backend.revoke while the other lease is
     // still outstanding.
-    let backend = backend_with_resource(&[Capability::Enforce, Capability::Revoke]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]);
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("test-instance"),
         allow_policy_for_uid(1000),
@@ -212,7 +212,7 @@ fn a_release_racing_a_grant_on_the_same_resource_never_tears_down_the_new_grant(
     // did not follow b's grant in a way that would leave b's lease
     // pointing at torn-down enforcement — b's own subsequent release
     // still triggers its own, second revoke call.
-    let backend = backend_with_resource(&[Capability::Enforce, Capability::Revoke]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]);
     let handler = AuthorizationHandler::new(
         IssuerInstanceId::new("test-instance"),
         allow_policy_for_uid(1000),
@@ -267,7 +267,7 @@ fn a_release_racing_a_grant_on_the_same_resource_never_tears_down_the_new_grant(
 
 #[test]
 fn a_permission_denied_backend_error_is_reported_as_internal_not_a_policy_denial() {
-    let backend = backend_with_resource(&[Capability::Enforce]);
+    let backend = backend_with_resource(&[Capability::DeviceEnforce]);
     backend.script_enforcement(
         resource_identity(),
         // FakeBackend's script only pins EnforcementResult, not

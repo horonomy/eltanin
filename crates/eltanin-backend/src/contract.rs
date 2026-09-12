@@ -88,7 +88,7 @@ pub trait ComputeBackend: Send + Sync {
     /// (F-M1-004) has already been made by the time this is called. It
     /// only reports whether the backend could carry out or verify the
     /// already-decided action. A backend lacking
-    /// [`Capability::Enforce`] must return
+    /// [`Capability::DeviceEnforce`] must return
     /// `Ok(EnforcementResult::Unsupported { .. })`, never
     /// `Ok(EnforcementResult::Allowed)` — see [`EnforcementResult`]'s own
     /// docs on why capability downgrade must never masquerade as
@@ -102,12 +102,12 @@ pub trait ComputeBackend: Send + Sync {
     fn enforce(&self, request: &ComputeRequest) -> Result<EnforcementResult, BackendError>;
 
     /// Revoke previously granted access to `resource`, if this backend
-    /// has [`Capability::Revoke`].
+    /// has [`Capability::DeviceRevoke`].
     ///
     /// # Errors
     ///
     /// Returns [`BackendError::Unsupported`] if the backend lacks
-    /// [`Capability::Revoke`], or another [`BackendError`] variant for
+    /// [`Capability::DeviceRevoke`], or another [`BackendError`] variant for
     /// other revocation failures.
     fn revoke(&self, resource: &ResourceIdentity) -> Result<EnforcementResult, BackendError>;
 }
