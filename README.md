@@ -62,5 +62,5 @@ See [`SECURITY.md`](SECURITY.md) for the vulnerability reporting process.
 
 ## License
 
-See [`LICENSE`](LICENSE) — **pending founder decision**, tracked in
-[HORO-781](https://lightning-dust-mite.atlassian.net/browse/HORO-781).
+Apache License 2.0 — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+Founder decision, [HORO-781](https://lightning-dust-mite.atlassian.net/browse/HORO-781).

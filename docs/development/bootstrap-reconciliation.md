@@ -156,6 +156,11 @@ code. All nine Features start from zero:
    boundary decision per campaign rules — needs Bryant's choice
    (e.g. Apache-2.0, MIT, or a dual-license/open-core split ahead of the
    future `horonomy/eltanin-enterprise`). Nothing else is blocked by this.
+
+   > **Resolved 2026-09-12.** Bryant chose Apache License 2.0. This
+   > paragraph is left as written at reconciliation time — it accurately
+   > records that the decision was open then — see
+   > `campaign-state.md`'s Completed table for the resolving PR/commit.
 2. **Bare-metal Linux/NVIDIA hardware access (MAJOR DECISION, to be
    raised separately).** F-M1-002, F-M1-007, HORO-841 (hard security
    gate), and the final MVP 1.0 READY gate all require real bare-metal

@@ -91,12 +91,14 @@ subtask work remains identified for either as of this pass.
 
 ## Required human decisions outstanding
 
-1. License choice for `horonomy/eltanin` (HORO-781) — repo is public with
-   a placeholder LICENSE; `deny.toml` exempts our own unpublished crates
-   from the license check in the meantime so CI isn't blocked by this.
-2. Bare-metal Linux/NVIDIA hardware provisioning for F-M1-002/007/HORO-841/
+1. Bare-metal Linux/NVIDIA hardware provisioning for F-M1-002/007/HORO-841/
    MVP 1.0 READY (not yet formally raised as its own escalation — next
    action once hardware-free Feature work is further along).
+
+License choice for `horonomy/eltanin` (HORO-781) was resolved
+2026-09-12: **Apache License 2.0**, founder decision. See "Next planned
+action" below (the Completed table above gets its HORO-781 row in the
+usual campaign-state follow-up PR, once this PR's merge commit exists).
 
 ## Hardware evidence state
 
@@ -194,24 +196,41 @@ that can be implemented and QA-verified without physical hardware
 under HORO-772 that doesn't require bare-metal hardware (HORO-814/819/
 820/810/811) is done.
 
-**What remains — both require a founder decision, neither is decidable
-by this campaign autonomously:**
+**HORO-781 (license) is resolved.** Founder decision 2026-09-12: Apache
+License 2.0. `LICENSE` now carries the full unmodified Apache-2.0 text;
+`NOTICE` carries the copyright line (`Copyright 2026 Horonom`); the root
+`Cargo.toml`'s `[workspace.package]` and every crate's `Cargo.toml` now
+declare `license = "Apache-2.0"` (via `license.workspace = true`);
+`deny.toml`'s `[licenses.private]` comment updated to explain `ignore =
+true` is now about `publish = false`, not an undecided license;
+`README.md`'s License section states the license plainly.
+`bootstrap-reconciliation.md`'s original "License (MAJOR DECISION)" note
+is left as written (it accurately recorded an open decision at the time)
+with a dated resolution pointer added directly below it — historical
+record, not rewritten.
 
-1. **Bare-metal Linux/NVIDIA hardware provisioning** (a paid external
-   resource — see `.claude/CLAUDE.md`'s "Escalation" section). Blocks:
-   F-M1-002/HORO-785 (NVIDIA protected resource discovery), F-M1-007/
-   HORO-789 (Linux protected-device enforcement), HORO-790 (MVP 1.0 READY
-   hardware proof), and by extension the final MVP 1.0 release gate in
-   HORO-772. No hardware-free subtask work remains identified for either
-   Feature — see "Dependency blockers" and "Required human decisions
-   outstanding" above.
-2. **LICENSE choice for the public `horonomy/eltanin` repo** (HORO-781).
-   The repo currently ships a placeholder LICENSE; `deny.toml` exempts
-   this workspace's own unpublished crates from the license check in the
-   meantime so CI isn't blocked, but HORO-781 stays intentionally
-   `In Progress` pending this choice.
+**What remains — one blocker, not decidable by this campaign
+autonomously:**
 
-Neither blocker has a hardware-free workaround. A fresh session resuming
-this campaign should raise both to the founder rather than search for
-further autonomous work — there is none left in scope until one or both
-are resolved.
+**Bare-metal Linux/NVIDIA hardware provisioning** (a paid external
+resource — see `.claude/CLAUDE.md`'s "Escalation" section). Blocks:
+F-M1-002/HORO-785 (NVIDIA protected resource discovery), F-M1-007/
+HORO-789 (Linux protected-device enforcement), HORO-790 (MVP 1.0 READY
+hardware proof), and by extension the final MVP 1.0 release gate in
+HORO-772. No hardware-free subtask work remains identified for either
+Feature — see "Dependency blockers" and "Required human decisions
+outstanding" above.
+
+The founder has stated intent to obtain real hardware evidence (not
+waive or fabricate it) and asked for a complete hardware-validation
+runbook prepared *before* provisioning, so the paid/physical execution
+window is as short as possible. This session is preparing that runbook
+as a separate, immediately following piece of work — see the next
+Completed-table entry once it lands. It is preparation only: no
+hardware has been provisioned and no hardware evidence exists yet;
+nothing in it is fabricated or simulated execution output.
+
+A fresh session resuming this campaign should raise hardware
+provisioning to the founder (pointing at the runbook once it exists)
+rather than search for further autonomous work — there is none left in
+scope until the founder provides a real hardware environment.
