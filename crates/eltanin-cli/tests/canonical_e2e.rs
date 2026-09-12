@@ -17,8 +17,9 @@
 //! file — it remains the deeper internal-branch coverage; this file is
 //! the shallow, user-facing, whole-system journey.
 //!
-//! Linux-only (this repo's `ubuntu-latest` CI runner; MVP 1.0 is
-//! bare-metal-Linux-only per `README.md`) — mirrors
+//! Linux and macOS (this repo's `ubuntu-latest` and `macos-latest` CI
+//! runners; widened from Linux-only by HORO-1013, which added a real
+//! macOS peer-credential/workload-identity collector) — mirrors
 //! `crates/eltanin-agent/tests/authz_end_to_end.rs`'s own file-level
 //! gate. Requires the workspace to already be built (`cargo build
 //! --workspace` or `cargo test --workspace`, both of which CI always
@@ -34,7 +35,7 @@
 //! makes no workload-executable-identity claim: only uid is varied
 //! between the ALLOW and DENY legs.
 
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 
 use std::fs;
 use std::io::Read;
@@ -212,10 +213,13 @@ impl Agentd {
         let policy_path = write_policy(dir, allow_uid);
         let socket_path = dir.join("agent.sock");
         // `sun_path` (the kernel struct backing a Unix socket address) is
-        // ~107 bytes — same guard as
+        // ~107 bytes on Linux but only ~103 on macOS (`sockaddr_un` is
+        // 104 bytes there vs. Linux's 108) — same guard as
         // `crates/eltanin-agent/tests/support/mod.rs::temp_socket_path`,
         // needed here too since this path is one segment longer
         // (`base/scenario-n/agent.sock` vs. that file's `base/tag-n.sock`).
+        // The `< 100` bound below is chosen to clear both platforms'
+        // limits with margin, not just Linux's.
         assert!(
             socket_path.as_os_str().len() < 100,
             "[{SCENARIO_ID}] socket path too long for sun_path: {}",
