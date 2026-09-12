@@ -114,15 +114,24 @@ pre-existing process. Governs HORO-841/844/790/1015 at minimum.
 | HORO-790 | Hardware-validation runbook (`docs/development/hardware-validation-runbook.md`) for F-M1-002/HORO-785, F-M1-007/HORO-789, and this ticket — GPU/kernel/driver/capability requirements, own-workstation-vs-rented-hardware guidance, exact setup/test/cleanup commands, expected evidence; `scripts/hardware-preflight-check.sh` and `scripts/hardware-evidence-capture.sh` (read-mostly, shellcheck-clean automation). Preparation only — no hardware provisioned, no evidence exists, no AC weakened | #36 | `dcb5036` |
 | HORO-1018 | Privileged-enforcement-testing blast-radius governance (`docs/qa/privileged-enforcement-testing.md`) — blast-radius model, 12-point abort-on-failure preflight, 4-level safe escalation, no-spawn-then-restrict-race requirement, collateral-damage assertion checklist; `.claude/CLAUDE.md` §6 gate added; additive Jira comments on HORO-841/844/790/1015 | #38 | `1923cad` |
 | HORO-1011 | F-M1-010 subtask: cross-accelerator capability/memory model — `Capability` expanded 5→9 explicit dimensions (adds `ObserveWorkload`/`ControlledLaunch`, renames the rest), `ResourceCapabilities` reshaped to a `Capability`→`SupportState` map (Supported/Partial/Unsupported/NotEvaluated), new `AcceleratorMemory` (Dedicated/Unified/NotReportable) on `ProtectedResource`; [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md); design pre-reviewed by opus-architect; one real bug (stale `"enforce"` wire literal) caught by CI and fixed | #39 | `617befd` |
+| HORO-1012 | F-M1-010 subtask: Apple Silicon Metal backend (`crates/eltanin-apple`) — `objc2`/`objc2-metal`-based device discovery (`AppleBackend`), `DeviceSnapshot`→`ProtectedResource` capability/memory mapping honesty (only `DiscoverResource` fully `Supported`; `enforce`/`revoke` unconditionally `Unsupported`), a single scoped `#[allow(unsafe_code)]` real Metal compute probe verified on physical Apple Silicon; [ADR 0007](../adr/0007-apple-silicon-metal-backend.md) | #41 | `ff5ff58` |
+| HORO-1012 | Fix compute-probe non-macOS error's capability claim + correct ADR 0007's per-crate license claim (review-driven follow-up) | #42 | `a3a39de` |
 
-Current `main` HEAD: `617befd`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+Current `main` HEAD: `a3a39de`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
 F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811/781/1018
 (governance + license) are done. HORO-1011 (Apple Silicon capability/
-memory model) is done. HORO-790's hardware-validation runbook is ready
-and waiting on the founder to provide real Linux/NVIDIA hardware.
-HORO-1012 (Metal backend) and HORO-1013 (macOS platform adapter) are
-next, unblocked and may run in parallel per the Apple dependency graph
-above.
+memory model) and HORO-1012 (Apple Silicon Metal backend) are done.
+HORO-790's hardware-validation runbook is ready and waiting on the
+founder to provide real Linux/NVIDIA hardware. HORO-1013 (macOS
+platform/IPC/controlled-launch adapter) is in progress — see "Next
+planned action" below.
+
+**Process note (found while resuming this campaign for HORO-1013):**
+this file had not been synced after HORO-1012's PRs #41/#42 merged —
+the rows above and the HEAD pointer were missing until this pass. Fixed
+here rather than left for a future sync, since a stale "next planned
+action" pointing at already-merged work would have misled the next
+resumed session.
 
 ## Active worktrees
 
@@ -153,13 +162,16 @@ hardware access (see "Dependency blockers" below) — no hardware-free
 subtask work remains identified for either as of this pass.
 
 F-M1-010 (Apple Silicon Real-Accelerator Functional Validation,
-HORO-1010): HORO-1011 (capability/memory model subtask) is Done, no
-Feature Verification Record yet (per HORO-1010's own scope, not this
-subtask's — F-M1-010 PASS requires all of HORO-1011/1012/1013/1014
-merged + Track A + Track B `B-M1-APPLE` + physical M3 Max evidence).
-HORO-1012 (Metal backend) and HORO-1013 (macOS platform adapter) are
-next — hardware-free implementation work, no physical M3 Max required
-until HORO-1015.
+HORO-1010): HORO-1011 (capability/memory model subtask) and HORO-1012
+(Metal backend subtask) are Done, no Feature Verification Record yet
+(per HORO-1010's own scope, not either subtask's — F-M1-010 PASS
+requires all of HORO-1011/1012/1013/1014 merged + Track A + Track B
+`B-M1-APPLE` + physical M3 Max evidence). HORO-1013 (macOS platform
+adapter) is in progress — hardware-free implementation work in the
+sense that no physical M3 Max provisioning is required (this session
+ran directly on real Apple Silicon hardware for local verification, but
+that is a development-environment convenience, not the HORO-1015
+hardware-evidence gate).
 
 ## Required human decisions outstanding
 
@@ -357,12 +369,13 @@ additive-history convention.
 Apple Silicon as a second real-hardware evidence class** (see "Apple
 Silicon scope amendment" above) — the campaign is no longer purely
 blocked on Linux/NVIDIA hardware. HORO-1018 (privileged-enforcement
-blast-radius governance) and HORO-1011 (capability/memory model) are
-both Done. **Next: HORO-1012 (Metal backend) and HORO-1013 (macOS
-platform/IPC/launch adapter), in separate isolated worktrees, may start
-in parallel now that HORO-1011 has merged to `main`.** HORO-1012 blocks
-HORO-1014 (native Metal fixture); HORO-1015 (physical M3 Max QA) starts
-only after HORO-1012/1013/1014 all merge.
+blast-radius governance), HORO-1011 (capability/memory model), and
+HORO-1012 (Metal backend, PRs #41/#42) are all Done. **HORO-1013 (macOS
+platform/IPC/controlled-launch adapter) is in progress** in its own
+isolated worktree, per the parallelism this dependency graph already
+allowed. HORO-1012 having merged now also unblocks HORO-1014 (native
+Metal fixture); HORO-1015 (physical M3 Max QA) starts only after
+HORO-1012/1013/1014 all merge — HORO-1013 is the one still outstanding.
 
 The Linux/NVIDIA hardware blocker (HORO-841, F-M1-002/007, HORO-790's
 E3 evidence) is unchanged and still requires the founder to provide
