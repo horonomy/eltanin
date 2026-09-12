@@ -4,8 +4,8 @@
 use eltanin_backend::contract::{BackendError, ComputeBackend};
 use eltanin_backend::fake::FakeBackend;
 use eltanin_core::resource::{
-    Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource, ResourceCapabilities,
-    ResourceIdentity, ResourceKind, ResourceVendor,
+    AcceleratorMemory, Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource,
+    ResourceCapabilities, ResourceIdentity, ResourceKind, ResourceVendor,
 };
 
 fn identity(id: &str) -> ResourceIdentity {
@@ -20,6 +20,7 @@ fn resource_with(id: &str, caps: impl IntoIterator<Item = Capability>) -> Protec
     ProtectedResource {
         identity: identity(id),
         capabilities: ResourceCapabilities::new(caps),
+        memory: AcceleratorMemory::NotReportable,
     }
 }
 
@@ -28,7 +29,7 @@ fn resource_present_is_discoverable_and_observable() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
-        [Capability::Discover, Capability::Observe],
+        [Capability::DiscoverResource, Capability::ObserveResource],
     ));
 
     let discovered = backend.discover().unwrap();
@@ -36,7 +37,7 @@ fn resource_present_is_discoverable_and_observable() {
     assert_eq!(discovered[0].identity, identity("gpu-0"));
 
     let observed = backend.observe(&identity("gpu-0")).unwrap();
-    assert!(observed.capabilities.supports(Capability::Observe));
+    assert!(observed.capabilities.supports(Capability::ObserveResource));
 }
 
 #[test]
@@ -56,7 +57,7 @@ fn backend_lacking_enforce_capability_reports_unsupported_not_allowed() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
-        [Capability::Discover, Capability::Observe],
+        [Capability::DiscoverResource, Capability::ObserveResource],
     ));
     let request = ComputeRequest {
         resource: identity("gpu-0"),
@@ -67,7 +68,7 @@ fn backend_lacking_enforce_capability_reports_unsupported_not_allowed() {
     assert_eq!(
         result,
         EnforcementResult::Unsupported {
-            capability: Capability::Enforce
+            capability: Capability::DeviceEnforce
         }
     );
 }
@@ -77,7 +78,7 @@ fn enforcement_succeeds_when_capability_present_and_no_override() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
-        [Capability::Discover, Capability::Enforce],
+        [Capability::DiscoverResource, Capability::DeviceEnforce],
     ));
     let request = ComputeRequest {
         resource: identity("gpu-0"),
@@ -96,7 +97,7 @@ fn unauthorized_request_reports_scripted_denial() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
-        [Capability::Discover, Capability::Enforce],
+        [Capability::DiscoverResource, Capability::DeviceEnforce],
     ));
     backend.script_enforcement(
         identity("gpu-0"),
@@ -123,7 +124,7 @@ fn resource_disappears_mid_session() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
-        [Capability::Discover, Capability::Enforce],
+        [Capability::DiscoverResource, Capability::DeviceEnforce],
     ));
     assert!(backend.observe(&identity("gpu-0")).is_ok());
 
@@ -161,7 +162,7 @@ fn lease_expiry_scenario_via_scripted_denial() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-1",
-        [Capability::Discover, Capability::Enforce],
+        [Capability::DiscoverResource, Capability::DeviceEnforce],
     ));
     backend.script_enforcement(
         identity("gpu-1"),
@@ -186,10 +187,10 @@ fn lease_expiry_scenario_via_scripted_denial() {
 #[test]
 fn scripted_allowed_cannot_mask_a_capability_downgrade() {
     // A script must never be able to make enforce() report Allowed for a
-    // resource that structurally lacks Capability::Enforce — capability
+    // resource that structurally lacks Capability::DeviceEnforce — capability
     // is checked before any scripted override is consulted.
     let backend = FakeBackend::new();
-    backend.insert(resource_with("gpu-0", [Capability::Discover]));
+    backend.insert(resource_with("gpu-0", [Capability::DiscoverResource]));
     backend.script_enforcement(identity("gpu-0"), EnforcementResult::Allowed);
 
     let request = ComputeRequest {
@@ -200,7 +201,7 @@ fn scripted_allowed_cannot_mask_a_capability_downgrade() {
     assert_eq!(
         result,
         EnforcementResult::Unsupported {
-            capability: Capability::Enforce
+            capability: Capability::DeviceEnforce
         }
     );
 }
@@ -210,14 +211,14 @@ fn revoke_without_capability_is_explicit_unsupported() {
     let backend = FakeBackend::new();
     backend.insert(resource_with(
         "gpu-0",
-        [Capability::Discover, Capability::Enforce],
+        [Capability::DiscoverResource, Capability::DeviceEnforce],
     ));
 
     let result = backend.revoke(&identity("gpu-0")).unwrap();
     assert_eq!(
         result,
         EnforcementResult::Unsupported {
-            capability: Capability::Revoke
+            capability: Capability::DeviceRevoke
         }
     );
 }
@@ -228,9 +229,9 @@ fn revoke_with_capability_succeeds() {
     backend.insert(resource_with(
         "gpu-0",
         [
-            Capability::Discover,
-            Capability::Enforce,
-            Capability::Revoke,
+            Capability::DiscoverResource,
+            Capability::DeviceEnforce,
+            Capability::DeviceRevoke,
         ],
     ));
 
@@ -246,7 +247,7 @@ fn scenarios_are_deterministic_across_repeated_runs() {
         let backend = FakeBackend::new();
         backend.insert(resource_with(
             "gpu-0",
-            [Capability::Discover, Capability::Enforce],
+            [Capability::DiscoverResource, Capability::DeviceEnforce],
         ));
         let request = ComputeRequest {
             resource: identity("gpu-0"),

@@ -2,11 +2,11 @@
 
 use eltanin_backend::contract::{BackendError, ComputeBackend};
 use eltanin_core::resource::{
-    Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource, ResourceCapabilities,
-    ResourceIdentity, ResourceKind, ResourceVendor,
+    AcceleratorMemory, Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource,
+    ResourceCapabilities, ResourceIdentity, ResourceKind, ResourceVendor,
 };
 
-/// A minimal backend that lacks `Capability::Enforce`, used to verify a
+/// A minimal backend that lacks `Capability::DeviceEnforce`, used to verify a
 /// capability downgrade surfaces as `Unsupported`, never as `Allowed`.
 struct NoEnforceBackend;
 
@@ -18,19 +18,23 @@ impl ComputeBackend for NoEnforceBackend {
     fn observe(&self, resource: &ResourceIdentity) -> Result<ProtectedResource, BackendError> {
         Ok(ProtectedResource {
             identity: resource.clone(),
-            capabilities: ResourceCapabilities::new([Capability::Discover, Capability::Observe]),
+            capabilities: ResourceCapabilities::new([
+                Capability::DiscoverResource,
+                Capability::ObserveResource,
+            ]),
+            memory: AcceleratorMemory::NotReportable,
         })
     }
 
     fn enforce(&self, _request: &ComputeRequest) -> Result<EnforcementResult, BackendError> {
         Ok(EnforcementResult::Unsupported {
-            capability: Capability::Enforce,
+            capability: Capability::DeviceEnforce,
         })
     }
 
     fn revoke(&self, _resource: &ResourceIdentity) -> Result<EnforcementResult, BackendError> {
         Err(BackendError::Unsupported {
-            capability: Capability::Revoke,
+            capability: Capability::DeviceRevoke,
         })
     }
 }
@@ -56,7 +60,7 @@ fn capability_downgrade_reports_unsupported_not_allowed() {
     assert_eq!(
         result,
         EnforcementResult::Unsupported {
-            capability: Capability::Enforce
+            capability: Capability::DeviceEnforce
         }
     );
     assert_ne!(result, EnforcementResult::Allowed);
@@ -69,7 +73,7 @@ fn revoke_without_capability_is_a_typed_unsupported_error() {
     assert_eq!(
         err,
         BackendError::Unsupported {
-            capability: Capability::Revoke
+            capability: Capability::DeviceRevoke
         }
     );
 }
@@ -79,9 +83,9 @@ fn backend_error_variants_serialize_with_distinct_tags() {
     let cases: &[(BackendError, &str)] = &[
         (
             BackendError::Unsupported {
-                capability: Capability::Enforce,
+                capability: Capability::DeviceEnforce,
             },
-            r#"{"kind":"unsupported","capability":"enforce"}"#,
+            r#"{"kind":"unsupported","capability":"device_enforce"}"#,
         ),
         (
             BackendError::PermissionDenied,

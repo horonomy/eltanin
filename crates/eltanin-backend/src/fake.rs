@@ -21,7 +21,7 @@ use crate::contract::{BackendError, ComputeBackend};
 /// Resources are added at construction (or later, via [`Self::insert`])
 /// and can be removed to simulate a resource disappearing mid-session.
 /// [`Self::script_enforcement`] lets a test pin exactly what `enforce`
-/// returns for a resource that has [`Capability::Enforce`] — this is how
+/// returns for a resource that has [`Capability::DeviceEnforce`] — this is how
 /// a test simulates "policy already decided ALLOW/DENY" and "a lease has
 /// expired" without depending on F-M1-004/005, which don't exist yet. A
 /// script can never override a real capability downgrade.
@@ -69,12 +69,12 @@ impl FakeBackend {
     }
 
     /// Pin what `enforce` returns for `identity` when it also has
-    /// [`Capability::Enforce`]. Used to script an already-decided
+    /// [`Capability::DeviceEnforce`]. Used to script an already-decided
     /// ALLOW/DENY (F-M1-004's job in the real system) or a lease-expiry
     /// outcome (F-M1-005's job) without depending on those Features.
     ///
     /// A script can never produce `Allowed` for a resource that lacks
-    /// `Capability::Enforce` — `enforce` checks capability first and
+    /// `Capability::DeviceEnforce` — `enforce` checks capability first and
     /// ignores the script entirely in that case, so this can't be used
     /// to accidentally mask a capability downgrade.
     ///
@@ -142,9 +142,9 @@ impl ComputeBackend for FakeBackend {
         // by scripting `Allowed` on a resource that structurally cannot
         // be enforced on — that's exactly what EnforcementResult's own
         // docs forbid (a downgrade must never masquerade as enforcement).
-        if !resource.capabilities.supports(Capability::Enforce) {
+        if !resource.capabilities.supports(Capability::DeviceEnforce) {
             return Ok(EnforcementResult::Unsupported {
-                capability: Capability::Enforce,
+                capability: Capability::DeviceEnforce,
             });
         }
 
@@ -168,9 +168,9 @@ impl ComputeBackend for FakeBackend {
             .entry(resource.clone())
             .or_insert(0) += 1;
         let observed = self.observe(resource)?;
-        if !observed.capabilities.supports(Capability::Revoke) {
+        if !observed.capabilities.supports(Capability::DeviceRevoke) {
             return Ok(EnforcementResult::Unsupported {
-                capability: Capability::Revoke,
+                capability: Capability::DeviceRevoke,
             });
         }
         Ok(EnforcementResult::Allowed)

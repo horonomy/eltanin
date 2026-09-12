@@ -27,7 +27,9 @@ use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::policy::{
     Condition, Effect, EvidenceMatch, PolicyDocument, PolicyId, PolicySet, Rule, RuleId, TrustFloor,
 };
-use eltanin_core::resource::{Action, Capability, ProtectedResource, ResourceCapabilities};
+use eltanin_core::resource::{
+    AcceleratorMemory, Action, Capability, ProtectedResource, ResourceCapabilities,
+};
 use eltanin_protocol::request::{ClientRequest, LeaseRequest, RequestBody, RequestId};
 use eltanin_protocol::response::{AgentResponse, ResponseBody};
 use support::authz::resource_identity;
@@ -87,7 +89,11 @@ fn a_real_peer_over_a_real_socket_is_granted_a_lease_via_the_fake_backend() {
     let backend = Arc::new(FakeBackend::new());
     backend.insert(ProtectedResource {
         identity: resource_identity(),
-        capabilities: ResourceCapabilities::new([Capability::Enforce, Capability::Revoke]),
+        capabilities: ResourceCapabilities::new([
+            Capability::DeviceEnforce,
+            Capability::DeviceRevoke,
+        ]),
+        memory: AcceleratorMemory::NotReportable,
     });
     let handler = Arc::new(AuthorizationHandler::new(
         IssuerInstanceId::new("end-to-end-instance"),

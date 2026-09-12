@@ -25,7 +25,9 @@ use eltanin_agent::peer::LinuxPeerContextSource;
 use eltanin_agent::runtime::{issuer_instance_id, AgentClock};
 use eltanin_agent::{authz, daemon};
 use eltanin_backend::fake::FakeBackend;
-use eltanin_core::resource::{Capability, ProtectedResource, ResourceCapabilities};
+use eltanin_core::resource::{
+    AcceleratorMemory, Capability, ProtectedResource, ResourceCapabilities,
+};
 
 /// Required environment variables have no default: each names a
 /// security-relevant choice (socket mode, lease ttl) or a value this
@@ -88,13 +90,17 @@ fn run() -> Result<(), String> {
     // nothing to `enforce` on unless something seeds it — every resource
     // this policy names is seeded here, with the capabilities a real
     // backend would need for the authorization path to actually work
-    // end to end (`Capability::Enforce`/`Revoke`; `discover`/`observe`
+    // end to end (`Capability::DeviceEnforce`/`Revoke`; `discover`/`observe`
     // are always supported by `FakeBackend` regardless).
     let backend = Arc::new(FakeBackend::new());
     for resource in policy.resources() {
         backend.insert(ProtectedResource {
             identity: resource,
-            capabilities: ResourceCapabilities::new([Capability::Enforce, Capability::Revoke]),
+            capabilities: ResourceCapabilities::new([
+                Capability::DeviceEnforce,
+                Capability::DeviceRevoke,
+            ]),
+            memory: AcceleratorMemory::NotReportable,
         });
     }
 

@@ -22,7 +22,7 @@ fn handler() -> AuthorizationHandler {
     AuthorizationHandler::new(
         IssuerInstanceId::new("test-instance"),
         allow_policy_for_uid(1000),
-        backend_with_resource(&[Capability::Enforce, Capability::Revoke]),
+        backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]),
         FixedClock::new(),
         Arc::new(NullSink),
         &AuthorizationConfig::new(Duration::from_secs(60)).unwrap(),
