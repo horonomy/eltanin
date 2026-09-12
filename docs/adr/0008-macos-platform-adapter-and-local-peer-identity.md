@@ -111,9 +111,16 @@ trade-off this workspace already made twice — `rustix` for
 `SO_PEERCRED`/`geteuid` (ADR 0004, `eltanin-linux`/`eltanin-agent`) and
 `signal-hook` for `SIGTERM`/`SIGINT` (HORO-840) — applied to the one
 remaining OS boundary that needed it. Both `nix` and `libproc` are
-`MIT`-licensed, already covered by `deny.toml`'s allow-list; `cargo deny
-check` was run against the real resolved dependency graph before this
-PR, as ADR 0007 did for `objc2*`.
+`MIT`-licensed, already covered by `deny.toml`'s allow-list; the exact
+API surfaces used (`XuCred::version()`/`uid()`/`groups()`,
+`sockopt::LocalPeerCred`/`LocalPeerPid`, `libproc::proc_pid::{pidinfo,
+pidpath}`, `bsd_info::BSDInfo`'s field names) were verified by reading
+the real downloaded crate sources (`nix` 0.30.1, `libproc` 0.14.11), but
+`cargo deny check` itself against the real resolved dependency graph is
+verified by this PR's `cargo-deny` CI job, not by a local run — this
+session's shared dev machine could not complete a local `cargo` run
+against the workspace's shared `target/` directory (see the PR
+description's verification notes).
 
 **Consequence**: `crates/eltanin-macos` keeps `#![forbid(unsafe_code)]`
 — unlike `crates/eltanin-apple` (ADR 0007) and the not-yet-built
@@ -285,6 +292,18 @@ ADR therefore adds `macos-latest` jobs (`clippy-macos`, `test-macos`) to
 jobs. This is free on this public repository — GitHub does not bill
 macOS runner minutes on public repos — so there is no cost trade-off
 analogous to what a private repository would face.
+
+`test-macos` deliberately runs with `--exclude eltanin-apple`. That
+crate's `crates/eltanin-apple/tests/metal_compute_probe.rs` dispatches a
+real Metal kernel unconditionally (no hardware-availability skip) and
+was written for local developer verification on a real Apple Silicon
+host per ADR 0007's own Consequences section, which explicitly declined
+a macOS CI runner for it — a GitHub-hosted `macos-latest` runner is
+virtualized and is not the evidence class that probe exists to
+establish. Producing a Feature Verification Record from that probe
+remains HORO-1015's scope, unchanged by this ADR. `clippy-macos` still
+lints `eltanin-apple` (linting is static and carries no hardware
+dependency).
 
 ## Consequences
 

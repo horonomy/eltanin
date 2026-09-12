@@ -168,10 +168,13 @@ HORO-1010): HORO-1011 (capability/memory model subtask) and HORO-1012
 requires all of HORO-1011/1012/1013/1014 merged + Track A + Track B
 `B-M1-APPLE` + physical M3 Max evidence). HORO-1013 (macOS platform
 adapter) is in progress — hardware-free implementation work in the
-sense that no physical M3 Max provisioning is required (this session
-ran directly on real Apple Silicon hardware for local verification, but
-that is a development-environment convenience, not the HORO-1015
-hardware-evidence gate).
+sense that no physical M3 Max provisioning is required (this session's
+development environment was a real Apple Silicon host, but the shared
+dev machine's `cargo` lock contention prevented a local compile/test run
+this session; functional verification is via this ticket's own
+`macos-latest` CI jobs, not a local run — see PR #43's verification
+notes. This is a development-environment convenience either way, not
+the HORO-1015 hardware-evidence gate).
 
 ## Required human decisions outstanding
 
