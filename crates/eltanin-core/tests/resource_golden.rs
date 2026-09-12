@@ -128,6 +128,40 @@ fn enforcement_result_unsupported_is_distinct_from_allowed() {
 }
 
 #[test]
+fn unified_memory_resource_round_trips_with_no_fabricated_byte_count() {
+    let mut resource = sample_resource();
+    resource.memory = AcceleratorMemory::Unified;
+    let json = serde_json::to_string(&resource).unwrap();
+    // A shared-memory backend must never be forced to invent a dedicated
+    // byte count — the wire shape carries only the tag, nothing else.
+    assert_eq!(json.matches("total_bytes").count(), 0);
+    let decoded: ProtectedResource = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, resource);
+}
+
+#[test]
+fn dedicated_memory_resource_round_trips_with_its_reported_byte_count() {
+    let mut resource = sample_resource();
+    resource.memory = AcceleratorMemory::Dedicated {
+        total_bytes: 24 * 1024 * 1024 * 1024,
+    };
+    let json = serde_json::to_string(&resource).unwrap();
+    assert!(json.contains("\"total_bytes\":25769803776"));
+    let decoded: ProtectedResource = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, resource);
+}
+
+#[test]
+fn an_omitted_memory_field_decodes_as_not_reportable() {
+    // Pre-HORO-1011 shape: no "memory" key at all. #[serde(default)] must
+    // make this additive, decoding to NotReportable, never a hard error.
+    let json = r#"{"identity":{"vendor":"fake","kind":"gpu","local_id":"x"},
+        "capabilities":{"support":{}}}"#;
+    let decoded: ProtectedResource = serde_json::from_str(json).unwrap();
+    assert_eq!(decoded.memory, AcceleratorMemory::NotReportable);
+}
+
+#[test]
 fn unknown_action_deserializes_explicitly() {
     let request: ComputeRequest = serde_json::from_str(
         r#"{"resource":{"vendor":"fake","kind":"gpu","local_id":"x"},"action":"reboot"}"#,
