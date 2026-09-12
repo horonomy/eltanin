@@ -77,7 +77,10 @@ asserts for real on physical Apple Silicon hardware.
 ## What this proves
 
 - A real Metal command buffer was submitted to a real system GPU device
-  and completed (`waitUntilCompleted` returned).
+  and completed (`waitUntilCompleted` returned) — the evidence report's
+  `gpu_command_completed` field is structural, not a separately measured
+  signal: it is only ever present because the `Ok` result it lives on
+  cannot be constructed until `waitUntilCompleted` has already returned.
 - Its output was read back and independently checked against a
   CPU-computed expected value for a known, deterministic input.
 - When run as a managed workload: the full `eltanin run` ALLOW path

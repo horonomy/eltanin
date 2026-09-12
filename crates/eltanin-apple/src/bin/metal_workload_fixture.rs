@@ -107,7 +107,13 @@ struct WorkloadResult {
     /// `true` iff the Metal command buffer's `waitUntilCompleted` call
     /// returned, i.e. the GPU genuinely finished executing the
     /// submitted command — the "proof the GPU command completed through
-    /// Metal" Jira's QA section asks for.
+    /// Metal" Jira's QA section asks for. Structural, not a separately
+    /// measured signal: this field is only ever serialized as part of a
+    /// [`WorkloadResult`] built from an `Ok(ComputeProbeReport)`, which
+    /// `probe::run_compute_probe` cannot return until
+    /// `waitUntilCompleted` has already returned (see that function's
+    /// `imp` module) — there is no code path that reaches this struct
+    /// without the GPU command having genuinely completed first.
     gpu_command_completed: bool,
 }
 
