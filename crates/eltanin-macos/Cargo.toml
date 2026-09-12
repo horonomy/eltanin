@@ -1,0 +1,27 @@
+[package]
+name = "eltanin-macos"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license.workspace = true
+description = "macOS adapter that derives WorkloadIdentity/ExecutionContext from libproc-observed process state and peer credentials from LOCAL_PEERCRED/LOCAL_PEERPID (F-M1-010, HORO-1013)."
+
+[lints]
+workspace = true
+
+[dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+
+# LOCAL_PEERCRED/LOCAL_PEERPID (crate::peer) and libproc-based process
+# inspection (crate::lib) are macOS-only and needed on no other target,
+# so they are declared as target-specific dependencies rather than
+# unconditional ones — kept out of the dependency graph entirely on any
+# non-macOS build, exactly like eltanin-linux gates `rustix` to
+# `cfg(target_os = "linux")` (see that crate's Cargo.toml) and
+# eltanin-apple gates `objc2*` to `cfg(target_os = "macos")` (see ADR
+# 0007). Both `nix` and `libproc` wrap their respective syscalls in safe
+# Rust, preserving this workspace's #![forbid(unsafe_code)] on every
+# crate (see ADR 0004/0008) — no hand-written unsafe libc FFI needed.
+[target.'cfg(target_os = "macos")'.dependencies]
+nix = { version = "0.30", default-features = false, features = ["socket"] }
+libproc = "0.14"
