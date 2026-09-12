@@ -29,7 +29,7 @@ const CANONICAL_E2E: &str = include_str!("canonical_e2e.rs");
 
 const FEATURE_IDS: &[&str] = &[
     "F-M1-001", "F-M1-002", "F-M1-003", "F-M1-004", "F-M1-005", "F-M1-006", "F-M1-007", "F-M1-008",
-    "F-M1-009",
+    "F-M1-009", "F-M1-010",
 ];
 
 /// Parse `canonical_e2e.rs`'s `pub const COVERS: &[&str] = &[...]` literal
@@ -328,8 +328,17 @@ fn every_feature_id_appears_in_the_e2e_index_with_a_scenario_or_na_or_blocked_ma
             matches.len()
         );
         let row = matches[0];
+        // "E2E-" is this repository's original scenario-ID prefix
+        // (`E2E-F-M1-008-controlled-launch-v1`); "B-M1-" is the second
+        // naming lineage HORO-1015 introduces for the Apple Silicon Track
+        // B scenario (`B-M1-APPLE-v1`, per that ticket's own Jira text
+        // and `docs/development/campaign-state.md`) — both are valid
+        // scenario-ID prefixes this repo now uses, not a drift.
         assert!(
-            row.contains("E2E-") || row.contains("N/A") || row.contains("BLOCKED"),
+            row.contains("E2E-")
+                || row.contains("B-M1-")
+                || row.contains("N/A")
+                || row.contains("BLOCKED"),
             "docs/qa/e2e/README.md's coverage row for {id} names neither a scenario ID, N/A, \
              nor BLOCKED — every Feature must state its Track B status explicitly: {row:?}"
         );
@@ -349,7 +358,7 @@ fn every_e2e_index_manifest_link_resolves_to_a_real_file() {
     let mut checked_md = 0;
     let mut checked_rs = 0;
     for line in E2E_INDEX.lines() {
-        if !line.starts_with("| `E2E-") {
+        if !(line.starts_with("| `E2E-") || line.starts_with("| `B-M1-")) {
             continue;
         }
         let mut idx = 0;
