@@ -115,12 +115,12 @@ remaining OS boundary that needed it. Both `nix` and `libproc` are
 API surfaces used (`XuCred::version()`/`uid()`/`groups()`,
 `sockopt::LocalPeerCred`/`LocalPeerPid`, `libproc::proc_pid::{pidinfo,
 pidpath}`, `bsd_info::BSDInfo`'s field names) were verified by reading
-the real downloaded crate sources (`nix` 0.30.1, `libproc` 0.14.11), but
-`cargo deny check` itself against the real resolved dependency graph is
-verified by this PR's `cargo-deny` CI job, not by a local run — this
-session's shared dev machine could not complete a local `cargo` run
-against the workspace's shared `target/` directory (see the PR
-description's verification notes).
+the real downloaded crate sources (`nix` 0.30.1, `libproc` 0.14.11).
+`cargo deny check` was run for real against the resolved dependency
+graph — including `nix`/`libproc` — using a private `CARGO_TARGET_DIR`
+to bypass this session's shared dev machine's contended
+`~/.cargo/shared-target` lock (see the PR description's verification
+notes); it reported `advisories ok, bans ok, licenses ok, sources ok`.
 
 **Consequence**: `crates/eltanin-macos` keeps `#![forbid(unsafe_code)]`
 — unlike `crates/eltanin-apple` (ADR 0007) and the not-yet-built

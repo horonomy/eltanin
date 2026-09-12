@@ -169,12 +169,17 @@ requires all of HORO-1011/1012/1013/1014 merged + Track A + Track B
 `B-M1-APPLE` + physical M3 Max evidence). HORO-1013 (macOS platform
 adapter) is in progress — hardware-free implementation work in the
 sense that no physical M3 Max provisioning is required (this session's
-development environment was a real Apple Silicon host, but the shared
-dev machine's `cargo` lock contention prevented a local compile/test run
-this session; functional verification is via this ticket's own
-`macos-latest` CI jobs, not a local run — see PR #43's verification
-notes. This is a development-environment convenience either way, not
-the HORO-1015 hardware-evidence gate).
+development environment was a real Apple Silicon host; the shared dev
+machine's `cargo` lock contention on `~/.cargo/shared-target` initially
+blocked all local `cargo` runs, but pointing `CARGO_TARGET_DIR` at a
+private directory bypassed it — see PR #43's verification notes for the
+resulting real local `clippy`/`test`/`deny`/`doc` runs, including 11
+tests executing genuine `LOCAL_PEERCRED`/`LOCAL_PEERPID`/`libproc`
+syscalls on this machine's own kernel. This remains a
+development-environment convenience, not the HORO-1015
+hardware-evidence gate — worth recording for future sessions hitting
+the same shared-target contention: `CARGO_TARGET_DIR=<private-dir>
+cargo <subcommand> ...` is the fix, no need to wait out the lock).
 
 ## Required human decisions outstanding
 
