@@ -81,6 +81,12 @@ mod imp {
     /// assumes — refuse rather than guess.
     const XUCRED_VERSION: u32 = nix::libc::XUCRED_VERSION;
 
+    // `effective_uid`/`effective_gid` are the correct, precise names for
+    // these two independently-derived values (see the module docs above
+    // on why "uid"/"gid" alone would be ambiguous with a real-uid/gid) —
+    // clippy's similarity heuristic is a false positive here, not a
+    // naming problem to fix.
+    #[allow(clippy::similar_names)]
     pub(super) fn collect_peer_context(
         stream: &UnixStream,
     ) -> Result<PeerContext, PeerCredentialError> {

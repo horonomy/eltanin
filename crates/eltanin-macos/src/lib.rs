@@ -98,9 +98,10 @@ mod imp {
         // microsecond count. See this crate's module docs on why this
         // representation is not comparable to Linux's clock-tick token
         // — harmless, since nothing compares across collectors.
-        let micros = u64::from(info.pbi_start_tvsec)
+        let micros = info
+            .pbi_start_tvsec
             .saturating_mul(1_000_000)
-            .saturating_add(u64::from(info.pbi_start_tvusec));
+            .saturating_add(info.pbi_start_tvusec);
         Evidence::Present {
             value: ProcessStartToken(micros),
             source: EvidenceSource::KernelObserved,
