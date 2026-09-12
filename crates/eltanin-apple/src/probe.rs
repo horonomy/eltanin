@@ -31,9 +31,10 @@ pub struct ComputeProbeReport {
 ///
 /// # Errors
 ///
-/// Returns [`BackendError::Unsupported`] on any non-macOS target, or if
-/// no Metal device is present, if kernel compilation/pipeline creation
-/// fails, or if the readback does not match the expected doubled values.
+/// Returns [`BackendError::Unsupported`] on any non-macOS target, or
+/// [`BackendError::Transient`] if no Metal device is currently present,
+/// if kernel compilation/pipeline creation fails, or if the readback
+/// does not match the expected doubled values.
 #[cfg(target_os = "macos")]
 pub fn run_compute_probe() -> Result<ComputeProbeReport, BackendError> {
     imp::run_compute_probe()
@@ -41,13 +42,23 @@ pub fn run_compute_probe() -> Result<ComputeProbeReport, BackendError> {
 
 /// # Errors
 ///
-/// Always returns [`BackendError::Unsupported`] — no `objc2-metal`
-/// dependency exists in a non-macOS build's dependency graph (see this
-/// crate's `Cargo.toml`), so no Metal call is ever attempted here.
+/// Always returns `BackendError::Unsupported { capability:
+/// Capability::DiscoverResource }` — the same capability
+/// `AppleBackend::discover` reports as `Unsupported` on this target, for
+/// the same reason: no `objc2-metal` dependency exists in a non-macOS
+/// build's dependency graph (see this crate's `Cargo.toml`), so no
+/// Metal call — including discovering whether a device exists at all —
+/// is ever attempted here. This is deliberately not
+/// `Capability::ControlledLaunch`: that dimension is
+/// `SupportState::NotEvaluated` (HORO-1013's scope, not claimed either
+/// way by this crate — see `crate::backend::snapshot_to_resource`), so
+/// this error must not assert a *structural* absence
+/// (`BackendError::Unsupported`'s documented meaning) for a dimension
+/// this crate has explicitly not evaluated.
 #[cfg(not(target_os = "macos"))]
 pub fn run_compute_probe() -> Result<ComputeProbeReport, BackendError> {
     Err(BackendError::Unsupported {
-        capability: Capability::ControlledLaunch,
+        capability: Capability::DiscoverResource,
     })
 }
 
@@ -61,7 +72,6 @@ mod imp {
     };
 
     use eltanin_backend::contract::BackendError;
-    use eltanin_core::resource::Capability;
 
     use super::ComputeProbeReport;
 
@@ -81,12 +91,6 @@ mod imp {
 
     const ELEMENT_COUNT: usize = 16;
 
-    fn unsupported() -> BackendError {
-        BackendError::Unsupported {
-            capability: Capability::ControlledLaunch,
-        }
-    }
-
     fn transient(message: impl Into<String>) -> BackendError {
         BackendError::Transient {
             message: message.into(),
@@ -96,7 +100,10 @@ mod imp {
     #[allow(unsafe_code)]
     pub(super) fn run_compute_probe() -> Result<ComputeProbeReport, BackendError> {
         let devices = MTLCopyAllDevices();
-        let device = devices.iter().next().ok_or_else(unsupported)?;
+        let device = devices
+            .iter()
+            .next()
+            .ok_or_else(|| transient("no Metal device is currently present"))?;
         let device_name = device.name().to_string();
 
         let queue = device
