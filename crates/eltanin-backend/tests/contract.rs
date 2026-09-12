@@ -85,7 +85,7 @@ fn backend_error_variants_serialize_with_distinct_tags() {
             BackendError::Unsupported {
                 capability: Capability::DeviceEnforce,
             },
-            r#"{"kind":"unsupported","capability":"enforce"}"#,
+            r#"{"kind":"unsupported","capability":"device_enforce"}"#,
         ),
         (
             BackendError::PermissionDenied,
