@@ -6,11 +6,30 @@ corrected before it ships.
 
 ## Supported platform boundary
 
-- Bare-metal Linux only. No containers-as-the-enforcement-boundary claim,
-  no VMs, no Windows/macOS.
-- NVIDIA GPUs only. No AMD/Intel.
-- Single-host, single-user-session scope for MVP 1.0. Multi-tenant
-  fleet/enterprise scenarios are explicitly future stages (HORO-777+).
+MVP 1.0 evidence comes from three distinct classes (HORO-1011 scope
+amendment; see
+[ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md)).
+**Compatibility is not protection** — a platform being functionally
+supported never by itself means device-level enforcement is claimed for
+it:
+
+- **E1 — Fake/simulated (CI).** Deterministic, no real accelerator, no
+  device-level claim of any kind.
+- **E2 — Apple Silicon (physical MacBook Pro M3 Max).** Real Metal
+  accelerator functional evidence only: discovery, observation,
+  attribution, and a full ALLOW/DENY application-level flow through a
+  real GPU compute path. `DeviceEnforce`/`DeviceRevoke` are
+  `Unsupported`/`NotEvaluated` on this platform by definition — this
+  class never claims system-wide or kernel-level GPU protection.
+- **E3 — Bare-metal Linux + NVIDIA.** The sole device-level enforcement
+  evidence class. No containers-as-the-enforcement-boundary claim, no
+  VMs. No AMD/Intel. **This is the mandatory hard security gate
+  (HORO-841/844, F-M1-007) and is not replaceable by E2 evidence** — an
+  Apple-only PASS is `BLOCKED ON E3`, never `READY`.
+
+Single-host, single-user-session scope for MVP 1.0 on every platform.
+Multi-tenant fleet/enterprise scenarios are explicitly future stages
+(HORO-777+).
 
 ## Threat levels
 
@@ -49,6 +68,15 @@ hardware evidence.
 
 ## What is NOT security in this system
 
+- **A backend reporting `Capability::ControlledLaunch` as `Supported`
+  is not a device-enforcement claim.** `ResourceCapabilities` (HORO-1011,
+  ADR 0006) evaluates each of nine capability dimensions independently;
+  functional launch/observation support and device-level
+  enforce/revoke support are separate dimensions with separate
+  `SupportState`s precisely so one can never be silently read from the
+  other. Only `Capability::DeviceEnforce`/`DeviceRevoke` at
+  `SupportState::Supported`, backed by real E3 (Linux/NVIDIA) hardware
+  evidence, is a device-level protection claim.
 - **GPU utilization ("nvidia-smi shows activity") is not authorization
   evidence and never overrides a deny decision.**
 - **A previously-issued lease's mere existence does not extend past its
