@@ -12,11 +12,64 @@ Durable execution-state record. Read this + Jira + `git fetch origin
   approval, no force-push/delete).
 - Jira: continuing in project `HORO` (no dedicated `ELTN` project — see
   `bootstrap-reconciliation.md` §4).
-- Fix Version: `Eltanin MVP 1.0 — Authorization Happy Path` (id `10192`).
-- Goal: `Eltanin G1` (`CBLPCRLM-19`), linked to HORO-772 only.
+- Fix Version: `Eltanin MVP 1.0 — Authorization Happy Path` (id `10192`);
+  description updated 2026-09-12 to state the three-evidence-class model
+  (see "Apple Silicon scope amendment" below).
+- Goal: `Eltanin G1` (`CBLPCRLM-19`), linked to HORO-772 only. **Name/
+  description still read the old NVIDIA-only wording** — no Atlassian
+  connector tool exists to edit an existing Goal (confirmed empirically,
+  not assumed); a `createGoalUpdate` traceability note records the
+  intended canonical wording, and the exact smallest manual UI action is
+  documented on HORO-1009. Not blocking — HORO-1011 proceeded regardless
+  per the founder's own contingency instruction.
 - Components: `Eltanin :: {Repo & Governance, Core, Backend, NVIDIA,
   Linux Platform, Device Guard, Protocol, Agent, CLI, Audit, QA, Docs}`
-  (ids 10145–10156).
+  (ids 10145–10156), plus `Eltanin :: Apple Silicon` (id `10163`) and
+  `Eltanin :: macOS Platform` (id `10164`), added 2026-09-12 via direct
+  authenticated REST (no connector tool exists for component creation
+  either) and backfilled onto HORO-1010 through HORO-1015 preserving
+  each ticket's pre-existing components.
+
+## Apple Silicon scope amendment (2026-09-12)
+
+A product/architecture scope amendment approved 2026-09-12 adds Apple
+Silicon (physical MacBook Pro M3 Max) as a second real-hardware evidence
+class for MVP 1.0, alongside the original Linux/NVIDIA class. The North
+Star ("no protected compute without authorization") is unchanged — this
+is additive scope, not a pivot away from the NVIDIA enforcement gate.
+
+**Three evidence classes** (superseding the old two-class Fake/NVIDIA
+model; see [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md)):
+- **E1** — Fake/simulated, deterministic CI.
+- **E2** — Apple Silicon real-accelerator functional evidence (physical
+  M3 Max): real Metal GPU compute, full ALLOW/DENY application-level
+  flow. `DeviceEnforce`/`DeviceRevoke` are `Unsupported`/`NotEvaluated`
+  by definition — never a device-level protection claim.
+- **E3** — Linux/NVIDIA physical device-level enforcement (F-M1-007,
+  HORO-841/844). The sole mandatory hard security gate, unreplaceable
+  by E2. Apple-only-PASS is `BLOCKED ON E3`, never `READY`.
+
+**New Feature F-M1-010 / HORO-1010** (Apple Silicon Real-Accelerator
+Functional Validation), with an internal dependency chain (via Jira
+issue links, authoritative over any assumption): **HORO-1011**
+(capability/memory model) → blocks **HORO-1012** (Metal backend) and
+**HORO-1013** (macOS platform/IPC/launch), which may run in parallel
+once HORO-1011 merges → HORO-1012 blocks **HORO-1014** (native Metal
+fixture) → **HORO-1015** (physical M3 Max QA, Track B scenario
+`B-M1-APPLE`) starts only after HORO-1012/1013/1014 all merge to `main`.
+
+**HORO-790 (MVP 1.0 READY gate) was rewritten** to the three-evidence-
+class model: READY = E1 + E2 + E3 all PASS + all Feature QA PASS +
+Track A PASS + `B-M1-APPLE` PASS + `B-M1-NVIDIA` PASS + Docs Impact
+closed + Release Quality Report.
+
+**Privileged-enforcement blast-radius safety invariant** (HORO-1018,
+2026-09-12): before any privileged cgroup/eBPF/device-node/hardware
+enforcement test, [`docs/qa/privileged-enforcement-testing.md`](../qa/privileged-enforcement-testing.md)
+is now a mandatory pre-test gate (`.claude/CLAUDE.md` §6) — only a new
+disposable workload created for the test may be denied/killed/
+constrained, never the orchestrator/agent session/controlling shell/any
+pre-existing process. Governs HORO-841/844/790/1015 at minimum.
 
 ## Completed
 
@@ -59,11 +112,17 @@ Durable execution-state record. Read this + Jira + `git fetch origin
 | HORO-811 | campaign-state.md sync after PR #33 | #34 | `d8bc5a5` |
 | HORO-781 | Adopted Apache License 2.0 (founder decision) — `LICENSE`/`NOTICE`, `license.workspace = true` on every crate, `deny.toml` comment reconciled, `README.md`/`bootstrap-reconciliation.md` updated (historical "License (MAJOR DECISION)" note left as written, dated resolution pointer added below it) | #35 | `3e44a16` |
 | HORO-790 | Hardware-validation runbook (`docs/development/hardware-validation-runbook.md`) for F-M1-002/HORO-785, F-M1-007/HORO-789, and this ticket — GPU/kernel/driver/capability requirements, own-workstation-vs-rented-hardware guidance, exact setup/test/cleanup commands, expected evidence; `scripts/hardware-preflight-check.sh` and `scripts/hardware-evidence-capture.sh` (read-mostly, shellcheck-clean automation). Preparation only — no hardware provisioned, no evidence exists, no AC weakened | #36 | `dcb5036` |
+| HORO-1018 | Privileged-enforcement-testing blast-radius governance (`docs/qa/privileged-enforcement-testing.md`) — blast-radius model, 12-point abort-on-failure preflight, 4-level safe escalation, no-spawn-then-restrict-race requirement, collateral-damage assertion checklist; `.claude/CLAUDE.md` §6 gate added; additive Jira comments on HORO-841/844/790/1015 | #38 | `1923cad` |
+| HORO-1011 | F-M1-010 subtask: cross-accelerator capability/memory model — `Capability` expanded 5→9 explicit dimensions (adds `ObserveWorkload`/`ControlledLaunch`, renames the rest), `ResourceCapabilities` reshaped to a `Capability`→`SupportState` map (Supported/Partial/Unsupported/NotEvaluated), new `AcceleratorMemory` (Dedicated/Unified/NotReportable) on `ProtectedResource`; [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md); design pre-reviewed by opus-architect; one real bug (stale `"enforce"` wire literal) caught by CI and fixed | #39 | `617befd` |
 
-Current `main` HEAD: `dcb5036`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
-F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811/781
-(governance + license) are done. HORO-790's hardware-validation runbook
-is ready and waiting on the founder to provide real hardware.
+Current `main` HEAD: `617befd`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811/781/1018
+(governance + license) are done. HORO-1011 (Apple Silicon capability/
+memory model) is done. HORO-790's hardware-validation runbook is ready
+and waiting on the founder to provide real Linux/NVIDIA hardware.
+HORO-1012 (Metal backend) and HORO-1013 (macOS platform adapter) are
+next, unblocked and may run in parallel per the Apple dependency graph
+above.
 
 ## Active worktrees
 
@@ -93,6 +152,15 @@ cgroup/device-BPF enforcement) are blocked on bare-metal Linux/NVIDIA
 hardware access (see "Dependency blockers" below) — no hardware-free
 subtask work remains identified for either as of this pass.
 
+F-M1-010 (Apple Silicon Real-Accelerator Functional Validation,
+HORO-1010): HORO-1011 (capability/memory model subtask) is Done, no
+Feature Verification Record yet (per HORO-1010's own scope, not this
+subtask's — F-M1-010 PASS requires all of HORO-1011/1012/1013/1014
+merged + Track A + Track B `B-M1-APPLE` + physical M3 Max evidence).
+HORO-1012 (Metal backend) and HORO-1013 (macOS platform adapter) are
+next — hardware-free implementation work, no physical M3 Max required
+until HORO-1015.
+
 ## Required human decisions outstanding
 
 1. Bare-metal Linux/NVIDIA hardware provisioning for F-M1-002/007/HORO-841/
@@ -116,8 +184,17 @@ evidence; it is preparation only.
 
 ## Remaining release gates
 
-Everything in HORO-772's "Release Gate — MVP 1.0 READY" section. Nothing
-gated yet since no Feature work has started.
+HORO-790's rewritten "MVP 1.0 READY Gate" (see "Apple Silicon scope
+amendment" above): E1 + E2 + E3 all PASS + all Feature QA PASS + Track A
+PASS + `B-M1-APPLE` PASS + `B-M1-NVIDIA` PASS + Docs Impact closed +
+Release Quality Report. E1 (Fake/CI) evidence exists throughout this
+campaign's Track A suite. E2 (Apple Silicon) and E3 (Linux/NVIDIA) both
+require physical hardware not yet available in this environment —
+E2 needs the founder's own M3 Max (HORO-1015), E3 needs founder-provided
+bare-metal Linux/NVIDIA (HORO-841, see "Dependency blockers"). Apple-
+only-PASS is explicitly `BLOCKED ON E3`, never `READY`, per HORO-790's
+own gate definition — an all-Apple-hardware pass would not itself
+satisfy this gate.
 
 ## Lessons from this pass (process, not product)
 
@@ -139,6 +216,31 @@ gated yet since no Feature work has started.
   ticket if it recurs: widen the margin or make the assertion
   timing-independent (e.g. assert on the renewal count/sequence rather
   than wall-clock-adjacent exit-code timing).
+- A global find/replace of `Capability::Enforce` etc. (HORO-1011's
+  variant rename) missed a bare wire-string JSON literal
+  (`"enforce"` not preceded by `Capability::`) in
+  `eltanin-backend/tests/contract.rs` — caught by CI's real test run,
+  not the local `cargo check`/`clippy` pass, since both compile
+  successfully against a *wrong* string constant. **Lesson: after any
+  enum-variant rename touching a `#[serde(rename_all)]` type, grep for
+  the old *wire* strings (quoted, snake_case) separately from the old
+  *Rust identifier* — compilation proves the code is well-typed, never
+  that a hand-written literal still matches.**
+- This session's shared dev machine repeatedly hit extreme load (peaks
+  36-67 across 37 concurrent users) during HORO-1011, causing
+  `cargo test --workspace`/`cargo doc --workspace` to die silently with
+  no output and no process, even when auto-backgrounded with a 590s
+  timeout — not a code issue. Per-crate/per-test-file runs
+  (`cargo test -p <crate> --test <file>`) mostly still succeeded and
+  were used to verify every touched file individually; `cargo check
+  --workspace --all-targets` and `cargo clippy --workspace --all-targets
+  -- -D warnings` (both lighter than a full test run) also completed and
+  were clean. The full-suite gate was deferred to GitHub Actions CI
+  (unaffected by local contention) rather than fought further locally —
+  this caught the real bug above. **Lesson: under sustained extreme
+  local load, prefer `cargo check`/`clippy`/targeted `--test` runs plus
+  real CI as the authoritative full-suite gate, rather than repeatedly
+  retrying a full local `cargo test --workspace`.**
 
 ## Next planned action
 
@@ -243,17 +345,38 @@ Criteria on HORO-785/789/841/790 have been weakened or reinterpreted.
 Jira comments (not status transitions) were added to HORO-790, HORO-785,
 HORO-789, and HORO-841 pointing at it.
 
-**Both HORO-781 and this runbook are now done. All hardware-independent
-MVP 1.0 work, all hardware-free governance Tasks, and the license
-decision are complete.** The only remaining blocker in this campaign's
-entire scope is the founder actually providing a real bare-metal
-Linux/NVIDIA environment (own workstation strongly recommended per the
-runbook's §1, or a genuinely dedicated — not virtualized-cloud —
-physical server). There is no further hardware-free implementation,
-governance, or documentation work identified as of this pass.
+**Both HORO-781 and this runbook are done.** At the time this paragraph
+was written (before the 2026-09-12 scope amendment) the only remaining
+blocker was the founder providing bare-metal Linux/NVIDIA hardware. That
+is **no longer the whole picture** — see the next paragraph and "Apple
+Silicon scope amendment" above for the current state. Left as written
+(accurate at the time) rather than rewritten, per this document's own
+additive-history convention.
 
-A fresh session resuming this campaign should raise hardware
-provisioning to the founder (pointing at the runbook) rather than
-search for further autonomous work. Once a real environment is
-provided, follow the runbook directly — it is written to be executed,
-not re-derived.
+**A product/architecture scope amendment approved 2026-09-12 added
+Apple Silicon as a second real-hardware evidence class** (see "Apple
+Silicon scope amendment" above) — the campaign is no longer purely
+blocked on Linux/NVIDIA hardware. HORO-1018 (privileged-enforcement
+blast-radius governance) and HORO-1011 (capability/memory model) are
+both Done. **Next: HORO-1012 (Metal backend) and HORO-1013 (macOS
+platform/IPC/launch adapter), in separate isolated worktrees, may start
+in parallel now that HORO-1011 has merged to `main`.** HORO-1012 blocks
+HORO-1014 (native Metal fixture); HORO-1015 (physical M3 Max QA) starts
+only after HORO-1012/1013/1014 all merge.
+
+The Linux/NVIDIA hardware blocker (HORO-841, F-M1-002/007, HORO-790's
+E3 evidence) is unchanged and still requires the founder to provide
+bare-metal hardware — see "Dependency blockers". This no longer stops
+all forward progress: the Apple Silicon track gives hardware-free
+implementation work (HORO-1012/1013/1014) to continue on independently,
+per the founder's own scope-amendment directive not to let one hardware
+class's unavailability idle the whole campaign.
+
+A fresh session resuming this campaign should: (1) check Jira/`git
+worktree list` for HORO-1012/1013 progress before starting new work,
+(2) continue the Apple Silicon dependency graph as far as hardware-free
+work allows, (3) separately raise Linux/NVIDIA hardware provisioning to
+the founder (pointing at the runbook) as its own independent thread,
+and (4) once a real M3 Max or Linux/NVIDIA environment is provided,
+execute the relevant plan (HORO-1015's QA scenario, or the hardware-
+validation runbook) directly.
