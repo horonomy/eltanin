@@ -100,7 +100,8 @@ fn arbitrary_vendor_tag_round_trips_without_data_loss() {
 
 #[test]
 fn capability_check_reflects_actual_support_not_assumption() {
-    let caps = ResourceCapabilities::new([Capability::DiscoverResource, Capability::ObserveResource]);
+    let caps =
+        ResourceCapabilities::new([Capability::DiscoverResource, Capability::ObserveResource]);
     assert!(caps.supports(Capability::DiscoverResource));
     assert!(!caps.supports(Capability::DeviceEnforce));
 }
@@ -123,7 +124,10 @@ fn enforcement_result_unsupported_is_distinct_from_allowed() {
         capability: Capability::DeviceEnforce,
     };
     let json = serde_json::to_string(&downgraded).unwrap();
-    assert_eq!(json, r#"{"outcome":"unsupported","capability":"device_enforce"}"#);
+    assert_eq!(
+        json,
+        r#"{"outcome":"unsupported","capability":"device_enforce"}"#
+    );
     assert_ne!(downgraded, EnforcementResult::Allowed);
 }
 

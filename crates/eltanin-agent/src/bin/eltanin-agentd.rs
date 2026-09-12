@@ -25,7 +25,9 @@ use eltanin_agent::peer::LinuxPeerContextSource;
 use eltanin_agent::runtime::{issuer_instance_id, AgentClock};
 use eltanin_agent::{authz, daemon};
 use eltanin_backend::fake::FakeBackend;
-use eltanin_core::resource::{AcceleratorMemory, Capability, ProtectedResource, ResourceCapabilities};
+use eltanin_core::resource::{
+    AcceleratorMemory, Capability, ProtectedResource, ResourceCapabilities,
+};
 
 /// Required environment variables have no default: each names a
 /// security-relevant choice (socket mode, lease ttl) or a value this
@@ -94,7 +96,10 @@ fn run() -> Result<(), String> {
     for resource in policy.resources() {
         backend.insert(ProtectedResource {
             identity: resource,
-            capabilities: ResourceCapabilities::new([Capability::DeviceEnforce, Capability::DeviceRevoke]),
+            capabilities: ResourceCapabilities::new([
+                Capability::DeviceEnforce,
+                Capability::DeviceRevoke,
+            ]),
             memory: AcceleratorMemory::NotReportable,
         });
     }

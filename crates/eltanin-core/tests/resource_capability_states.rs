@@ -41,7 +41,10 @@ fn supports_is_true_only_for_the_supported_state_across_every_dimension() {
 
 #[test]
 fn an_absent_capability_is_not_evaluated_and_never_supported() {
-    let caps = ResourceCapabilities::from_states([(Capability::DiscoverResource, SupportState::Supported)]);
+    let caps = ResourceCapabilities::from_states([(
+        Capability::DiscoverResource,
+        SupportState::Supported,
+    )]);
     for &capability in ALL_CAPABILITIES {
         if capability == Capability::DiscoverResource {
             continue;
@@ -66,7 +69,10 @@ fn new_marks_every_listed_capability_supported_and_nothing_else() {
     assert!(caps.supports(Capability::ControlledLaunch));
     assert!(caps.supports(Capability::Attest));
     assert!(!caps.supports(Capability::DeviceEnforce));
-    assert_eq!(caps.state_of(Capability::DeviceEnforce), SupportState::NotEvaluated);
+    assert_eq!(
+        caps.state_of(Capability::DeviceEnforce),
+        SupportState::NotEvaluated
+    );
 }
 
 #[test]

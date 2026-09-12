@@ -18,7 +18,10 @@ impl ComputeBackend for NoEnforceBackend {
     fn observe(&self, resource: &ResourceIdentity) -> Result<ProtectedResource, BackendError> {
         Ok(ProtectedResource {
             identity: resource.clone(),
-            capabilities: ResourceCapabilities::new([Capability::DiscoverResource, Capability::ObserveResource]),
+            capabilities: ResourceCapabilities::new([
+                Capability::DiscoverResource,
+                Capability::ObserveResource,
+            ]),
             memory: AcceleratorMemory::NotReportable,
         })
     }
