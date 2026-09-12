@@ -484,3 +484,88 @@ fn deny_journey_never_spawns_the_real_metal_workload() {
         evidence_path.display(),
     );
 }
+
+/// HORO-1015 Track B step 13: "verify determinism" — repeat the
+/// ALLOW-then-DENY lifecycle enough times on real hardware to show the
+/// outcome is a function of the policy decision, not incidental timing
+/// or state leaking between runs (e.g. a stale lease, a Metal device
+/// left in a bad state, a socket/fixture race). Each iteration starts a
+/// *fresh* `eltanin-agentd` and scenario directory — same isolation as
+/// every other test in this file — so a flake here would indicate a
+/// real non-determinism, not shared-fixture contamination.
+#[test]
+#[ignore = "real Apple Silicon hardware only — run by hand with `-- --ignored` after \
+            `cargo build --workspace`; see this file's doc comment"]
+fn lifecycle_is_deterministic_across_repeated_allow_and_deny_cycles() {
+    const CYCLES: u32 = 3;
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+    let fixture_bin = sibling_bin("metal_workload_fixture");
+
+    for cycle in 0..CYCLES {
+        // ALLOW leg.
+        let dir = scenario_dir(&format!("lifecycle-allow-{cycle}"));
+        let agent = Agentd::start(&dir, uid, None);
+        let profile_dir = write_profile_dir(&dir);
+        let evidence_path = dir.join("evidence.json");
+        let evidence_arg = evidence_path.to_string_lossy().into_owned();
+        let output = eltanin_command(
+            &agent,
+            &profile_dir,
+            &[
+                fixture_bin.to_str().expect("utf-8 fixture path"),
+                "--evidence-out",
+                &evidence_arg,
+            ],
+        )
+        .output()
+        .expect("run eltanin binary");
+        assert!(
+            output.status.success(),
+            "[{PROVISIONAL_SCENARIO_ID}/ALLOW cycle {cycle}] expected the real Metal workload \
+             to run to completion, got exit {:?} — determinism requires every cycle to behave \
+             identically, not just the first one — stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            evidence_path.exists(),
+            "[{PROVISIONAL_SCENARIO_ID}/ALLOW cycle {cycle}] expected a real fixture evidence \
+             file at {}",
+            evidence_path.display(),
+        );
+        drop(agent);
+
+        // DENY leg, in the same cycle, with its own fresh agent/dir.
+        let dir = scenario_dir(&format!("lifecycle-deny-{cycle}"));
+        let agent = Agentd::start(&dir, uid.wrapping_add(1), None);
+        let profile_dir = write_profile_dir(&dir);
+        let evidence_path = dir.join("evidence.json");
+        let evidence_arg = evidence_path.to_string_lossy().into_owned();
+        let output = eltanin_command(
+            &agent,
+            &profile_dir,
+            &[
+                fixture_bin.to_str().expect("utf-8 fixture path"),
+                "--evidence-out",
+                &evidence_arg,
+            ],
+        )
+        .output()
+        .expect("run eltanin binary");
+        assert_eq!(
+            output.status.code(),
+            Some(77),
+            "[{PROVISIONAL_SCENARIO_ID}/DENY cycle {cycle}] expected exit 77 on every cycle, got \
+             {:?} — stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            !evidence_path.exists(),
+            "[{PROVISIONAL_SCENARIO_ID}/DENY cycle {cycle}] the real Metal workload must never \
+             run on a denied request, on any cycle — found an evidence file at {}",
+            evidence_path.display(),
+        );
+    }
+}
