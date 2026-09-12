@@ -11,7 +11,7 @@ use std::time::Duration;
 use eltanin_agent::config::AgentConfig;
 use eltanin_agent::handler::StatusOnlyHandler;
 use eltanin_agent::listener::BoundSocket;
-use eltanin_agent::peer::LinuxPeerContextSource;
+use eltanin_agent::peer::OsPeerContextSource;
 use eltanin_agent::server::AgentServer;
 use support::temp_socket_path;
 
@@ -24,7 +24,7 @@ fn shutdown_stops_the_accept_loop_and_cleans_up_the_socket() {
         socket,
         config,
         Arc::new(StatusOnlyHandler),
-        Arc::new(LinuxPeerContextSource),
+        Arc::new(OsPeerContextSource),
     );
     let shutdown = server.shutdown_handle();
 
@@ -56,7 +56,7 @@ fn the_socket_path_is_rebindable_immediately_after_shutdown() {
         socket,
         config,
         Arc::new(StatusOnlyHandler),
-        Arc::new(LinuxPeerContextSource),
+        Arc::new(OsPeerContextSource),
     );
     let shutdown = server.shutdown_handle();
     let server_thread = std::thread::spawn(move || server.run());
@@ -81,7 +81,7 @@ fn shutdown_can_be_called_multiple_times_without_panicking() {
         socket,
         config,
         Arc::new(StatusOnlyHandler),
-        Arc::new(LinuxPeerContextSource),
+        Arc::new(OsPeerContextSource),
     );
     let shutdown = server.shutdown_handle();
     let server_thread = std::thread::spawn(move || server.run());
