@@ -19,8 +19,15 @@ architecture decision.
   `eltanin-protocol`, `eltanin-agent`, `eltanin-cli`, `eltanin-audit`)
   `#![forbid(unsafe_code)]`. Unsafe is permitted only in platform/vendor
   crates added for FFI/eBPF boundaries (`crates/eltanin-nvidia`,
-  `crates/eltanin-linux`, `ebpf/eltanin-device-guard/`), and every
+  `crates/eltanin-linux`, `ebpf/eltanin-device-guard/`,
+  `crates/eltanin-apple` — F-M1-010/HORO-1012, ADR 0007), and every
   `unsafe` block there must carry a `// SAFETY:` comment.
+  `crates/eltanin-apple` does not blanket-allow `unsafe_code` or add its
+  own `#![forbid(unsafe_code)]` override — it carries a single scoped
+  `#[allow(unsafe_code)]` on the one function that dispatches a real
+  Metal compute kernel and reads back its result
+  (`crate::probe::run_compute_probe`); every other function in that
+  crate, including device discovery, uses zero `unsafe` code.
 
 ## Architecture boundaries
 
@@ -29,8 +36,9 @@ architecture decision.
   Those crates depend on `crates/eltanin-backend`'s trait contract, never
   on a concrete vendor backend. The vendor backend (`crates/eltanin-nvidia`,
   added by F-M1-002) depends on `eltanin-backend`, never the reverse. The
-  same rule applies to the Apple Silicon adapter added by the MVP 1.0
-  scope amendment (HORO-1010+): `eltanin-core::resource::Capability`'s
+  same rule applies to the Apple Silicon adapter (`crates/eltanin-apple`,
+  F-M1-010/HORO-1012) added by the MVP 1.0 scope amendment (HORO-1010+):
+  `eltanin-core::resource::Capability`'s
   nine dimensions (HORO-1011,
   [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md))
   are the vendor-neutral vocabulary every adapter reports itself
