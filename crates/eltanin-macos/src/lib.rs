@@ -169,12 +169,12 @@ mod imp {
             let parent_info = bsd_info(parent);
             out.push(ProcessAncestor {
                 pid: parent,
-                start: parent_info
-                    .as_ref()
-                    .map(process_start)
-                    .unwrap_or(Evidence::Missing {
+                start: parent_info.as_ref().map_or_else(
+                    |_| Evidence::Missing {
                         reason: format!("proc_pidinfo({parent}) failed while walking ancestry"),
-                    }),
+                    },
+                    process_start,
+                ),
                 executable_path: executable_path(parent),
             });
             current = parent;
