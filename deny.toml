@@ -7,9 +7,10 @@ yanked = "deny"
 
 [licenses]
 version = 2
-# Placeholder while Eltanin's own LICENSE is undecided (HORO-781). Common
-# permissive licenses are allowed for dependencies regardless of the
-# project's own eventual license choice.
+# Eltanin's own license is Apache-2.0 (founder decision, HORO-781; see
+# LICENSE/NOTICE and every crate's `license.workspace = true`). This list
+# governs third-party dependency licenses, independent of that choice —
+# common permissive licenses compatible with Apache-2.0 distribution.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -22,11 +23,13 @@ allow = [
 confidence-threshold = 0.8
 
 [licenses.private]
-# Eltanin's own workspace crates (publish = false) have no `license` field
-# yet — the project's own license is an open founder decision (HORO-781),
-# tracked separately from third-party dependency licensing. Don't fail CI
-# on our own unpublished crates for a decision that hasn't been made yet;
-# this only exempts crates with publish = false, never third-party deps.
+# Every workspace crate now declares `license.workspace = true` = "Apache-2.0"
+# (HORO-781), so this no longer needs to exempt them from the license
+# check on that basis. `ignore = true` is kept because every crate here
+# also has `publish = false` (not intended for crates.io) — cargo-deny's
+# own docs recommend `ignore = true` for that case regardless of whether
+# a `license` field is present, since the field's accuracy is moot for a
+# crate that is never published.
 ignore = true
 
 [bans]

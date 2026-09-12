@@ -3,6 +3,7 @@ name = "eltanin-backend"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license.workspace = true
 description = "Eltanin protected-resource backend trait contract + deterministic fake backend (MVP 1.0 scaffold)."
 
 [lints]

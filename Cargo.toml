@@ -25,6 +25,11 @@ members = [
 version = "0.1.0"
 edition = "2021"
 publish = false
+# Founder decision (HORO-781): Apache License 2.0. See LICENSE/NOTICE at
+# the repo root. `publish = false` means this doesn't gate crates.io
+# publishing (not planned for MVP 1.0) — it documents this workspace's
+# real license for cargo-deny (deny.toml) and any downstream consumer.
+license = "Apache-2.0"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

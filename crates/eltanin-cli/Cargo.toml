@@ -3,6 +3,7 @@ name = "eltanin-cli"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license.workspace = true
 description = "eltanin run — controlled protected launch (F-M1-008, HORO-823/845/846)."
 
 [[bin]]
