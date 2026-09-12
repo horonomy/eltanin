@@ -200,14 +200,6 @@ fn agent_source_contains_no_unsafe_code() {
 /// unconditionally.
 #[test]
 fn agent_source_never_constructs_a_peer_context_directly() {
-    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    code_files(&src_dir, &mut files);
-    assert!(
-        !files.is_empty(),
-        "expected to find eltanin-agent source files to scan"
-    );
-
     const FORBIDDEN_PEER_CONSTRUCTORS: &[&str] = &[
         "PeerCredential::from_kernel",
         "PeerCredential::new",
@@ -216,6 +208,14 @@ fn agent_source_never_constructs_a_peer_context_directly() {
         "PeerContext::from_kernel_observation",
         "PeerContext::peer_unmapped",
     ];
+
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    code_files(&src_dir, &mut files);
+    assert!(
+        !files.is_empty(),
+        "expected to find eltanin-agent source files to scan"
+    );
 
     let mut violations = Vec::new();
     for file in &files {
