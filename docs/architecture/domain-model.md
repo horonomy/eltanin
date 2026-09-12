@@ -662,6 +662,53 @@ obligation for "never start with globally-permissive access before
 authorization" is: no `Command::spawn` before an observed
 `LeaseGranted`. Full detail: `docs/product/CLI_CONTRACT.md`.
 
+## Apple Silicon Metal backend (F-M1-010, HORO-1012) — `eltanin-apple`
+
+`AppleBackend` implements `ComputeBackend` (see above) for the system
+Metal GPU device, per [ADR 0007](../adr/0007-apple-silicon-metal-backend.md).
+
+| Type | Purpose |
+|---|---|
+| `device::DeviceSnapshot` | An owned, plain-Rust snapshot of one Metal device's static attributes (`registry_id`, `name`, `has_unified_memory`) — unconditional (not `cfg`-gated), so `backend::snapshot_to_resource` can be tested as a pure function on any target, including hardware-free Linux CI. |
+| `device::snapshot_all` | Enumerates every Metal device via `MTLCopyAllDevices` on `macos`; returns an empty `Vec` (no Metal call attempted) on every other target. Uses zero `unsafe` code — every `objc2-metal` call it makes is a safe function on the pinned version. |
+| `backend::AppleBackend` | Holds no Metal/`objc2` state — every method acquires what it needs locally via `device::snapshot_all` and returns owned values, so it is trivially `Send + Sync`. |
+| `probe::run_compute_probe` | Standalone function (not a `ComputeBackend` method): compiles and dispatches a trivial inline Metal kernel, reads back the result, and asserts correctness. Real-hardware-tagged integration evidence for HORO-1015, never part of `discover`, which stays cheap and side-effect-free. |
+
+Capability honesty (`backend::snapshot_to_resource`, via
+`ResourceCapabilities::from_states`, never `::new`): `DiscoverResource`
+`Supported`; `ObserveResource` `Partial` (static attributes only, no
+utilization API); `ObserveWorkload`/`AttributeWorkload`/`Authorize`/
+`DeviceEnforce`/`DeviceRevoke`/`Attest` all `Unsupported`;
+`ControlledLaunch` `NotEvaluated` (HORO-1013's scope, not claimed here).
+Memory: `hasUnifiedMemory() == true` → `AcceleratorMemory::Unified`
+(no byte count); `false` → `NotReportable`. Never synthesizes
+`Dedicated{total_bytes}` from a working-set-recommendation API.
+
+`AppleBackend::discover`/`observe` are `cfg`-gated to `macos`, returning
+`BackendError::Unsupported` on every other target with zero Metal calls
+attempted. `AppleBackend::enforce`/`revoke` are **not** `cfg`-gated — they
+report `EnforcementResult::Unsupported` unconditionally on every target,
+so no compilation path can produce `Allowed` from this backend.
+
+Unsafe boundary: this crate carries no crate-level `#![forbid(unsafe_code)]`
+or blanket allow — a single scoped `#[allow(unsafe_code)]` on
+`probe::run_compute_probe` covers the Metal buffer-binding and
+compute-buffer readback calls that are genuinely `unsafe` on the pinned
+`objc2-metal` version; every other function in this crate uses zero
+`unsafe` code. See ADR 0007 and the amendment note on
+[ADR 0004](../adr/0004-local-ipc-and-nvml-ffi-boundary.md).
+
+`ResourceVendor::new("apple")` and `ResourceKind::gpu()` are constructed
+inside this crate — `eltanin-core` gains no `ResourceVendor::apple()`
+helper. `ResourceIdentity::local_id` is the device's `registryID` (a
+stable per-device identifier), never its human-readable `name`.
+
+**E2 evidence, not E3.** This backend is additive functional proof of
+real Metal GPU compute (ADR 0006's E2 evidence class) — it makes zero
+device-level protection claim. The E3 (Linux/NVIDIA, F-M1-007) evidence
+class remains the sole, mandatory basis for any device-level protection
+claim this project makes.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`
