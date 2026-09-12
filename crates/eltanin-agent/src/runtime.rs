@@ -70,8 +70,13 @@ pub enum InstanceIdError {
 /// process's own `/proc`-observed start token is not
 /// [`Evidence::Present`].
 pub fn issuer_instance_id() -> Result<IssuerInstanceId, InstanceIdError> {
+    #[cfg(not(target_os = "macos"))]
+    use eltanin_linux as platform;
+    #[cfg(target_os = "macos")]
+    use eltanin_macos as platform;
+
     let pid = std::process::id();
-    let identity = eltanin_linux::collect_workload_identity(pid);
+    let identity = platform::collect_workload_identity(pid);
     match identity.process_start {
         Evidence::Present { value, .. } => Ok(IssuerInstanceId::new(format!(
             "agent-pid-{pid}-start-{}",

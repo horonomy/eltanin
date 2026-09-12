@@ -185,3 +185,30 @@ fn canonical_scenario_id_appears_in_quickstart_and_its_track_b_record() {
         "docs/qa/e2e/F-M1-008-controlled-launch.md must cite {CANONICAL_SCENARIO_ID:?}"
     );
 }
+
+/// `eltanin-cli::client::DEFAULT_SOCKET_PATH` is a deliberate copy of
+/// `eltanin_agent::config::DEFAULT_SOCKET_PATH` (see both constants' doc
+/// comments) rather than a shared dependency — HORO-1013 added a
+/// `target_os = "macos"` arm to both. Reading both files' source
+/// (`include_str!`, not subject to `cfg`) so this drift-guard runs on
+/// every platform, not only the one whose arm happens to be active.
+#[test]
+fn cli_and_agent_default_socket_paths_stay_pinned_together_on_every_platform() {
+    let agent_config = include_str!("../../eltanin-agent/src/config.rs");
+    let cli_client = include_str!("../../eltanin-cli/src/client.rs");
+
+    for path in ["/run/eltanin/agent.sock", "/var/run/eltanin/agent.sock"] {
+        let literal = format!("\"{path}\"");
+        assert!(
+            agent_config.contains(&literal),
+            "eltanin-agent/src/config.rs must define DEFAULT_SOCKET_PATH = {literal} for some \
+             target_os"
+        );
+        assert!(
+            cli_client.contains(&literal),
+            "eltanin-cli/src/client.rs must define DEFAULT_SOCKET_PATH = {literal} for some \
+             target_os — kept in sync with eltanin-agent/src/config.rs by hand, not by a shared \
+             dependency (see that constant's doc comment)"
+        );
+    }
+}

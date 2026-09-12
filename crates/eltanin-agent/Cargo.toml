@@ -15,6 +15,14 @@ path = "src/bin/eltanin-agentd.rs"
 
 [dependencies]
 eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+# The Linux platform collector is kept as an unconditional dependency
+# (rather than target-gated) because it already has a working non-Linux
+# `Unsupported` fallback (see its own crate docs) and stays the
+# `platform` alias on every non-macOS target, including this repo's
+# ubuntu-latest CI. eltanin-macos is target-gated to macOS only,
+# selected by the same `platform` alias in src/peer.rs and
+# src/runtime.rs (HORO-1013) — the two are mutually exclusive by
+# `target_os`, never both compiled for the same build.
 eltanin-linux = { path = "../eltanin-linux", version = "0.1.0" }
 eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
 eltanin-backend = { path = "../eltanin-backend", version = "0.1.0" }
@@ -25,6 +33,13 @@ thiserror = { workspace = true }
 # Promoted from a dev-dependency (HORO-839) to a real one: the daemon
 # binary loads a PolicyDocument from a JSON file at startup (HORO-840).
 serde_json = { workspace = true }
+
+# macOS platform collector (HORO-1013) — target-gated to macOS only, so
+# no objc2/nix/libproc dependency enters this crate's dependency graph
+# on any other target (see eltanin-linux's identical rustix gating
+# above).
+[target.'cfg(target_os = "macos")'.dependencies]
+eltanin-macos = { path = "../eltanin-macos", version = "0.1.0" }
 
 # Socket-directory ownership validation (listener.rs) needs this
 # process's own euid. rustix's safe geteuid() wrapper keeps this crate
@@ -46,7 +61,8 @@ default-features = false
 features = ["iterator"]
 
 [dev-dependencies]
-# Enables PeerCredential::new/PeerContext::new (test doubles only) for
-# this crate's integration tests, without exposing them to production
-# builds — see eltanin-linux/Cargo.toml's "test-support" feature doc.
-eltanin-linux = { path = "../eltanin-linux", version = "0.1.0", features = ["test-support"] }
+# Enables PeerCredential::for_test/PeerContext::for_test (test doubles
+# only) for this crate's integration tests, without exposing them to
+# production builds — see eltanin-core/Cargo.toml's "test-support"
+# feature doc. Relocated from eltanin-linux by HORO-1013.
+eltanin-core = { path = "../eltanin-core", version = "0.1.0", features = ["test-support"] }

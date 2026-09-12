@@ -17,7 +17,7 @@
 //! | Field | Source | On the wire? |
 //! |---|---|---|
 //! | `pid` | transport peer credential (HORO-839) | no |
-//! | `process_start`, `uid`, `gid`, `executable_path`, `executable_hash`, `ancestry` | `eltanin_linux` collector, keyed on the peer pid | no |
+//! | `process_start`, `uid`, `gid`, `executable_path`, `executable_hash`, `ancestry` | the platform collector (`eltanin_linux`/`eltanin_macos`), keyed on the peer pid | no |
 //! | `cgroup_path`, `namespace_hint`, `container_hint`, `session_origin` | same collector | no |
 //! | `resource`, `action` | **client** — a request parameter; default-deny policy means it can only narrow what's already permitted, never grant it | yes |
 //! | `request_id` | **client** — correlation only, no authority | yes |

@@ -9,6 +9,7 @@
 pub mod envelope;
 pub mod identity;
 pub mod lease;
+pub mod peer;
 pub mod policy;
 pub mod provenance;
 pub mod resource;

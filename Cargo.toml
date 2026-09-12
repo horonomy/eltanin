@@ -9,6 +9,7 @@ members = [
     "crates/eltanin-audit",
     "crates/eltanin-cli",
     "crates/eltanin-apple",
+    "crates/eltanin-macos",
 ]
 
 # Layout and naming match the Jira Component table on HORO-772/HORO-780
@@ -28,6 +29,18 @@ members = [
 # Cargo.toml, so they never enter a non-macOS build's dependency graph,
 # while the crate itself still participates in every
 # `cargo {clippy,test,doc} --workspace` CI gate on every target.
+# crates/eltanin-macos was added by F-M1-010/HORO-1013 (the macOS
+# platform adapter: workload identity, local IPC peer credential, and
+# controlled-launch support). It is the macOS counterpart to
+# crates/eltanin-linux, not an extension of crates/eltanin-apple — see
+# ADR 0008: an accelerator vendor adapter (eltanin-apple) and an OS
+# platform adapter (eltanin-macos) are different concerns, exactly as
+# they already are for Linux/NVIDIA (eltanin-linux vs. the not-yet-built
+# eltanin-nvidia), and eltanin-agent may depend on a platform adapter
+# but never on a vendor backend (docs/product/PRODUCT_CONSTITUTION.md).
+# Its nix/libproc dependencies are target-gated to `cfg(target_os =
+# "macos")` in its own Cargo.toml, kept out of any non-macOS build's
+# dependency graph, while the crate stays a normal workspace member.
 
 [workspace.package]
 version = "0.1.0"

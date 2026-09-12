@@ -21,7 +21,7 @@ use eltanin_agent::authz::audit::AuditEventSink;
 use eltanin_agent::authz::event::{EventSink, StderrSink};
 use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::config::{AgentConfig, DEFAULT_SOCKET_PATH};
-use eltanin_agent::peer::LinuxPeerContextSource;
+use eltanin_agent::peer::OsPeerContextSource;
 use eltanin_agent::runtime::{issuer_instance_id, AgentClock};
 use eltanin_agent::{authz, daemon};
 use eltanin_backend::fake::FakeBackend;
@@ -114,7 +114,7 @@ fn run() -> Result<(), String> {
     ));
 
     let config = AgentConfig::new(socket_path, socket_mode);
-    let report = daemon::run(config, handler, Arc::new(LinuxPeerContextSource))
+    let report = daemon::run(config, handler, Arc::new(OsPeerContextSource))
         .map_err(|e| format!("agent startup failed: {e}"))?;
     eprintln!(
         "eltanin-agentd: shut down (drained {}, abandoned {})",

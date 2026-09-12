@@ -9,6 +9,22 @@ use std::time::Duration;
 /// crate's "no silent default for a security-relevant choice" stance
 /// (see [`AgentConfig::new`]'s `socket_mode` parameter for the same
 /// reasoning).
+///
+/// `/run` does not exist on macOS (HORO-1013): the macOS default is
+/// `/var/run/eltanin/agent.sock` instead. `/var/run` is itself a
+/// symlink to `/private/var/run` on stock macOS, but the path is
+/// resolved by the kernel at bind/connect time, so this constant does
+/// not need to spell out the resolved form. The same root-owned-
+/// parent-directory caveat this crate's Linux deployment docs already
+/// state applies unchanged; `ELTANIN_AGENT_SOCKET` overrides this for
+/// dev/QA on either platform — see `crates/eltanin-cli/tests/docs_sync.rs`
+/// pinning `eltanin-cli::client::DEFAULT_SOCKET_PATH` to this constant.
+#[cfg(target_os = "macos")]
+pub const DEFAULT_SOCKET_PATH: &str = "/var/run/eltanin/agent.sock";
+
+/// See the macOS-arm doc comment above for the full rationale; this is
+/// the Linux/other-Unix default, unchanged since F-M1-006.
+#[cfg(not(target_os = "macos"))]
 pub const DEFAULT_SOCKET_PATH: &str = "/run/eltanin/agent.sock";
 
 /// Socket mode permitting any local user to connect. Connect permission

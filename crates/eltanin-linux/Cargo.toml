@@ -9,20 +9,8 @@ description = "Linux adapter that derives WorkloadIdentity/ExecutionContext from
 [lints]
 workspace = true
 
-[features]
-# Gates PeerCredential::new/PeerContext::new (crate::peer) — public
-# constructors that bypass kernel derivation entirely, needed by
-# downstream crates' test doubles (eltanin-agent's tests/) but never by
-# production code. A Cargo feature, not #[cfg(test)], because #[cfg(test)]
-# is only active when compiling this crate itself with --test, not for
-# a downstream crate that depends on it normally. eltanin-agent enables
-# this only in its [dev-dependencies], so it is active for `cargo test`
-# but absent from every ordinary build.
-test-support = []
-
 [dependencies]
 eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
-thiserror = { workspace = true }
 
 # SO_PEERCRED access (crate::peer) is Linux-only and needed on no other
 # target, so it is declared as a target-specific dependency rather than

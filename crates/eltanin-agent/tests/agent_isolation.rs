@@ -13,27 +13,28 @@ use std::time::Duration;
 use eltanin_agent::config::AgentConfig;
 use eltanin_agent::handler::{RequestHandler, StatusOnlyHandler};
 use eltanin_agent::listener::BoundSocket;
-use eltanin_agent::peer::{LinuxPeerContextSource, PeerContextSource};
+use eltanin_agent::peer::{OsPeerContextSource, PeerContextSource};
 use eltanin_agent::server::AgentServer;
 use eltanin_core::envelope::{Versioned, DOMAIN_SCHEMA_VERSION};
-use eltanin_linux::peer::{PeerContext, PeerCredentialError};
+use eltanin_core::peer::{PeerContext, PeerCredentialError};
 use eltanin_protocol::request::{ClientRequest, RequestBody, RequestId};
 use eltanin_protocol::response::{AgentResponse, ResponseBody};
 use support::temp_socket_path;
 
-/// A `PeerContextSource` that always succeeds, wrapping the real Linux
+/// A `PeerContextSource` that always succeeds, wrapping the real OS
 /// derivation with a self-connect fallback — this file runs on both
-/// Linux (`SO_PEERCRED` against this test binary's own process) and
-/// macOS (falls back to the stub-shaped identity below), so the
-/// isolation behavior under test isn't gated on a real Linux
-/// environment.
+/// Linux and macOS (`OsPeerContextSource` derives a real credential
+/// against this test binary's own process on either), falling back to
+/// the stub-shaped identity below only if that ever fails, so the
+/// isolation behavior under test isn't gated on either platform's
+/// derivation succeeding.
 struct AnyPlatformPeers;
 
 impl PeerContextSource for AnyPlatformPeers {
     fn derive(&self, stream: &UnixStream) -> Result<PeerContext, PeerCredentialError> {
-        LinuxPeerContextSource.derive(stream).or_else(|_| {
+        OsPeerContextSource.derive(stream).or_else(|_| {
             use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
-            use eltanin_linux::peer::{PeerConsistency, PeerCredential};
+            use eltanin_core::peer::{PeerConsistency, PeerCredential};
             let workload = WorkloadIdentity {
                 pid: std::process::id(),
                 process_start: Evidence::Unsupported,

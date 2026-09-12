@@ -31,6 +31,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  clippy-macos:
+    # Real compile+lint coverage for eltanin-macos's target_os = "macos"
+    # code path (HORO-1013) — the ubuntu-latest `clippy` job above never
+    # even type-checks it (the cfg condition is false there). Unlike
+    # ADR 0007's Apple Silicon *Metal* backend (deliberately left off
+    # CI, since its device-discovery/capability-mapping logic is
+    # unconditional and already testable on ubuntu-latest), HORO-1013's
+    # macOS code is almost entirely behind cfg(target_os = "macos"), so
+    # this job is the only CI coverage it gets at all. Free on this
+    # public repo (GitHub does not bill macOS runner minutes on public
+    # repos) — see ADR 0008.
+    name: clippy (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
   test:
     name: test (no GPU / fake backend)
     runs-on: ubuntu-latest
@@ -44,6 +65,34 @@ jobs:
       - name: Track A — full hardware-free suite
         if: success() || failure()
         run: cargo test --workspace
+
+  test-macos:
+    # Real execution of the macOS peer-credential/workload-identity
+    # collector (HORO-1013) — see clippy-macos above for why this job
+    # exists at all. This is genuine functional evidence (real
+    # LOCAL_PEERCRED/LOCAL_PEERPID/libproc calls against a real macOS
+    # kernel), not a cross-compile check.
+    #
+    # Deliberately `--exclude eltanin-apple`: that crate's
+    # `metal_compute_probe.rs` unconditionally dispatches a real Metal
+    # kernel and asserts success with no hardware-availability skip.
+    # ADR 0007 explicitly decided against a macOS CI runner for that
+    # probe (a virtualized/hosted GPU is not the evidence class it
+    # exists to produce), and producing that Feature Verification
+    # Record is HORO-1015's scope, not this ticket's — see ADR 0008's
+    # CI section. Every other crate still builds and runs here.
+    name: test (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets --exclude eltanin-apple
+      - name: Track B — canonical Product/Business E2E
+        run: cargo test -p eltanin-cli --test canonical_e2e
+      - name: Track A — full hardware-free suite (excludes eltanin-apple's real-hardware Metal probe)
+        if: success() || failure()
+        run: cargo test --workspace --exclude eltanin-apple
 
   deny:
     name: cargo-deny (license/advisory)

@@ -28,6 +28,14 @@ architecture decision.
   Metal compute kernel and reads back its result
   (`crate::probe::run_compute_probe`); every other function in that
   crate, including device discovery, uses zero `unsafe` code.
+  `crates/eltanin-macos` (F-M1-010/HORO-1013, [ADR 0008](../adr/0008-macos-platform-adapter-and-local-peer-identity.md))
+  is the macOS **platform** adapter (process identity, local IPC peer
+  credential) — distinct from `crates/eltanin-apple`, the macOS
+  **vendor** (accelerator) adapter — and needed no `unsafe` escape hatch
+  at all: it keeps `#![forbid(unsafe_code)]`, using `nix`/`libproc`'s
+  safe wrappers over `LOCAL_PEERCRED`/`LOCAL_PEERPID`/`proc_pidinfo`/
+  `proc_pidpath`, the same "safe wrapper crate" trade-off `eltanin-linux`
+  already makes for `SO_PEERCRED` via `rustix`.
 
 ## Architecture boundaries
 
@@ -54,10 +62,17 @@ architecture decision.
 - **Local persistence, local IPC.** The agent's local state does not
   require a network call to function (North Star invariant 9). The IPC
   boundary itself (`crates/eltanin-protocol`) is a **versioned Unix
-  Domain Socket protocol** on Linux MVP, with caller identity/context
-  derived from OS peer credentials (`SO_PEERCRED`) rather than trusted
-  from anything the caller asserts about itself — see HORO-788 and
-  [ADR 0004](../adr/0004-local-ipc-and-nvml-ffi-boundary.md).
+  Domain Socket protocol**, with caller identity/context derived from OS
+  peer credentials (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED`/
+  `LOCAL_PEERPID` on macOS) rather than trusted from anything the caller
+  asserts about itself — see HORO-788, [ADR 0004](../adr/0004-local-ipc-and-nvml-ffi-boundary.md),
+  and, for the macOS platform adapter (F-M1-010/HORO-1013),
+  [ADR 0008](../adr/0008-macos-platform-adapter-and-local-peer-identity.md).
+  The shared peer-credential contract
+  (`eltanin_core::peer::{PeerCredential, PeerConsistency, PeerContext}`)
+  lives in `crates/eltanin-core` so both platform adapters
+  (`crates/eltanin-linux`, `crates/eltanin-macos`) produce it without
+  either depending on the other.
 - **Versioned protocol over unstable ABI.** When the backend boundary is
   externalized (e.g. out-of-process backend), use a versioned
   process/protocol boundary — never rely on Rust's unstable dynamic ABI

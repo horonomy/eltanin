@@ -1,22 +1,26 @@
 # Quickstart — `eltanin run`
 
 This walks through the exact ALLOW and DENY journeys MVP 1.0 supports for
-`eltanin run`, on bare-metal Linux. Every command below is exercised,
-byte-for-byte, by the canonical Product E2E scenario
+`eltanin run`, on bare-metal Linux or macOS. Every command below is
+exercised, byte-for-byte, by the canonical Product E2E scenario
 `E2E-F-M1-008-controlled-launch-v1`
 (`crates/eltanin-cli/tests/canonical_e2e.rs`, `tests/docs_sync.rs` pins
-this page to it) — if a command here ever drifted from what that test
-actually runs, CI would fail. See
+this page to it), on both platforms — if a command here ever drifted
+from what that test actually runs, CI would fail. See
 [`docs/qa/e2e/F-M1-008-controlled-launch.md`](../qa/e2e/F-M1-008-controlled-launch.md)
 for the full evidence record this scenario produces.
 
-**Platform**: bare-metal Linux only (MVP 1.0's only supported platform —
-see `README.md`). **Backend**: `FakeBackend` — this Quickstart proves the
-*authorization* path end to end; it is not GPU hardware enforcement
-evidence (that is F-M1-002/F-M1-007's, gated on bare-metal NVIDIA
-hardware). **Do not run as root** — the policy below denies uid `0`
-outright (see step 2), so a root shell will always get the DENY journey,
-never ALLOW.
+**Platform**: bare-metal Linux, or Apple Silicon macOS (F-M1-010,
+HORO-1013 — see `README.md`). **Backend**: `FakeBackend` — this
+Quickstart proves the *authorization* path end to end; it is not GPU
+hardware enforcement evidence (that is F-M1-002/F-M1-007's, gated on
+bare-metal NVIDIA hardware, and remains the sole device-level
+enforcement basis — see `docs/product/SECURITY_MODEL.md`'s E2/E3
+distinction). On macOS specifically, this proves **managed
+controlled-launch authorization**, never device-level Metal enforcement
+— no Metal/GPU guard exists or is claimed here. **Do not run as root** —
+the policy below denies uid `0` outright (see step 2), so a root shell
+will always get the DENY journey, never ALLOW.
 
 ## What this proves, and what it does not
 

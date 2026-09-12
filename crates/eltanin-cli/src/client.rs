@@ -22,10 +22,17 @@ use eltanin_protocol::request::{ClientRequest, RequestBody, RequestId};
 use eltanin_protocol::response::AgentResponse;
 
 /// The agent's default socket path (mirrors
-/// `eltanin_agent::config::DEFAULT_SOCKET_PATH`) — copied here rather
-/// than adding an `eltanin-agent` dependency for one constant;
-/// `eltanin-cli` is a client of the agent's wire protocol
-/// (`eltanin-protocol`), not of its implementation.
+/// `eltanin_agent::config::DEFAULT_SOCKET_PATH`, including its per-`target_os`
+/// arm added by HORO-1013 — see that constant's doc comment for the
+/// macOS rationale) — copied here rather than adding an `eltanin-agent`
+/// dependency for one constant; `eltanin-cli` is a client of the
+/// agent's wire protocol (`eltanin-protocol`), not of its
+/// implementation. `crates/eltanin-cli/tests/docs_sync.rs` pins these
+/// two literals together so they cannot silently drift.
+#[cfg(target_os = "macos")]
+const DEFAULT_SOCKET_PATH: &str = "/var/run/eltanin/agent.sock";
+
+#[cfg(not(target_os = "macos"))]
 const DEFAULT_SOCKET_PATH: &str = "/run/eltanin/agent.sock";
 
 /// Client-side I/O timeout. The agent applies its own timeout

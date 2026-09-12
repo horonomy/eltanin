@@ -1,14 +1,16 @@
-//! Linux-only end-to-end coverage: a real `UnixStream`, real
-//! `SO_PEERCRED` credential derivation via [`LinuxPeerContextSource`],
-//! through [`serve_connection`], into a real [`AuthorizationHandler`]
-//! (F-M1-006, HORO-840). Every other `authz_*.rs` test calls
-//! `AuthorizationHandler::handle` directly with a stub `PeerContext` —
-//! this file is the one place the whole stack is exercised together
-//! over an actual socket, on `target_os = "linux"` only (this repo's
-//! `ubuntu-latest` CI runner), matching the pattern already established
-//! by `crates/eltanin-linux/tests/peer_credential.rs`.
+//! Linux/macOS end-to-end coverage: a real `UnixStream`, real kernel
+//! peer-credential derivation via [`OsPeerContextSource`], through
+//! [`serve_connection`], into a real [`AuthorizationHandler`]
+//! (F-M1-006, HORO-840; widened to macOS by HORO-1013). Every other
+//! `authz_*.rs` test calls `AuthorizationHandler::handle` directly with
+//! a stub `PeerContext` — this file is the one place the whole stack is
+//! exercised together over an actual socket, on the two platforms this
+//! workspace has a real peer-credential collector for (this repo's
+//! `ubuntu-latest` and `macos-latest` CI runners), matching the pattern
+//! already established by `crates/eltanin-linux/tests/peer_credential.rs`
+//! and `crates/eltanin-macos/tests/peer_credential.rs`.
 
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 
 mod support;
 
@@ -20,7 +22,7 @@ use std::time::Duration;
 use eltanin_agent::authz::event::NullSink;
 use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::connection::serve_connection;
-use eltanin_agent::peer::LinuxPeerContextSource;
+use eltanin_agent::peer::OsPeerContextSource;
 use eltanin_backend::fake::FakeBackend;
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::IssuerInstanceId;
@@ -36,12 +38,17 @@ use support::authz::resource_identity;
 use support::temp_socket_path;
 
 fn real_uid() -> u32 {
-    let identity = eltanin_linux::collect_workload_identity(std::process::id());
+    #[cfg(not(target_os = "macos"))]
+    use eltanin_linux as platform;
+    #[cfg(target_os = "macos")]
+    use eltanin_macos as platform;
+
+    let identity = platform::collect_workload_identity(std::process::id());
     identity
         .uid
         .value()
         .copied()
-        .expect("this process's own /proc uid must be observable in CI")
+        .expect("this process's own uid must be observable in CI")
 }
 
 fn policy_allowing_this_process() -> PolicySet {
@@ -112,7 +119,7 @@ fn a_real_peer_over_a_real_socket_is_granted_a_lease_via_the_fake_backend() {
             stream,
             Duration::from_secs(2),
             handler.as_ref(),
-            &LinuxPeerContextSource,
+            &OsPeerContextSource,
         );
     });
 

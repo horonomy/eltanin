@@ -2,10 +2,10 @@
 //! (F-M1-009, HORO-824).
 //!
 //! Converts this crate's [`AuthorizationEvent`] and
-//! `eltanin_linux::peer` types into `eltanin-audit`'s plain,
+//! `eltanin_core::peer` types into `eltanin-audit`'s plain,
 //! `Deserialize`-safe `Recorded*` mirrors — `eltanin-audit` cannot
-//! depend on `eltanin-linux` or `eltanin-agent` (see its own crate
-//! docs), so this conversion lives here, agent-side.
+//! depend on `eltanin-linux`/`eltanin-macos` or `eltanin-agent` (see
+//! its own crate docs), so this conversion lives here, agent-side.
 //!
 //! # Durability is best-effort — by explicit founder decision
 //!
@@ -30,8 +30,8 @@ use eltanin_audit::record::{
 };
 use eltanin_audit::sink::{AuditEntry, AuditFileSink, AuditSinkError};
 use eltanin_core::lease::{IssuerInstanceId, LeaseError, LeaseValidity};
+use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_core::policy::{DecisionReason, PolicyDecision, PolicyProvenance};
-use eltanin_linux::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_protocol::request::ClientRequest;
 
 use super::event::{AuthorizationEvent, AuthorizationOutcome, EventSink, Operation};

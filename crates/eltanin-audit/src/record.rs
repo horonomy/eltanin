@@ -114,7 +114,7 @@ pub enum RecordedRequest {
     AgentStatus,
 }
 
-/// Mirror of `eltanin_linux::peer::PeerCredential` — plain data, no
+/// Mirror of `eltanin_core::peer::PeerCredential` — plain data, no
 /// serde derives on the original (it isn't meant to cross a wire), so
 /// this crate keeps its own `Deserialize`-safe copy rather than adding
 /// serde to a crate this one cannot depend on anyway.
@@ -125,7 +125,7 @@ pub struct RecordedPeerCredential {
     pub effective_gid: u32,
 }
 
-/// Mirror of `eltanin_linux::peer::PeerConsistency`.
+/// Mirror of `eltanin_core::peer::PeerConsistency`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "consistency")]
 pub enum RecordedPeerConsistency {
