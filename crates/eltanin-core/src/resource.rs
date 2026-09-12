@@ -13,7 +13,7 @@
 //! placeholder — a real requirement for audit evidence (F-M1-009) to
 //! actually preserve what was observed.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -149,40 +149,105 @@ pub enum Capability {
     Attest,
 }
 
-/// The set of capabilities a backend actually supports for a resource.
+/// The support state a backend actually reports for each capability of a
+/// resource.
 ///
 /// Deliberately a value type, not a trait — "does this backend support
-/// X" must be checkable data (so a caller can explicitly detect and
-/// report a capability downgrade), never an assumption baked into
-/// control flow.
+/// X, and how well" must be checkable data (so a caller can explicitly
+/// detect and report a capability downgrade), never an assumption baked
+/// into control flow.
+///
+/// The internal map deliberately has no `#[serde(default)]`: an older
+/// `{"supported": [...]}` document (the pre-HORO-1011 shape) must fail
+/// to decode loudly, not silently become an empty map — which would
+/// read as "every capability `NotEvaluated`" and erase the old
+/// document's claims. See
+/// `docs/adr/0006-cross-accelerator-capability-and-memory-model.md`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceCapabilities {
-    supported: BTreeSet<Capability>,
+    support: BTreeMap<Capability, SupportState>,
 }
 
 impl ResourceCapabilities {
+    /// Every listed capability is [`SupportState::Supported`]; anything
+    /// not listed is [`SupportState::NotEvaluated`], never `Supported`.
+    /// For a backend that knows about partial/unsupported states, use
+    /// [`Self::from_states`] instead.
     pub fn new(supported: impl IntoIterator<Item = Capability>) -> Self {
         Self {
-            supported: supported.into_iter().collect(),
+            support: supported
+                .into_iter()
+                .map(|capability| (capability, SupportState::Supported))
+                .collect(),
         }
     }
 
-    #[must_use]
-    pub fn supports(&self, capability: Capability) -> bool {
-        self.supported.contains(&capability)
+    /// Explicit per-capability support states, for a backend that can
+    /// distinguish `Partial`/`Unsupported` from "not evaluated."
+    pub fn from_states(states: impl IntoIterator<Item = (Capability, SupportState)>) -> Self {
+        Self {
+            support: states.into_iter().collect(),
+        }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Capability> + '_ {
-        self.supported.iter().copied()
+    /// A capability absent from the map is [`SupportState::NotEvaluated`]
+    /// — absence never means "supported."
+    #[must_use]
+    pub fn state_of(&self, capability: Capability) -> SupportState {
+        self.support
+            .get(&capability)
+            .copied()
+            .unwrap_or(SupportState::NotEvaluated)
+    }
+
+    /// True iff `capability`'s state is exactly [`SupportState::Supported`].
+    /// `Partial`, `Unsupported`, and an absent entry all return `false` —
+    /// this is the fail-closed guarantee that partial or unproven support
+    /// can never be read as full protection.
+    #[must_use]
+    pub fn supports(&self, capability: Capability) -> bool {
+        self.state_of(capability).is_proven()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Capability, SupportState)> + '_ {
+        self.support.iter().map(|(&c, &s)| (c, s))
     }
 }
 
-/// A protected resource: its identity plus what a backend actually
-/// supports for it right now.
+/// An accelerator's memory topology, reported truthfully rather than
+/// assumed. `Unified` deliberately carries no byte count — a
+/// shared-memory backend (e.g. Apple Silicon) is never required to
+/// report a fictitious dedicated-VRAM size. A shared memory pool is not,
+/// by itself, an isolation boundary against the host process — see
+/// `docs/adr/0006-cross-accelerator-capability-and-memory-model.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "model")]
+pub enum AcceleratorMemory {
+    /// Memory the accelerator owns exclusively, with a known size.
+    Dedicated { total_bytes: u64 },
+    /// Memory shared with the host; no byte count is required.
+    Unified,
+    /// The backend cannot honestly report a memory model.
+    NotReportable,
+}
+
+impl Default for AcceleratorMemory {
+    fn default() -> Self {
+        Self::NotReportable
+    }
+}
+
+/// A protected resource: its identity, what a backend actually supports
+/// for it right now, and its memory topology.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtectedResource {
     pub identity: ResourceIdentity,
     pub capabilities: ResourceCapabilities,
+    /// Added by HORO-1011. Additive on decode: absent from older-shaped
+    /// JSON decodes as [`AcceleratorMemory::NotReportable`], never a
+    /// hard failure.
+    #[serde(default)]
+    pub memory: AcceleratorMemory,
 }
 
 /// What a workload is asking to do. MVP 1.0 has exactly one meaningful

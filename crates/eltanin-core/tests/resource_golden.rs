@@ -1,13 +1,18 @@
 //! Golden serialization fixtures for the resource domain.
 //!
 //! These fixtures are deterministic byte-for-byte JSON. A test failure
-//! here means the wire shape changed — bump [`DOMAIN_SCHEMA_VERSION`] and
-//! update the fixture deliberately, don't just fix the test to match.
+//! here means the wire shape changed — update the fixture deliberately,
+//! don't just fix the test to match. This does NOT automatically mean
+//! bumping [`DOMAIN_SCHEMA_VERSION`]: see
+//! `docs/adr/0006-cross-accelerator-capability-and-memory-model.md` for
+//! why the HORO-1011 resource-shape change deliberately did not bump it
+//! (that constant is shared with the IPC framing and user-published
+//! policy-document formats, neither of which this change touches).
 
 use eltanin_core::envelope::{Versioned, DOMAIN_SCHEMA_VERSION};
 use eltanin_core::resource::{
-    Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource, ResourceCapabilities,
-    ResourceIdentity, ResourceKind, ResourceVendor,
+    AcceleratorMemory, Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource,
+    ResourceCapabilities, ResourceIdentity, ResourceKind, ResourceVendor,
 };
 
 fn sample_resource() -> ProtectedResource {
@@ -23,6 +28,7 @@ fn sample_resource() -> ProtectedResource {
             Capability::Authorize,
             Capability::DeviceEnforce,
         ]),
+        memory: AcceleratorMemory::NotReportable,
     }
 }
 
@@ -39,12 +45,15 @@ fn protected_resource_golden_json() {
       "local_id": "fake-gpu-0"
     },
     "capabilities": {
-      "supported": [
-        "discover",
-        "observe",
-        "authorize",
-        "enforce"
-      ]
+      "support": {
+        "discover_resource": "supported",
+        "observe_resource": "supported",
+        "authorize": "supported",
+        "device_enforce": "supported"
+      }
+    },
+    "memory": {
+      "model": "not_reportable"
     }
   }
 }"#;
@@ -102,7 +111,7 @@ fn enforcement_result_unsupported_is_distinct_from_allowed() {
         capability: Capability::DeviceEnforce,
     };
     let json = serde_json::to_string(&downgraded).unwrap();
-    assert_eq!(json, r#"{"outcome":"unsupported","capability":"enforce"}"#);
+    assert_eq!(json, r#"{"outcome":"unsupported","capability":"device_enforce"}"#);
     assert_ne!(downgraded, EnforcementResult::Allowed);
 }
 

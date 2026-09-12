@@ -4,8 +4,8 @@
 use eltanin_backend::contract::{BackendError, ComputeBackend};
 use eltanin_backend::fake::FakeBackend;
 use eltanin_core::resource::{
-    Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource, ResourceCapabilities,
-    ResourceIdentity, ResourceKind, ResourceVendor,
+    AcceleratorMemory, Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource,
+    ResourceCapabilities, ResourceIdentity, ResourceKind, ResourceVendor,
 };
 
 fn identity(id: &str) -> ResourceIdentity {
@@ -20,6 +20,7 @@ fn resource_with(id: &str, caps: impl IntoIterator<Item = Capability>) -> Protec
     ProtectedResource {
         identity: identity(id),
         capabilities: ResourceCapabilities::new(caps),
+        memory: AcceleratorMemory::NotReportable,
     }
 }
 

@@ -15,8 +15,8 @@ use eltanin_core::policy::{
     Condition, Effect, EvidenceMatch, PolicyDocument, PolicySet, Rule, RuleId, TrustFloor,
 };
 use eltanin_core::resource::{
-    Action, Capability, ComputeRequest, ProtectedResource, ResourceCapabilities, ResourceIdentity,
-    ResourceKind, ResourceVendor,
+    AcceleratorMemory, Action, Capability, ComputeRequest, ProtectedResource, ResourceCapabilities,
+    ResourceIdentity, ResourceKind, ResourceVendor,
 };
 use eltanin_linux::peer::{PeerConsistency, PeerContext, PeerCredential};
 
@@ -159,6 +159,7 @@ pub fn backend_with_resource(capabilities: &[Capability]) -> Arc<FakeBackend> {
     backend.insert(ProtectedResource {
         identity: resource_identity(),
         capabilities: ResourceCapabilities::new(capabilities.iter().copied()),
+        memory: AcceleratorMemory::NotReportable,
     });
     backend
 }

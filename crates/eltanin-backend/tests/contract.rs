@@ -2,8 +2,8 @@
 
 use eltanin_backend::contract::{BackendError, ComputeBackend};
 use eltanin_core::resource::{
-    Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource, ResourceCapabilities,
-    ResourceIdentity, ResourceKind, ResourceVendor,
+    AcceleratorMemory, Action, Capability, ComputeRequest, EnforcementResult, ProtectedResource,
+    ResourceCapabilities, ResourceIdentity, ResourceKind, ResourceVendor,
 };
 
 /// A minimal backend that lacks `Capability::DeviceEnforce`, used to verify a
@@ -19,6 +19,7 @@ impl ComputeBackend for NoEnforceBackend {
         Ok(ProtectedResource {
             identity: resource.clone(),
             capabilities: ResourceCapabilities::new([Capability::DiscoverResource, Capability::ObserveResource]),
+            memory: AcceleratorMemory::NotReportable,
         })
     }
 
