@@ -9,7 +9,7 @@
 //! against independently observed process state: an unforgeable
 //! [`PeerCredential`], an explicit [`PeerConsistency`] verdict on
 //! whether the two sources still agree, and the raw
-//! [`eltanin_core::identity::ExecutionContext`] observed for audit
+//! [`crate::identity::ExecutionContext`] observed for audit
 //! purposes regardless of that verdict.
 //!
 //! # Production code has exactly one way to construct an authorizable `PeerContext`
@@ -129,8 +129,9 @@ pub enum PeerConsistency {
 /// A connected peer's credential plus what was independently observed
 /// about it, and whether the two agree. Production code has exactly two
 /// real ways to obtain one: [`PeerContext::from_kernel_observation`] and
-/// [`PeerContext::peer_unmapped`]; [`PeerContext::for_test`] exists for
-/// test doubles only, behind the `test-support` feature.
+/// [`PeerContext::peer_unmapped`]; `PeerContext::for_test` (not linked —
+/// only present behind the `test-support` feature) exists for test
+/// doubles only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerContext {
     credential: PeerCredential,
