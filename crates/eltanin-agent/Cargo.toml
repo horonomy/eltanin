@@ -3,6 +3,7 @@ name = "eltanin-agent"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license.workspace = true
 description = "Eltanin privileged local authorization coordinator (MVP 1.0, F-M1-006 / HORO-788/838/839/840, F-M1-009 / HORO-824 audit adapter)."
 
 [lints]

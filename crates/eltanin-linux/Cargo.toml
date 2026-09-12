@@ -3,6 +3,7 @@ name = "eltanin-linux"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license.workspace = true
 description = "Linux adapter that derives WorkloadIdentity/ExecutionContext from observed /proc state (F-M1-003, HORO-832)."
 
 [lints]

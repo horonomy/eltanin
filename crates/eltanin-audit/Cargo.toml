@@ -3,6 +3,7 @@ name = "eltanin-audit"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license.workspace = true
 description = "Eltanin local audit & explain evidence — versioned append-only record schema, file sink, and explain reader (F-M1-009, HORO-824)."
 
 [lints]
