@@ -116,22 +116,23 @@ pre-existing process. Governs HORO-841/844/790/1015 at minimum.
 | HORO-1011 | F-M1-010 subtask: cross-accelerator capability/memory model — `Capability` expanded 5→9 explicit dimensions (adds `ObserveWorkload`/`ControlledLaunch`, renames the rest), `ResourceCapabilities` reshaped to a `Capability`→`SupportState` map (Supported/Partial/Unsupported/NotEvaluated), new `AcceleratorMemory` (Dedicated/Unified/NotReportable) on `ProtectedResource`; [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md); design pre-reviewed by opus-architect; one real bug (stale `"enforce"` wire literal) caught by CI and fixed | #39 | `617befd` |
 | HORO-1012 | F-M1-010 subtask: Apple Silicon Metal backend (`crates/eltanin-apple`) — `objc2`/`objc2-metal`-based device discovery (`AppleBackend`), `DeviceSnapshot`→`ProtectedResource` capability/memory mapping honesty (only `DiscoverResource` fully `Supported`; `enforce`/`revoke` unconditionally `Unsupported`), a single scoped `#[allow(unsafe_code)]` real Metal compute probe verified on physical Apple Silicon; [ADR 0007](../adr/0007-apple-silicon-metal-backend.md) | #41 | `ff5ff58` |
 | HORO-1012 | Fix compute-probe non-macOS error's capability claim + correct ADR 0007's per-crate license claim (review-driven follow-up) | #42 | `a3a39de` |
+| HORO-1013 | F-M1-010 subtask: macOS workload context, local IPC peer identity, controlled-launch adapter — relocated `PeerCredential`/`PeerConsistency`/`PeerContext`/`PeerCredentialError` to `eltanin_core::peer` (narrowed construction so no caller can hand-assert `Consistent`), new `crates/eltanin-macos` (`nix`+`libproc`, zero `unsafe`), agent platform seam selecting Linux/macOS collector by `target_os`, macOS-specific default socket path, `authz_end_to_end.rs`/`canonical_e2e.rs` widened to run for real on macOS; new `test-macos`/`clippy-macos` CI jobs; [ADR 0008](../adr/0008-macos-platform-adapter-and-local-peer-identity.md); real evidence on physical Apple Silicon (11/11 `eltanin-macos` tests executing genuine `LOCAL_PEERCRED`/`LOCAL_PEERPID`/`libproc` syscalls) | #43 | `24b22b3` |
 
-Current `main` HEAD: `a3a39de`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+Current `main` HEAD: `24b22b3`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
 F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811/781/1018
-(governance + license) are done. HORO-1011 (Apple Silicon capability/
-memory model) and HORO-1012 (Apple Silicon Metal backend) are done.
-HORO-790's hardware-validation runbook is ready and waiting on the
-founder to provide real Linux/NVIDIA hardware. HORO-1013 (macOS
-platform/IPC/controlled-launch adapter) is in progress — see "Next
-planned action" below.
+(governance + license) are done. HORO-1011 (capability/memory model),
+HORO-1012 (Apple Silicon Metal backend), and HORO-1013 (macOS platform
+adapter) are all done. HORO-790's hardware-validation runbook is ready
+and waiting on the founder to provide real Linux/NVIDIA hardware.
+HORO-1014 (native Metal fixture) is next, unblocked now that HORO-1012
+and HORO-1013 have both merged — see "Next planned action" below.
 
 **Process note (found while resuming this campaign for HORO-1013):**
 this file had not been synced after HORO-1012's PRs #41/#42 merged —
-the rows above and the HEAD pointer were missing until this pass. Fixed
-here rather than left for a future sync, since a stale "next planned
+the rows above and the HEAD pointer were missing until that pass. Fixed
+there rather than left for a future sync, since a stale "next planned
 action" pointing at already-merged work would have misled the next
-resumed session.
+resumed session. Synced again here after HORO-1013 (PR #43) merged.
 
 ## Active worktrees
 
@@ -377,27 +378,36 @@ additive-history convention.
 Apple Silicon as a second real-hardware evidence class** (see "Apple
 Silicon scope amendment" above) — the campaign is no longer purely
 blocked on Linux/NVIDIA hardware. HORO-1018 (privileged-enforcement
-blast-radius governance), HORO-1011 (capability/memory model), and
-HORO-1012 (Metal backend, PRs #41/#42) are all Done. **HORO-1013 (macOS
-platform/IPC/controlled-launch adapter) is in progress** in its own
-isolated worktree, per the parallelism this dependency graph already
-allowed. HORO-1012 having merged now also unblocks HORO-1014 (native
-Metal fixture); HORO-1015 (physical M3 Max QA) starts only after
-HORO-1012/1013/1014 all merge — HORO-1013 is the one still outstanding.
+blast-radius governance), HORO-1011 (capability/memory model), HORO-1012
+(Metal backend, PRs #41/#42), and HORO-1013 (macOS platform adapter,
+PR #43) are all Done. **HORO-1014 (native Metal fixture) is next,
+unblocked now that both HORO-1012 and HORO-1013 have merged.** Once
+HORO-1014 merges, HORO-1015 (physical M3 Max QA, Track B `B-M1-APPLE`)
+can start — it is gated on all three of HORO-1012/1013/1014.
+
+A notable fact discovered during HORO-1012/1013: **this development
+machine is itself real Apple Silicon hardware** (M3 Max, macOS) — both
+tickets' Metal/`libproc`/`LOCAL_PEERCRED` code paths were genuinely
+executed here, not merely compiled. This does not by itself satisfy
+HORO-1015 (a distinct, dedicated QA/Feature-Verification-Record pass
+with its own Track B scenario is still required), but it means E2
+evidence-producing hardware is already available in this environment
+rather than something that still needs separate provisioning.
 
 The Linux/NVIDIA hardware blocker (HORO-841, F-M1-002/007, HORO-790's
 E3 evidence) is unchanged and still requires the founder to provide
 bare-metal hardware — see "Dependency blockers". This no longer stops
 all forward progress: the Apple Silicon track gives hardware-free
-implementation work (HORO-1012/1013/1014) to continue on independently,
-per the founder's own scope-amendment directive not to let one hardware
-class's unavailability idle the whole campaign.
+implementation work (now just HORO-1014, then HORO-1015's QA pass) to
+continue on independently, per the founder's own scope-amendment
+directive not to let one hardware class's unavailability idle the whole
+campaign.
 
 A fresh session resuming this campaign should: (1) check Jira/`git
-worktree list` for HORO-1012/1013 progress before starting new work,
-(2) continue the Apple Silicon dependency graph as far as hardware-free
-work allows, (3) separately raise Linux/NVIDIA hardware provisioning to
+worktree list` for HORO-1014 progress before starting new work,
+(2) continue the Apple Silicon dependency graph through HORO-1014 then
+HORO-1015, (3) separately raise Linux/NVIDIA hardware provisioning to
 the founder (pointing at the runbook) as its own independent thread,
-and (4) once a real M3 Max or Linux/NVIDIA environment is provided,
-execute the relevant plan (HORO-1015's QA scenario, or the hardware-
-validation runbook) directly.
+and (4) once a real Linux/NVIDIA environment is provided (this machine
+already covers the Apple Silicon side), execute the hardware-validation
+runbook directly.
