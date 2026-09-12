@@ -13,6 +13,7 @@ links back.
 | [0004](0004-local-ipc-and-nvml-ffi-boundary.md) | Local IPC over versioned Unix Domain Sockets; NVML behind a single FFI boundary | Accepted |
 | [0005](0005-eltanin-run-process-topology.md) | `eltanin run` stays alive as the lease-holding supervisor | Accepted |
 | [0006](0006-cross-accelerator-capability-and-memory-model.md) | Cross-accelerator capability support states and memory model | Accepted |
+| [0007](0007-apple-silicon-metal-backend.md) | Apple Silicon Metal backend — crate boundary, binding choice, capability/memory mapping | Accepted |
 
 See [`docs/product/NORTH_STAR.md`](../product/NORTH_STAR.md) for the
 locked invariants these decisions implement, and
