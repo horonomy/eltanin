@@ -103,7 +103,11 @@ usual campaign-state follow-up PR, once this PR's merge commit exists).
 ## Hardware evidence state
 
 Not started. No representative bare-metal Linux/NVIDIA host identified
-yet in this environment.
+yet in this environment. A complete setup/test/cleanup runbook is
+prepared — [`docs/development/hardware-validation-runbook.md`](hardware-validation-runbook.md)
+— so that once a host is available, execution time is spent running
+the plan, not writing it. The runbook itself contains no hardware
+evidence; it is preparation only.
 
 ## Remaining release gates
 

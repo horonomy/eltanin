@@ -42,7 +42,8 @@ docs/
                  CLI_CONTRACT.md, POLICY_EXAMPLES.md, QUICKSTART.md (dual-purpose — see above)
   architecture/  domain-model.md (current-state architecture)
   adr/           one file per decision, indexed in adr/README.md
-  development/   this file, campaign-state.md, bootstrap-reconciliation.md
+  development/   this file, campaign-state.md, bootstrap-reconciliation.md,
+                 hardware-validation-runbook.md
   qa/            README.md (feature-level QA governance, HORO-819),
                  feature-verification/ (one record per Feature),
                  e2e/ (Track B scenario records)
