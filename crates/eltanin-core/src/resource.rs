@@ -220,7 +220,7 @@ impl ResourceCapabilities {
 /// report a fictitious dedicated-VRAM size. A shared memory pool is not,
 /// by itself, an isolation boundary against the host process — see
 /// `docs/adr/0006-cross-accelerator-capability-and-memory-model.md`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "model")]
 pub enum AcceleratorMemory {
     /// Memory the accelerator owns exclusively, with a known size.
@@ -228,13 +228,8 @@ pub enum AcceleratorMemory {
     /// Memory shared with the host; no byte count is required.
     Unified,
     /// The backend cannot honestly report a memory model.
+    #[default]
     NotReportable,
-}
-
-impl Default for AcceleratorMemory {
-    fn default() -> Self {
-        Self::NotReportable
-    }
 }
 
 /// A protected resource: its identity, what a backend actually supports
