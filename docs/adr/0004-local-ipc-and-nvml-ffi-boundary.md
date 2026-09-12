@@ -54,3 +54,17 @@ binding crate. Every `unsafe` block inside `eltanin-nvidia` carries a
   consume this as one input, not the sole one, per North Star invariant 4.
 - HORO-828 (NVML loading/device identity) is the only ticket expected to
   introduce `unsafe` code into the workspace's initial crate set.
+
+## Amendment (2026-09, ADR 0007)
+
+The last bullet above no longer holds: [ADR 0007](0007-apple-silicon-metal-backend.md)
+(F-M1-010/HORO-1012, the MVP 1.0 Apple Silicon scope amendment) introduces
+a second `unsafe`-containing crate, `crates/eltanin-apple`, for the narrow
+Metal compute-buffer readback its real-hardware probe needs. This does
+not change this ADR's NVML FFI-boundary decision — `crates/eltanin-nvidia`
+remains the sole boundary for NVIDIA/NVML interaction — it only corrects
+the now-inaccurate claim that HORO-828 is the *only* such ticket. See
+ADR 0007 for the Apple-specific boundary's own scope and rationale. This
+note is an amendment, not a rewrite: the bullet above is left as written
+above (it was accurate when this ADR was accepted) for historical
+accuracy.

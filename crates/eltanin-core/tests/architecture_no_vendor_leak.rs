@@ -15,7 +15,18 @@
 use std::fs;
 use std::path::Path;
 
-const FORBIDDEN: &[&str] = &["nvidia", "cuda", "/dev/nvidia", "nvml", "bpf_prog_type"];
+const FORBIDDEN: &[&str] = &[
+    "nvidia",
+    "cuda",
+    "/dev/nvidia",
+    "nvml",
+    "bpf_prog_type",
+    "metal",
+    "mtl",
+    "objc",
+    "apple",
+    "darwin",
+];
 // Deliberately NOT forbidden: the bare word "cgroup". It was originally
 // listed here, but that banned a legitimate field HORO-831 requires
 // (ExecutionContext::cgroup_path) — cgroup membership is workload
@@ -23,6 +34,13 @@ const FORBIDDEN: &[&str] = &["nvidia", "cuda", "/dev/nvidia", "nvml", "bpf_prog_
 // cgroup-v2-device-BPF *enforcement mechanism* (F-M1-007/ADR 0001),
 // which is what this list actually needs to keep out of eltanin-core.
 // The enforcement-mechanism-specific term ("bpf_prog_type") stays banned.
+//
+// "metal"/"mtl"/"objc"/"apple"/"darwin" added by HORO-1012 (F-M1-010):
+// the Apple Silicon adapter (`crates/eltanin-apple`) must report itself
+// solely through `eltanin-core::resource::Capability`'s nine
+// vendor-neutral dimensions (HORO-1011), never by leaking a
+// Metal/Objective-C/Apple-specific concept into this crate — mirroring
+// the existing NVIDIA/CUDA guard above.
 
 fn strip_comment_lines(source: &str) -> String {
     source

@@ -8,6 +8,7 @@ members = [
     "crates/eltanin-agent",
     "crates/eltanin-audit",
     "crates/eltanin-cli",
+    "crates/eltanin-apple",
 ]
 
 # Layout and naming match the Jira Component table on HORO-772/HORO-780
@@ -20,6 +21,13 @@ members = [
 # not here — see docs/development/campaign-state.md.
 # crates/eltanin-linux was added by F-M1-003/HORO-832.
 # crates/eltanin-audit was added by F-M1-009/HORO-824.
+# crates/eltanin-apple was added by F-M1-010/HORO-1012 (MVP 1.0 Apple
+# Silicon scope amendment, HORO-1010+). It stays a normal (non-excluded)
+# workspace member, exactly like eltanin-linux: its objc2/objc2-metal
+# dependencies are target-gated to `cfg(target_os = "macos")` in its own
+# Cargo.toml, so they never enter a non-macOS build's dependency graph,
+# while the crate itself still participates in every
+# `cargo {clippy,test,doc} --workspace` CI gate on every target.
 
 [workspace.package]
 version = "0.1.0"

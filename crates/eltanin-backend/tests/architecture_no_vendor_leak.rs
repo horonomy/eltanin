@@ -11,12 +11,29 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FORBIDDEN: &[&str] = &["nvidia", "cuda", "/dev/nvidia", "nvml", "bpf_prog_type"];
+const FORBIDDEN: &[&str] = &[
+    "nvidia",
+    "cuda",
+    "/dev/nvidia",
+    "nvml",
+    "bpf_prog_type",
+    "metal",
+    "mtl",
+    "objc",
+    "apple",
+    "darwin",
+];
 // Bare "cgroup" is deliberately not banned here — see the identical note
 // in eltanin-core's copy of this test (crates/eltanin-core/tests/
 // architecture_no_vendor_leak.rs): it's a legitimate workload-context
 // concept (HORO-831), not the enforcement-mechanism leak this list
 // exists to catch.
+//
+// "metal"/"mtl"/"objc"/"apple"/"darwin" added by HORO-1012 (F-M1-010):
+// the trait contract in this crate's `src/` must stay vendor-neutral
+// with respect to the Apple Silicon adapter exactly as it already does
+// for NVIDIA — the adapter itself lives in `crates/eltanin-apple`, not
+// here.
 
 fn strip_comment_lines(source: &str) -> String {
     source
