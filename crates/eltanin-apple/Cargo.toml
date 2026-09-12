@@ -1,0 +1,44 @@
+[package]
+name = "eltanin-apple"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license.workspace = true
+description = "Apple Silicon adapter that discovers the system Metal GPU device through supported Metal APIs (F-M1-010, HORO-1012)."
+
+[lints]
+workspace = true
+
+[dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+eltanin-backend = { path = "../eltanin-backend", version = "0.1.0" }
+
+# objc2/objc2-metal are Apple-only bindings and must never enter the
+# dependency graph of a non-macOS build (e.g. this repo's ubuntu-latest
+# CI runners) — target-gated exactly like eltanin-linux gates `rustix`
+# to `cfg(target_os = "linux")` (see that crate's Cargo.toml). Narrow,
+# explicit feature lists (`default-features = false` + only what's
+# actually called) rather than each crate's much larger default feature
+# set, per docs/product/PRODUCT_CONSTITUTION.md's unsafe/FFI-boundary
+# discipline.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSArray",
+    "NSObject",
+] }
+objc2-metal = { version = "0.3", default-features = false, features = [
+    "std",
+    "MTLDevice",
+    "MTLLibrary",
+    "MTLCommandQueue",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLComputePipeline",
+    "MTLComputeCommandEncoder",
+    "MTLBuffer",
+    "MTLResource",
+    "MTLTypes",
+] }
