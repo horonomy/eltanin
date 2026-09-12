@@ -41,6 +41,22 @@ fn observe_reports_unsupported_on_a_non_macos_target() {
     );
 }
 
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn compute_probe_reports_unsupported_discover_resource_on_a_non_macos_target() {
+    // Deliberately `Capability::DiscoverResource`, not `ControlledLaunch`
+    // — see `crate::probe::run_compute_probe`'s doc comment for why: this
+    // crate never evaluates `ControlledLaunch` either way, so its error
+    // here must not assert a structural absence for a dimension it has
+    // left `NotEvaluated`.
+    assert_eq!(
+        eltanin_apple::probe::run_compute_probe(),
+        Err(BackendError::Unsupported {
+            capability: Capability::DiscoverResource,
+        })
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn discover_succeeds_on_a_real_macos_host() {
