@@ -185,3 +185,54 @@ fn agent_source_contains_no_unsafe_code() {
         violations.join("\n")
     );
 }
+
+/// `eltanin-agent`'s own `src/` must never construct a `PeerContext`
+/// directly, by any constructor — production or `test-support`-gated
+/// alike. The only legitimate way `eltanin-agent` ever obtains one is
+/// by calling a platform collector's `collect_peer_context`
+/// (`eltanin_linux::peer`/`eltanin_macos::peer`, via
+/// `OsPeerContextSource`), never by calling `eltanin_core::peer`'s
+/// constructors itself. Before the peer contract's relocation to
+/// `eltanin-core` (HORO-1013), this was structurally impossible — the
+/// constructors lived crate-private inside `eltanin-linux`; this test
+/// compensates mechanically now that they are `pub` (even if
+/// `test-support`-feature-gated) on a crate `eltanin-agent` depends on
+/// unconditionally.
+#[test]
+fn agent_source_never_constructs_a_peer_context_directly() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    code_files(&src_dir, &mut files);
+    assert!(
+        !files.is_empty(),
+        "expected to find eltanin-agent source files to scan"
+    );
+
+    const FORBIDDEN_PEER_CONSTRUCTORS: &[&str] = &[
+        "PeerCredential::from_kernel",
+        "PeerCredential::new",
+        "PeerContext::for_test",
+        "PeerContext::new",
+        "PeerContext::from_kernel_observation",
+        "PeerContext::peer_unmapped",
+    ];
+
+    let mut violations = Vec::new();
+    for file in &files {
+        let contents = fs::read_to_string(file).expect("read source file");
+        let code_only = strip_comment_lines(&contents);
+        for term in FORBIDDEN_PEER_CONSTRUCTORS {
+            if code_only.contains(term) {
+                violations.push(format!("{}: calls forbidden {term:?}", file.display()));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "eltanin-agent's own src/ must never construct a PeerContext directly — only a platform \
+         collector (eltanin-linux/eltanin-macos) may, via its own collect_peer_context, but \
+         found:\n{}",
+        violations.join("\n")
+    );
+}
