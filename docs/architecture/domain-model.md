@@ -353,7 +353,7 @@ pair — not to a cgroup. See the "Local authorization agent integration"
 section below for why, and its named cross-ticket obligation on
 F-M1-008.
 
-## Local authorization agent transport (F-M1-006, HORO-839) — `eltanin-agent`, `eltanin_linux::peer`
+## Local authorization agent transport (F-M1-006, HORO-839; platform-selected by HORO-1013) — `eltanin-agent`, `eltanin_core::peer`
 
 Implements the Unix Domain Socket listener, peer-credential collection,
 and bounded single-request connection lifecycle that HORO-838's protocol
@@ -363,22 +363,51 @@ seam HORO-840's `authz` module (below) implements that behind;
 `tests/agent_architecture_guard.rs` makes the boundary mechanically
 checkable.
 
-**Peer credential collection (`eltanin_linux::peer`)**: `SO_PEERCRED`
-(via `rustix::net::sockopt::socket_peercred`, a safe wrapper preserving
-this workspace's `#![forbid(unsafe_code)]` instead of hand-written
-unsafe `libc` `getsockopt` code) reports the peer's **effective** uid/gid
-at `connect()` time. `collect_peer_context` cross-checks that against a
+**Peer credential contract (`eltanin_core::peer`)**: `PeerCredential`,
+`PeerConsistency`, `PeerContext`, `PeerCredentialError`, and the
+`classify_consistency` reconciliation function are defined once in
+`eltanin-core` (relocated there from `eltanin-linux` by HORO-1013) so
+both platform adapters below produce the identical contract without
+either depending on the other. `PeerContext` can only be constructed
+from a real kernel observation (`PeerContext::from_kernel_observation`/
+`::peer_unmapped`) outside a `test-support`-gated test double — no
+production code path anywhere in this workspace can hand-assert
+`PeerConsistency::Consistent`.
+
+**Linux collection (`eltanin_linux::peer`)**: `SO_PEERCRED` (via
+`rustix::net::sockopt::socket_peercred`, a safe wrapper preserving this
+workspace's `#![forbid(unsafe_code)]` instead of hand-written unsafe
+`libc` `getsockopt` code) reports the peer's **effective** uid/gid at
+`connect()` time. `collect_peer_context` cross-checks that against a
 fresh `/proc/<pid>/status` read (which reports **real** uid first,
-effective second) via `PeerConsistency`, rather than naively assuming
-the two uid notions are interchangeable — a naive direct comparison
-would false-positive-diverge on any setuid/setgid peer. A match on
-either the real or the effective `/proc` value is `Consistent`; both
-values unreadable is `Indeterminate`; anything else is
-`CredentialDivergence`. pid `0` (an unmappable namespace peer) is
-`PeerUnmapped` and `/proc/0` is never read. Only `PeerContext::consistency
-== Consistent` is `authorizable()`. Linux-only; every other `target_os`
-returns `PeerCredentialError::UnsupportedPlatform` rather than falsely
-claiming support.
+effective second) via `classify_consistency`, rather than naively
+assuming the two uid notions are interchangeable — a naive direct
+comparison would false-positive-diverge on any setuid/setgid peer. A
+match on either the real or the effective `/proc` value is
+`Consistent`; both values unreadable is `Indeterminate`; anything else
+is `CredentialDivergence`. pid `0` (an unmappable namespace peer) is
+`PeerUnmapped` and `/proc/0` is never read.
+
+**macOS collection (`eltanin_macos::peer`, HORO-1013,
+[ADR 0008](../adr/0008-macos-platform-adapter-and-local-peer-identity.md))**:
+`LOCAL_PEERCRED` (via `nix`) reports the peer's effective uid/gid,
+connect-time-fixed exactly like Linux's `SO_PEERCRED` — but carries no
+pid. `LOCAL_PEERPID` supplies the pid separately, and is **not**
+connect-time-fixed (XNU updates it on later socket operations), so the
+same `classify_consistency` cross-check — reconciling `LOCAL_PEERCRED`'s
+uid against a fresh `libproc` lookup for the `LOCAL_PEERPID` pid — is the
+one thing binding the strong credential to the pid everything downstream
+keys on; a cross-uid file-descriptor hand-off is caught (fails closed via
+`CredentialDivergence`/`Indeterminate`), a same-uid one is not (a named,
+honest limitation, not a silent gap — see ADR 0008).
+
+For both platforms, only `PeerContext::consistency == Consistent` is
+`authorizable()`. Every other `target_os` returns
+`PeerCredentialError::UnsupportedPlatform` rather than falsely claiming
+support. `eltanin-agent::peer::OsPeerContextSource` selects the real
+collector by `target_os` at compile time — exactly one of
+`eltanin_linux`/`eltanin_macos` ever enters a given build's dependency
+graph.
 
 **Socket lifecycle (`eltanin-agent::listener::BoundSocket`)**: binds only
 after validating the parent directory (not a symlink, is a directory,
@@ -509,7 +538,7 @@ A dedicated crate, not a module of `eltanin-agent`: `Eltanin::Audit` is
 its own Jira Component, and `eltanin-agentd` (a `[[bin]]` inside
 `eltanin-agent`) must select the audit sink at startup, so `eltanin-audit`
 cannot depend on `eltanin-agent` without a cycle. It also has no
-dependency on `eltanin-linux` — its record schema embeds
+dependency on `eltanin-linux`/`eltanin-macos` — its record schema embeds
 `eltanin_core::identity::ExecutionContext` directly (already an
 observation record, already `Deserialize`), keeping the crate portable
 and mechanically unable to leak a vendor/platform concern; enforced by
@@ -550,8 +579,8 @@ write to an already-open fd doesn't re-check its unlinked path).
 **Adapter (`eltanin_agent::authz::audit::AuditEventSink`)**: implements
 `eltanin-agent`'s existing `EventSink` trait (the F-M1-009 correlation
 seam HORO-840 left open, see above) and converts `AuthorizationEvent` /
-`eltanin_linux::peer` types into the `Recorded*` mirrors, since
-`eltanin-audit` cannot depend on either crate. `eltanin-agentd` selects
+`eltanin_core::peer` types into the `Recorded*` mirrors, since
+`eltanin-audit` cannot depend on `eltanin-agent`. `eltanin-agentd` selects
 it when `ELTANIN_AUDIT_LOG` is set, falling back to the existing
 `StderrSink` otherwise — no behavior change for a deployment that hasn't
 opted in.
