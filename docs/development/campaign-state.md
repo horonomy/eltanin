@@ -117,15 +117,21 @@ pre-existing process. Governs HORO-841/844/790/1015 at minimum.
 | HORO-1012 | F-M1-010 subtask: Apple Silicon Metal backend (`crates/eltanin-apple`) — `objc2`/`objc2-metal`-based device discovery (`AppleBackend`), `DeviceSnapshot`→`ProtectedResource` capability/memory mapping honesty (only `DiscoverResource` fully `Supported`; `enforce`/`revoke` unconditionally `Unsupported`), a single scoped `#[allow(unsafe_code)]` real Metal compute probe verified on physical Apple Silicon; [ADR 0007](../adr/0007-apple-silicon-metal-backend.md) | #41 | `ff5ff58` |
 | HORO-1012 | Fix compute-probe non-macOS error's capability claim + correct ADR 0007's per-crate license claim (review-driven follow-up) | #42 | `a3a39de` |
 | HORO-1013 | F-M1-010 subtask: macOS workload context, local IPC peer identity, controlled-launch adapter — relocated `PeerCredential`/`PeerConsistency`/`PeerContext`/`PeerCredentialError` to `eltanin_core::peer` (narrowed construction so no caller can hand-assert `Consistent`), new `crates/eltanin-macos` (`nix`+`libproc`, zero `unsafe`), agent platform seam selecting Linux/macOS collector by `target_os`, macOS-specific default socket path, `authz_end_to_end.rs`/`canonical_e2e.rs` widened to run for real on macOS; new `test-macos`/`clippy-macos` CI jobs; [ADR 0008](../adr/0008-macos-platform-adapter-and-local-peer-identity.md); real evidence on physical Apple Silicon (11/11 `eltanin-macos` tests executing genuine `LOCAL_PEERCRED`/`LOCAL_PEERPID`/`libproc` syscalls) | #43 | `24b22b3` |
+| HORO-1013 | campaign-state.md sync after PR #43, point at HORO-1014 | #44 | `acbef64` |
+| HORO-1014 | F-M1-010 subtask: native Metal workload fixture (`eltanin-apple::probe`-reused `double_elements` kernel, `metal_workload_fixture` bin), real-hardware canonical E2E scenario (`apple_metal_canonical_e2e.rs`, `#[ignore]`d, macOS-only), `docs/product/APPLE_SILICON_FIXTURE.md` | #45 | `1caa802` |
+| HORO-1015 | F-M1-010 closure: independent physical M3 Max QA pass — 3 new real-hardware tests (ALLOW/DENY `eltanin-explain` audit correlation, lifecycle determinism) added to `apple_metal_canonical_e2e.rs`, new `eltanin-apple/tests/real_discovery.rs` (real accelerator discovery/capability inspection), `docs/qa/e2e/B-M1-APPLE.md` Track B record, `docs/qa/feature-verification/F-M1-010.md` (PASS), F-M1-010 added to `qa_governance_sync.rs`/`docs/qa/README.md` inventory, docs forward-references closed | #46 | *(pending merge)* |
 
-Current `main` HEAD: `24b22b3`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
+Current `main` HEAD: `1caa802`. F-M1-001, F-M1-003, F-M1-004, F-M1-005,
 F-M1-006, F-M1-008, F-M1-009 are done. HORO-814/819/820/810/811/781/1018
 (governance + license) are done. HORO-1011 (capability/memory model),
-HORO-1012 (Apple Silicon Metal backend), and HORO-1013 (macOS platform
-adapter) are all done. HORO-790's hardware-validation runbook is ready
-and waiting on the founder to provide real Linux/NVIDIA hardware.
-HORO-1014 (native Metal fixture) is next, unblocked now that HORO-1012
-and HORO-1013 have both merged — see "Next planned action" below.
+HORO-1012 (Apple Silicon Metal backend), HORO-1013 (macOS platform
+adapter), and HORO-1014 (native Metal fixture) are all done. HORO-1015
+(physical M3 Max QA closure, Track B `B-M1-APPLE-v1`, F-M1-010 Feature
+Verification Record PASS) is done — see "Feature QA states" below.
+HORO-790's hardware-validation runbook is ready and waiting on the
+founder to provide real Linux/NVIDIA hardware, which remains the only
+work left blocking the final MVP 1.0 READY gate (E3 evidence) — see
+"Next planned action" below.
 
 **Process note (found while resuming this campaign for HORO-1013):**
 this file had not been synced after HORO-1012's PRs #41/#42 merged —
@@ -163,24 +169,29 @@ hardware access (see "Dependency blockers" below) — no hardware-free
 subtask work remains identified for either as of this pass.
 
 F-M1-010 (Apple Silicon Real-Accelerator Functional Validation,
-HORO-1010): HORO-1011 (capability/memory model subtask) and HORO-1012
-(Metal backend subtask) are Done, no Feature Verification Record yet
-(per HORO-1010's own scope, not either subtask's — F-M1-010 PASS
-requires all of HORO-1011/1012/1013/1014 merged + Track A + Track B
-`B-M1-APPLE` + physical M3 Max evidence). HORO-1013 (macOS platform
-adapter) is in progress — hardware-free implementation work in the
-sense that no physical M3 Max provisioning is required (this session's
-development environment was a real Apple Silicon host; the shared dev
-machine's `cargo` lock contention on `~/.cargo/shared-target` initially
-blocked all local `cargo` runs, but pointing `CARGO_TARGET_DIR` at a
-private directory bypassed it — see PR #43's verification notes for the
-resulting real local `clippy`/`test`/`deny`/`doc` runs, including 11
-tests executing genuine `LOCAL_PEERCRED`/`LOCAL_PEERPID`/`libproc`
-syscalls on this machine's own kernel. This remains a
-development-environment convenience, not the HORO-1015
-hardware-evidence gate — worth recording for future sessions hitting
-the same shared-target contention: `CARGO_TARGET_DIR=<private-dir>
-cargo <subcommand> ...` is the fix, no need to wait out the lock).
+HORO-1010): **Done, Feature Verification Record PASS** —
+[`docs/qa/feature-verification/F-M1-010.md`](../qa/feature-verification/F-M1-010.md)
+(HORO-1015), scoped to E2 functional evidence only (`DeviceEnforce`/
+`DeviceRevoke` remain `Unsupported`; this PASS does not replace
+F-M1-007's E3 gate — an Apple-only PASS stays `BLOCKED ON E3`, never
+`READY`, per HORO-790's own gate definition). HORO-1011 (capability/
+memory model), HORO-1012 (Metal backend), HORO-1013 (macOS platform
+adapter), and HORO-1014 (native Metal fixture) are all Done. HORO-1015
+independently re-verified the whole Track A suite and the two
+real-hardware ignored tests on this session's own physical M3 Max
+(correcting one factual assumption in the process: `metal_compute_probe.rs`
+is not actually `#[ignore]`d, found by reading the file rather than
+trusting the ticket text), added 3 new real-hardware tests
+(`allow_journey_is_explainable_via_the_audit_log`,
+`deny_journey_is_explainable_via_the_audit_log`,
+`lifecycle_is_deterministic_across_repeated_allow_and_deny_cycles` in
+`apple_metal_canonical_e2e.rs`) plus a new
+`crates/eltanin-apple/tests/real_discovery.rs` (real accelerator
+discovery/capability-state inspection), and produced the formal
+[`B-M1-APPLE-v1`](../qa/e2e/B-M1-APPLE.md) Track B record. The shared dev
+machine's `cargo` lock contention on `~/.cargo/shared-target` was again
+avoided by pointing `CARGO_TARGET_DIR` at a private directory (same
+workaround as HORO-1013's PR #43) — no need to wait out the lock.
 
 ## Required human decisions outstanding
 
@@ -411,3 +422,35 @@ the founder (pointing at the runbook) as its own independent thread,
 and (4) once a real Linux/NVIDIA environment is provided (this machine
 already covers the Apple Silicon side), execute the hardware-validation
 runbook directly.
+
+**HORO-1014 and HORO-1015 are both now Done — the entire Apple Silicon
+track (F-M1-010, HORO-1010) is closed.** HORO-1014 (PR #45, `1caa802`)
+shipped the native Metal workload fixture and its real-hardware
+canonical E2E test. HORO-1015 then ran as this campaign's mandated
+"clean/fresh verification context" independent QA pass — not trusting
+any HORO-1011/1012/1013/1014 implementation-agent claim, re-deriving and
+re-running everything directly on this session's own physical M3 Max:
+the full `cargo test --workspace` suite, `clippy`/`deny`/`doc`, both
+real-hardware tests HORO-1014 added (finding along the way that
+`metal_compute_probe.rs` is not actually `#[ignore]`d, contrary to the
+ticket text's assumption — corrected in the resulting Feature
+Verification Record rather than silently accepted), 3 new real-hardware
+tests (ALLOW/DENY `eltanin-explain` audit correlation, repeated-cycle
+determinism), and a new `eltanin-apple/tests/real_discovery.rs` (real
+accelerator discovery/capability-state inspection). Produced the formal
+[`B-M1-APPLE-v1`](../qa/e2e/B-M1-APPLE.md) Track B record and
+[`F-M1-010.md`](../qa/feature-verification/F-M1-010.md) — **Status:
+PASS**, explicitly scoped to E2 functional evidence (real accelerator
+discovery, authorization, lease, controlled launch, real Metal compute,
+audit/explain — never device-level enforcement or revoke) and explicitly
+stated to **not** replace F-M1-007's Linux/NVIDIA physical enforcement
+evidence requirement (HORO-790's E3 gate).
+
+**The only work remaining for the final MVP 1.0 READY gate is E3**
+(Linux/NVIDIA physical device-level enforcement, F-M1-002/F-M1-007,
+HORO-841/HORO-790) — unchanged from before this pass, still blocked on
+the founder providing bare-metal Linux/NVIDIA hardware access (see
+"Dependency blockers"). A fresh session resuming this campaign should
+raise that provisioning decision to the founder directly (pointing at
+`docs/development/hardware-validation-runbook.md`) rather than looking
+for further hardware-free Apple Silicon work — there is none left.

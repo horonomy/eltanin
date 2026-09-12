@@ -164,7 +164,13 @@ struct Agentd {
 }
 
 impl Agentd {
-    fn start(dir: &Path, allow_uid: u32) -> Self {
+    /// Start `eltanin-agentd`, optionally wired to write NDJSON audit
+    /// records to `audit_log` — same optional-audit-log shape as
+    /// `canonical_e2e.rs::Agentd::start`, needed here so the
+    /// explain-evidence tests below can inspect a real audit trail for
+    /// this fixture's own ALLOW/DENY journeys, not just the Linux
+    /// scenario's.
+    fn start(dir: &Path, allow_uid: u32, audit_log: Option<&Path>) -> Self {
         let policy_path = write_policy(dir, allow_uid);
         let socket_path = dir.join("agent.sock");
         assert!(
@@ -173,16 +179,24 @@ impl Agentd {
             socket_path.display(),
         );
 
-        let child = Command::new(sibling_bin("eltanin-agentd"))
+        let mut command = Command::new(sibling_bin("eltanin-agentd"));
+        command
             .env("ELTANIN_AGENT_SOCKET", &socket_path)
             .env("ELTANIN_AGENT_SOCKET_MODE", "0600")
             .env("ELTANIN_AGENT_POLICY", &policy_path)
             .env("ELTANIN_AGENT_LEASE_TTL_SECS", "60")
-            .env_remove("ELTANIN_AUDIT_LOG")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn eltanin-agentd");
+            .stderr(Stdio::piped());
+        match audit_log {
+            Some(log) => {
+                command.env("ELTANIN_AUDIT_LOG", log);
+            }
+            None => {
+                command.env_remove("ELTANIN_AUDIT_LOG");
+            }
+        }
+
+        let child = command.spawn().expect("spawn eltanin-agentd");
         Self { child, socket_path }.wait_for_socket()
     }
 
@@ -262,7 +276,7 @@ fn allow_journey_runs_the_real_metal_workload_and_verifies_output() {
     assert_non_root_precondition(uid);
 
     let dir = scenario_dir("allow");
-    let agent = Agentd::start(&dir, uid);
+    let agent = Agentd::start(&dir, uid, None);
     let profile_dir = write_profile_dir(&dir);
     let evidence_path = dir.join("evidence.json");
     let fixture_bin = sibling_bin("metal_workload_fixture");
@@ -319,6 +333,109 @@ fn allow_journey_runs_the_real_metal_workload_and_verifies_output() {
 #[test]
 #[ignore = "real Apple Silicon hardware only — run by hand with `-- --ignored` after \
             `cargo build --workspace`; see this file's doc comment"]
+fn allow_journey_is_explainable_via_the_audit_log() {
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+
+    let dir = scenario_dir("allow-explain");
+    let audit_log = dir.join("audit.ndjson");
+    let agent = Agentd::start(&dir, uid, Some(&audit_log));
+    let profile_dir = write_profile_dir(&dir);
+    let fixture_bin = sibling_bin("metal_workload_fixture");
+
+    let mut command = eltanin_command(
+        &agent,
+        &profile_dir,
+        &[fixture_bin.to_str().expect("utf-8 fixture path")],
+    );
+    let child = command.spawn().expect("spawn eltanin binary");
+    // Same rationale as `canonical_e2e.rs::deny_journey_is_explainable_via_the_audit_log`:
+    // `eltanin-explain --pid` selects on the connecting peer's pid, which
+    // through `eltanin run` is always `eltanin`'s own pid, never the real
+    // Metal workload's.
+    let pid = child.id();
+    let output = child.wait_with_output().expect("wait for eltanin binary");
+    assert!(
+        output.status.success(),
+        "[{PROVISIONAL_SCENARIO_ID}/ALLOW] precondition for this test: the run must be granted \
+         so there is a real Metal-compute grant to explain, got exit {:?} — stderr={:?}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let explain_output = Command::new(sibling_bin("eltanin-explain"))
+        .arg("--log")
+        .arg(&audit_log)
+        .arg("--pid")
+        .arg(pid.to_string())
+        .output()
+        .expect("run eltanin-explain binary");
+
+    assert!(
+        explain_output.status.success() && !explain_output.stdout.is_empty(),
+        "[{PROVISIONAL_SCENARIO_ID}/ALLOW] `eltanin-explain --pid {pid}` must produce a \
+         non-empty decision record correlated with the real Metal-compute grant, got exit {:?}, \
+         stdout={:?} stderr={:?} — violates NORTH_STAR.md invariant 3 (\"Monitoring != \
+         Security\": audit/explain must be genuine evidence, not a stub)",
+        explain_output.status.code(),
+        String::from_utf8_lossy(&explain_output.stdout),
+        String::from_utf8_lossy(&explain_output.stderr),
+    );
+}
+
+#[test]
+#[ignore = "real Apple Silicon hardware only — run by hand with `-- --ignored` after \
+            `cargo build --workspace`; see this file's doc comment"]
+fn deny_journey_is_explainable_via_the_audit_log() {
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+
+    let dir = scenario_dir("deny-explain");
+    let audit_log = dir.join("audit.ndjson");
+    let agent = Agentd::start(&dir, uid.wrapping_add(1), Some(&audit_log));
+    let profile_dir = write_profile_dir(&dir);
+    let fixture_bin = sibling_bin("metal_workload_fixture");
+
+    let mut command = eltanin_command(
+        &agent,
+        &profile_dir,
+        &[fixture_bin.to_str().expect("utf-8 fixture path")],
+    );
+    let child = command.spawn().expect("spawn eltanin binary");
+    let pid = child.id();
+    let output = child.wait_with_output().expect("wait for eltanin binary");
+    assert_eq!(
+        output.status.code(),
+        Some(77),
+        "[{PROVISIONAL_SCENARIO_ID}/DENY] precondition for this test: the run must be denied so \
+         there is a denial to explain, got exit {:?} — stderr={:?}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let explain_output = Command::new(sibling_bin("eltanin-explain"))
+        .arg("--log")
+        .arg(&audit_log)
+        .arg("--pid")
+        .arg(pid.to_string())
+        .output()
+        .expect("run eltanin-explain binary");
+
+    assert!(
+        explain_output.status.success() && !explain_output.stdout.is_empty(),
+        "[{PROVISIONAL_SCENARIO_ID}/DENY] `eltanin-explain --pid {pid}` must produce a non-empty \
+         decision record for a real denial of the managed Metal workload, got exit {:?}, \
+         stdout={:?} stderr={:?} — violates NORTH_STAR.md invariant 3 (\"Monitoring != \
+         Security\": audit/explain must be genuine evidence, not a stub)",
+        explain_output.status.code(),
+        String::from_utf8_lossy(&explain_output.stdout),
+        String::from_utf8_lossy(&explain_output.stderr),
+    );
+}
+
+#[test]
+#[ignore = "real Apple Silicon hardware only — run by hand with `-- --ignored` after \
+            `cargo build --workspace`; see this file's doc comment"]
 fn deny_journey_never_spawns_the_real_metal_workload() {
     let uid = real_euid();
     assert_non_root_precondition(uid);
@@ -327,7 +444,7 @@ fn deny_journey_never_spawns_the_real_metal_workload() {
     // Guaranteed to match neither the allow rule (our own uid) nor the
     // deny-root rule (we just asserted we're not uid 0) — a genuine
     // default-deny, not a scripted explicit deny.
-    let agent = Agentd::start(&dir, uid.wrapping_add(1));
+    let agent = Agentd::start(&dir, uid.wrapping_add(1), None);
     let profile_dir = write_profile_dir(&dir);
     let evidence_path = dir.join("evidence.json");
     let fixture_bin = sibling_bin("metal_workload_fixture");
@@ -366,4 +483,89 @@ fn deny_journey_never_spawns_the_real_metal_workload() {
          created",
         evidence_path.display(),
     );
+}
+
+/// HORO-1015 Track B step 13: "verify determinism" — repeat the
+/// ALLOW-then-DENY lifecycle enough times on real hardware to show the
+/// outcome is a function of the policy decision, not incidental timing
+/// or state leaking between runs (e.g. a stale lease, a Metal device
+/// left in a bad state, a socket/fixture race). Each iteration starts a
+/// *fresh* `eltanin-agentd` and scenario directory — same isolation as
+/// every other test in this file — so a flake here would indicate a
+/// real non-determinism, not shared-fixture contamination.
+#[test]
+#[ignore = "real Apple Silicon hardware only — run by hand with `-- --ignored` after \
+            `cargo build --workspace`; see this file's doc comment"]
+fn lifecycle_is_deterministic_across_repeated_allow_and_deny_cycles() {
+    const CYCLES: u32 = 3;
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+    let fixture_bin = sibling_bin("metal_workload_fixture");
+
+    for cycle in 0..CYCLES {
+        // ALLOW leg.
+        let dir = scenario_dir(&format!("lifecycle-allow-{cycle}"));
+        let agent = Agentd::start(&dir, uid, None);
+        let profile_dir = write_profile_dir(&dir);
+        let evidence_path = dir.join("evidence.json");
+        let evidence_arg = evidence_path.to_string_lossy().into_owned();
+        let output = eltanin_command(
+            &agent,
+            &profile_dir,
+            &[
+                fixture_bin.to_str().expect("utf-8 fixture path"),
+                "--evidence-out",
+                &evidence_arg,
+            ],
+        )
+        .output()
+        .expect("run eltanin binary");
+        assert!(
+            output.status.success(),
+            "[{PROVISIONAL_SCENARIO_ID}/ALLOW cycle {cycle}] expected the real Metal workload \
+             to run to completion, got exit {:?} — determinism requires every cycle to behave \
+             identically, not just the first one — stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            evidence_path.exists(),
+            "[{PROVISIONAL_SCENARIO_ID}/ALLOW cycle {cycle}] expected a real fixture evidence \
+             file at {}",
+            evidence_path.display(),
+        );
+        drop(agent);
+
+        // DENY leg, in the same cycle, with its own fresh agent/dir.
+        let dir = scenario_dir(&format!("lifecycle-deny-{cycle}"));
+        let agent = Agentd::start(&dir, uid.wrapping_add(1), None);
+        let profile_dir = write_profile_dir(&dir);
+        let evidence_path = dir.join("evidence.json");
+        let evidence_arg = evidence_path.to_string_lossy().into_owned();
+        let output = eltanin_command(
+            &agent,
+            &profile_dir,
+            &[
+                fixture_bin.to_str().expect("utf-8 fixture path"),
+                "--evidence-out",
+                &evidence_arg,
+            ],
+        )
+        .output()
+        .expect("run eltanin binary");
+        assert_eq!(
+            output.status.code(),
+            Some(77),
+            "[{PROVISIONAL_SCENARIO_ID}/DENY cycle {cycle}] expected exit 77 on every cycle, got \
+             {:?} — stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            !evidence_path.exists(),
+            "[{PROVISIONAL_SCENARIO_ID}/DENY cycle {cycle}] the real Metal workload must never \
+             run on a denied request, on any cycle — found an evidence file at {}",
+            evidence_path.display(),
+        );
+    }
 }

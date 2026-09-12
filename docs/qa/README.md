@@ -83,6 +83,7 @@ Criteria and, where applicable, `NORTH_STAR.md`), not a restatement of
 | F-M1-007 — Linux Protected-Device Enforcement | HORO-789 | — | — | *(none)* | Blocked on bare-metal Linux/NVIDIA hardware access |
 | F-M1-008 — Controlled Protected Launch (`eltanin run`) | HORO-823 | HORO-845, HORO-846, HORO-847 | #21, #22, #23, #24 | [`F-M1-008.md`](feature-verification/F-M1-008.md) | PASS |
 | F-M1-009 — Local Audit & Explain Evidence | HORO-824 | (implemented directly under the Feature ticket, no subtask decomposition) | #20 | [`F-M1-009.md`](feature-verification/F-M1-009.md) | PASS |
+| F-M1-010 — Apple Silicon Real-Accelerator Functional Validation | HORO-1010 | HORO-1011, HORO-1012, HORO-1013, HORO-1014, HORO-1015 | #39, #41, #42, #43, #45 | [`F-M1-010.md`](feature-verification/F-M1-010.md) | PASS (E2 functional-evidence scope — see "Known limitations": device-level enforcement/revoke stay Unsupported; this does not replace F-M1-007's E3 gate) |
 
 This table is a cross-reference into
 [`docs/development/campaign-state.md`](../development/campaign-state.md)'s

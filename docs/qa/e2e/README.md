@@ -31,6 +31,7 @@ already exercises it end to end.
 | Scenario ID | Ticket | Test file | Record | Features covered |
 |---|---|---|---|---|
 | `E2E-F-M1-008-controlled-launch-v1` | HORO-847 | [`crates/eltanin-cli/tests/canonical_e2e.rs`](../../../crates/eltanin-cli/tests/canonical_e2e.rs) | [`F-M1-008-controlled-launch.md`](F-M1-008-controlled-launch.md) | F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-008, F-M1-009 |
+| `B-M1-APPLE-v1` | HORO-1015 | [`crates/eltanin-cli/tests/apple_metal_canonical_e2e.rs`](../../../crates/eltanin-cli/tests/apple_metal_canonical_e2e.rs) | [`B-M1-APPLE.md`](B-M1-APPLE.md) | F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-009, F-M1-010 |
 
 `crates/eltanin-cli/tests/qa_governance_sync.rs` mechanically checks
 that every Feature ID in `canonical_e2e.rs`'s `pub const COVERS` list
@@ -50,7 +51,8 @@ documentation can't silently drift apart.
 | F-M1-006 — Local Authorization Agent & Authenticated IPC | `E2E-F-M1-008-controlled-launch-v1` — real wire traffic over a real UDS through `eltanin-agentd`'s actual accept loop. |
 | F-M1-007 — Linux Protected-Device Enforcement | BLOCKED — same hardware dependency as F-M1-002; no scenario exists because no enforcement implementation exists yet. |
 | F-M1-008 — Controlled Protected Launch (`eltanin run`) | `E2E-F-M1-008-controlled-launch-v1` — this is the scenario's own subject; the whole S0–S11 launch path is exercised directly. |
-| F-M1-009 — Local Audit & Explain Evidence | `E2E-F-M1-008-controlled-launch-v1` — `deny_journey_is_explainable_via_the_audit_log` writes a real audit record and reads it back with the real `eltanin-explain` binary. |
+| F-M1-009 — Local Audit & Explain Evidence | `E2E-F-M1-008-controlled-launch-v1` — `deny_journey_is_explainable_via_the_audit_log` writes a real audit record and reads it back with the real `eltanin-explain` binary. Also `B-M1-APPLE-v1` on Apple Silicon (both ALLOW and DENY legs). |
+| F-M1-010 — Apple Silicon Real-Accelerator Functional Validation | `B-M1-APPLE-v1` — this scenario's own subject; the full discover → capability-inspect → ALLOW+lease → real Metal compute → DENY-non-start → audit-correlate → repeat-for-determinism journey is exercised directly on physical Apple Silicon. |
 
 `qa_governance_sync.rs` mechanically checks that every `F-M1-00N` in
 [`docs/qa/README.md`](../README.md)'s Feature inventory appears

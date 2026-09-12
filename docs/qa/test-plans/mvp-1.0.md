@@ -83,10 +83,15 @@ Both tests are `#[ignore]`d and the file is `#![cfg(target_os =
 "macos")]` — `cargo test --workspace` compiles but never executes them,
 same CI-exclusion rationale as `metal_compute_probe.rs` above (ADR
 0007's decision against a macOS CI runner for real Metal dispatch).
-Verified for real by hand on this ticket's physical M3 Max; not a
-Feature Verification Record or a formal Track B scenario ID — HORO-1015
-owns producing the formal `B-M1-APPLE` Track B record and the F-M1-010
-Feature Verification Record, per its own Jira scope.
+Verified for real by hand on this ticket's physical M3 Max at HORO-1014.
+HORO-1015 subsequently extended this file with 3 more real-hardware
+tests (ALLOW/DENY `eltanin-explain` audit-evidence correlation, and a
+repeated-cycle determinism test) and a new `crates/eltanin-apple/tests/real_discovery.rs`
+(real accelerator discovery/capability-state inspection), then produced
+the formal [`B-M1-APPLE-v1`](../e2e/B-M1-APPLE.md) Track B record and the
+[F-M1-010 Feature Verification Record](../feature-verification/F-M1-010.md)
+— **Status: PASS** (E2 functional-evidence scope; does not replace
+F-M1-007's E3 gate).
 
 ## Hardware requirement (F-M1-002, F-M1-007, HORO-790)
 

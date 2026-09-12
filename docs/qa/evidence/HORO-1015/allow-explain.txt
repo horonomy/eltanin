@@ -1,0 +1,49 @@
+ALLOW journey — pid=1492 exit_status=0
+
+=== eltanin run stdout ===
+{
+  "schema_version": 1,
+  "fixture": "eltanin-apple-metal-workload-fixture",
+  "host": {
+    "arch": "aarch64",
+    "os": "macos"
+  },
+  "device": {
+    "name": "Apple M3 Max",
+    "registry_id": "0x100000456",
+    "has_unified_memory": true
+  },
+  "workload": {
+    "kernel": "double_elements",
+    "element_count": 16,
+    "input_hash": "0x13fdf84d829c1708"
+  },
+  "result": {
+    "verified_elements": 16,
+    "all_elements_verified": true,
+    "gpu_command_completed": true
+  }
+}
+
+=== eltanin run stderr ===
+
+=== eltanin-explain --log audit.ndjson --pid 1492 ===
+event: agent-pid-1472-start-1789234637153960#0
+recorded_at: unix 1789234637s.538019000n
+operation: RequestLease
+requested: RequestLease { resource: ResourceIdentity { vendor: ResourceVendor("fake"), kind: ResourceKind("gpu"), local_id: "gpu-0" }, action: Compute }
+peer: pid=1492 consistency=Consistent
+workload: uid=Present { value: 501, source: KernelObserved } executable_path=Present { value: "/private/tmp/eltanin-horo1015-target/debug/eltanin", source: KernelObserved } executable_hash=Missing { reason: "executable hashing not implemented by this collector" } cgroup=Unsupported
+outcome: Granted { lease_id: LeaseId { issuer: IssuerInstanceId("agent-pid-1472-start-1789234637153960"), sequence: 0 }, expires_at: MonotonicTime(60179799334) }
+response: LeaseGranted { lease: LeaseView { lease_id: LeaseId { issuer: IssuerInstanceId("agent-pid-1472-start-1789234637153960"), sequence: 0 }, remaining: 59.999983584s } }
+
+event: agent-pid-1472-start-1789234637153960#1
+recorded_at: unix 1789234638s.361421000n
+operation: ReleaseLease
+requested: ReleaseLease { lease_id: LeaseId { issuer: IssuerInstanceId("agent-pid-1472-start-1789234637153960"), sequence: 0 } }
+peer: pid=1492 consistency=Consistent
+workload: uid=Present { value: 501, source: KernelObserved } executable_path=Present { value: "/private/tmp/eltanin-horo1015-target/debug/eltanin", source: KernelObserved } executable_hash=Missing { reason: "executable hashing not implemented by this collector" } cgroup=Unsupported
+outcome: Released { revocation: Revoked, backend: Some(Allowed) }
+response: LeaseReleased { outcome: Released }
+note: a release record does not name a resource — correlate to the grant record for the same lease id to recover it.
+

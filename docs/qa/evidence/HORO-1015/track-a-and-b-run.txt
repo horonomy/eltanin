@@ -1,0 +1,945 @@
+=== cargo test --workspace ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_agent-195059dbc7c17c54)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/eltanin-agentd.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_agentd-da387e228a4d5d3e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/agent_architecture_guard.rs (/tmp/eltanin-horo1015-target/debug/deps/agent_architecture_guard-fe7124859bb216ab)
+
+running 3 tests
+test agent_source_never_names_policy_or_lease_evaluation_logic_outside_authz ... ok
+test agent_source_never_constructs_a_peer_context_directly ... ok
+test agent_source_contains_no_unsafe_code ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/agent_isolation.rs (/tmp/eltanin-horo1015-target/debug/deps/agent_isolation-b4abff54885b7f9c)
+
+running 3 tests
+test a_panicking_handler_answers_internal_error_and_the_server_keeps_running ... ok
+test a_connection_beyond_the_cap_is_closed_without_a_response ... ok
+test one_stalled_client_does_not_block_another_clients_response ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.03s
+
+     Running tests/agent_request_handling.rs (/tmp/eltanin-horo1015-target/debug/deps/agent_request_handling-7ee9b3547b7bb7ef)
+
+running 9 tests
+test garbage_non_json_reports_malformed_with_no_id ... ok
+test an_unsupported_version_names_found_and_expected ... ok
+test trailing_bytes_after_a_valid_document_fail_closed_as_malformed ... ok
+test an_unknown_operation_fails_closed_as_malformed ... ok
+test an_oversized_frame_is_rejected_promptly_before_the_body_is_ever_read ... ok
+test a_malformed_body_with_a_valid_envelope_recovers_the_request_id ... ok
+test a_well_formed_agent_status_round_trips_with_the_correct_id ... ok
+test a_truncated_body_fails_closed_as_malformed ... ok
+test a_truncated_header_fails_closed_as_malformed ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/agent_shutdown.rs (/tmp/eltanin-horo1015-target/debug/deps/agent_shutdown-1727c1189394d562)
+
+running 3 tests
+test shutdown_can_be_called_multiple_times_without_panicking ... ok
+test shutdown_stops_the_accept_loop_and_cleans_up_the_socket ... ok
+test the_socket_path_is_rebindable_immediately_after_shutdown ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/agent_socket_lifecycle.rs (/tmp/eltanin-horo1015-target/debug/deps/agent_socket_lifecycle-c89459addb613534)
+
+running 9 tests
+test a_group_writable_parent_directory_is_refused ... ok
+test bind_creates_a_socket_with_the_configured_mode ... ok
+test drop_removes_the_socket_path ... ok
+test a_non_socket_file_at_the_path_is_refused_and_left_untouched ... ok
+test a_live_agent_socket_is_never_unlinked ... ok
+test a_stale_socket_file_is_recovered_and_rebindable ... ok
+test a_clean_restart_can_rebind_the_same_path ... ok
+test a_missing_parent_directory_is_created_privately ... ok
+test a_symlinked_parent_directory_is_refused ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/audit_reader_isolation.rs (/tmp/eltanin-horo1015-target/debug/deps/audit_reader_isolation-f888bf3afcf1876b)
+
+running 1 test
+test agent_source_never_reads_the_audit_trail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/audit_sink.rs (/tmp/eltanin-horo1015-target/debug/deps/audit_sink-f07d04669bd6c116)
+
+running 3 tests
+test an_audit_write_failure_never_changes_the_already_computed_response ... ok
+test a_non_authorizable_peer_record_still_carries_the_discriminating_consistency ... ok
+test a_granted_and_released_lease_produce_correlated_distinct_records ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authz_backend_failure.rs (/tmp/eltanin-horo1015-target/debug/deps/authz_backend_failure-a384a3112d004a39)
+
+running 6 tests
+test resource_disappearing_mid_session_fails_safely ... ok
+test a_scripted_backend_error_never_grants_a_lease_and_compensates ... ok
+test a_permission_denied_backend_error_is_reported_as_internal_not_a_policy_denial ... ok
+test a_scripted_backend_denial_never_grants_a_lease ... ok
+test releasing_one_of_two_leases_on_the_same_resource_does_not_tear_down_the_others_enforcement ... ok
+test a_release_racing_a_grant_on_the_same_resource_never_tears_down_the_new_grant ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authz_end_to_end.rs (/tmp/eltanin-horo1015-target/debug/deps/authz_end_to_end-37f2618c10fcaff7)
+
+running 1 test
+test a_real_peer_over_a_real_socket_is_granted_a_lease_via_the_fake_backend ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authz_grant.rs (/tmp/eltanin-horo1015-target/debug/deps/authz_grant-4aaf7f60516767d5)
+
+running 6 tests
+test a_non_authorizable_peer_is_denied_never_evaluated_against_policy ... ok
+test a_request_denied_by_policy_cannot_mint_a_lease ... ok
+test a_capability_downgrade_leaves_no_lease_available_to_release_later ... ok
+test a_backend_lacking_enforce_capability_never_grants_a_lease ... ok
+test an_empty_policy_denies_every_request ... ok
+test an_authorized_request_is_granted_end_to_end_with_the_fake_backend ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authz_lifecycle.rs (/tmp/eltanin-horo1015-target/debug/deps/authz_lifecycle-d43682940a1192e7)
+
+running 6 tests
+test an_expired_lease_is_pruned_and_no_longer_releasable ... ok
+test a_request_beyond_max_outstanding_leases_fails_safely_without_granting ... ok
+test a_lease_survives_multiple_independent_calls_without_being_released ... ok
+test an_expired_leases_slot_is_reclaimed_by_prune_before_the_capacity_check ... ok
+test a_lease_from_a_prior_agent_instance_does_not_survive_a_restart ... ok
+test concurrent_requests_never_overshoot_max_outstanding_leases ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authz_release.rs (/tmp/eltanin-horo1015-target/debug/deps/authz_release-b96fa4acd54fc29c)
+
+running 5 tests
+test an_execve_substitution_is_refused_even_with_the_same_pid_and_start_token ... ok
+test releasing_an_unknown_lease_id_is_refused ... ok
+test the_same_client_can_release_its_own_lease ... ok
+test a_different_client_cannot_release_another_clients_lease ... ok
+test releasing_an_already_released_lease_is_refused_not_double_released ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authz_renewal.rs (/tmp/eltanin-horo1015-target/debug/deps/authz_renewal-a3ac0377e6349057)
+
+running 1 test
+test a_same_peer_second_request_lease_mints_an_independent_lease_and_the_old_one_stays_releasable ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_apple-cc81dc7418667d83)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/metal_workload_fixture.rs (/tmp/eltanin-horo1015-target/debug/deps/metal_workload_fixture-c63d6683d9952191)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capability_mapping.rs (/tmp/eltanin-horo1015-target/debug/deps/capability_mapping-558ed24c681cfb0a)
+
+running 6 tests
+test discover_resource_is_the_only_fully_supported_capability ... ok
+test controlled_launch_is_not_evaluated_not_unsupported ... ok
+test absent_unified_memory_flag_maps_to_not_reportable_never_dedicated ... ok
+test observe_resource_is_reported_as_partial_not_supported_or_unsupported ... ok
+test identity_uses_the_registry_id_as_local_id_not_the_name ... ok
+test unified_memory_flag_maps_to_accelerator_memory_unified ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/enforcement_honesty.rs (/tmp/eltanin-horo1015-target/debug/deps/enforcement_honesty-02710425959befe3)
+
+running 2 tests
+test revoke_always_reports_unsupported_device_revoke ... ok
+test enforce_always_reports_unsupported_device_enforce ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/metal_compute_probe.rs (/tmp/eltanin-horo1015-target/debug/deps/metal_compute_probe-058ac08126ee5001)
+
+running 2 tests
+test a_trivial_metal_kernel_computes_the_correct_result_on_real_hardware ... ok
+test the_input_hash_is_deterministic_across_independent_probe_runs_on_real_hardware ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/non_macos_fallback.rs (/tmp/eltanin-horo1015-target/debug/deps/non_macos_fallback-22ce3be6c947df49)
+
+running 2 tests
+test discover_succeeds_on_a_real_macos_host ... ok
+test observe_finds_a_resource_discover_just_reported ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/probe_hash.rs (/tmp/eltanin-horo1015-target/debug/deps/probe_hash-ae253b74df553e43)
+
+running 4 tests
+test a_single_differing_byte_changes_the_hash ... ok
+test empty_input_hashes_to_the_fnv_offset_basis ... ok
+test hashing_is_deterministic_across_repeated_calls ... ok
+test known_answer_test_vectors_match_the_published_fnv_1a_64_reference ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/real_discovery.rs (/tmp/eltanin-horo1015-target/debug/deps/real_discovery-126915bb0c2cb4fb)
+
+running 2 tests
+test discovered_resource_capability_state_matches_the_honesty_table ... ok
+test discover_finds_at_least_one_real_apple_gpu ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_audit-49dfdab2888f7d63)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/eltanin-explain.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_explain-4db1646e0426ec39)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/architecture_no_vendor_leak.rs (/tmp/eltanin-horo1015-target/debug/deps/architecture_no_vendor_leak-c43b8421b3e52fc5)
+
+running 2 tests
+test eltanin_audit_never_depends_on_eltanin_linux_or_eltanin_agent ... ok
+test audit_schema_names_no_vendor_or_platform_concept ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/explain_selectors.rs (/tmp/eltanin-horo1015-target/debug/deps/explain_selectors-fadc37a808c23117)
+
+running 8 tests
+test an_unknown_id_that_is_outside_any_observed_gap_is_not_found ... ok
+test a_lost_first_write_is_reported_as_possibly_lost_not_never_issued ... ok
+test selecting_by_event_id_finds_the_exact_record ... ok
+test a_grant_and_its_later_release_correlate_by_lease_id ... ok
+test an_unreadable_line_is_reported_and_does_not_stop_the_rest_of_the_scan ... ok
+test selecting_by_pid_returns_every_match_in_file_order ... ok
+test a_version_mismatched_lines_recovered_event_id_counts_as_present_not_a_gap ... ok
+test a_sequence_gap_between_two_records_is_reported_as_possibly_lost ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/record_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/record_golden-59a7eeda80b1d9e5)
+
+running 3 tests
+test a_release_records_lease_id_comes_from_the_request_not_the_outcome ... ok
+test a_granted_lease_record_exposes_its_lease_id_via_the_helper ... ok
+test a_denied_request_lease_record_round_trips_through_json ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/record_not_authority.rs (/tmp/eltanin-horo1015-target/debug/deps/record_not_authority-63660507b665e165)
+
+running 3 tests
+test a_version_mismatched_envelope_is_reported_not_silently_accepted ... ok
+test a_hand_edited_log_line_deserializes_to_a_record_and_nothing_else ... ok
+test record_schema_never_directly_embeds_an_authority_bearing_type ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/redaction.rs (/tmp/eltanin-horo1015-target/debug/deps/redaction-fd00aed5573a26ba)
+
+running 2 tests
+test a_missing_evidence_reason_containing_a_newline_stays_one_json_line ... ok
+test executable_path_evidence_is_recorded_verbatim_not_stripped ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sink_append.rs (/tmp/eltanin-horo1015-target/debug/deps/sink_append-e94540243a6319ef)
+
+running 5 tests
+test the_log_file_is_created_with_mode_0600 ... ok
+test a_failed_write_still_advances_the_sequence_leaving_a_detectable_gap ... ok
+test sequence_numbers_are_monotonic_per_sink_instance ... ok
+test appended_records_survive_reopening_the_log ... ok
+test concurrent_writers_never_interleave_a_line ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_backend-41d86c729112e358)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/architecture_no_vendor_leak.rs (/tmp/eltanin-horo1015-target/debug/deps/architecture_no_vendor_leak-2fe2c08287cef17c)
+
+running 2 tests
+test backend_contract_names_no_vendor_or_platform_concept ... ok
+test eltanin_core_does_not_depend_back_on_eltanin_backend ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capability_support_states.rs (/tmp/eltanin-horo1015-target/debug/deps/capability_support_states-41687847a49794ff)
+
+running 4 tests
+test not_evaluated_device_enforce_support_never_reports_allowed ... ok
+test controlled_launch_support_does_not_imply_device_enforce_support ... ok
+test enforcement_outcome_is_identical_across_vendor_tags ... ok
+test partial_device_enforce_support_never_reports_allowed ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/contract.rs (/tmp/eltanin-horo1015-target/debug/deps/contract-94d688e651dcad35)
+
+running 4 tests
+test capability_downgrade_reports_unsupported_not_allowed ... ok
+test backend_error_variants_serialize_with_distinct_tags ... ok
+test revoke_without_capability_is_a_typed_unsupported_error ... ok
+test unavailable_error_carries_the_specific_resource ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fake_backend_scenarios.rs (/tmp/eltanin-horo1015-target/debug/deps/fake_backend_scenarios-c1e458408f9b1c99)
+
+running 11 tests
+test backend_lacking_enforce_capability_reports_unsupported_not_allowed ... ok
+test lease_expiry_scenario_via_scripted_denial ... ok
+test enforcement_succeeds_when_capability_present_and_no_override ... ok
+test resource_absent_is_unavailable_not_a_silent_empty_success ... ok
+test resource_disappears_mid_session ... ok
+test resource_present_is_discoverable_and_observable ... ok
+test revoke_with_capability_succeeds ... ok
+test revoke_without_capability_is_explicit_unsupported ... ok
+test scenarios_are_deterministic_across_repeated_runs ... ok
+test scripted_allowed_cannot_mask_a_capability_downgrade ... ok
+test unauthorized_request_reports_scripted_denial ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_cli-f1da5f6520f431b9)
+
+running 3 tests
+test supervise::tests::a_remaining_duration_over_the_cap_is_clamped_not_added_verbatim ... ok
+test supervise::tests::an_ordinary_remaining_duration_adds_normally ... ok
+test supervise::tests::an_overflowing_remaining_duration_never_panics_and_falls_back_to_base ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin-1ac5ff29ebe0d3b7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/apple_metal_canonical_e2e.rs (/tmp/eltanin-horo1015-target/debug/deps/apple_metal_canonical_e2e-62849e80a01afa3f)
+
+running 5 tests
+test allow_journey_is_explainable_via_the_audit_log ... ignored, real Apple Silicon hardware only — run by hand with `-- --ignored` after `cargo build --workspace`; see this file's doc comment
+test allow_journey_runs_the_real_metal_workload_and_verifies_output ... ignored, real Apple Silicon hardware only — run by hand with `-- --ignored` after `cargo build --workspace`; see this file's doc comment
+test deny_journey_is_explainable_via_the_audit_log ... ignored, real Apple Silicon hardware only — run by hand with `-- --ignored` after `cargo build --workspace`; see this file's doc comment
+test deny_journey_never_spawns_the_real_metal_workload ... ignored, real Apple Silicon hardware only — run by hand with `-- --ignored` after `cargo build --workspace`; see this file's doc comment
+test lifecycle_is_deterministic_across_repeated_allow_and_deny_cycles ... ignored, real Apple Silicon hardware only — run by hand with `-- --ignored` after `cargo build --workspace`; see this file's doc comment
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/architecture_no_shell.rs (/tmp/eltanin-horo1015-target/debug/deps/architecture_no_shell-cbc91630348ff274)
+
+running 2 tests
+test there_is_exactly_one_command_spawn_call_site ... ok
+test eltanin_cli_source_never_names_a_shell_interpreter_or_system_call ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/argv_contract.rs (/tmp/eltanin-horo1015-target/debug/deps/argv_contract-44c8cffc44cd08ac)
+
+running 15 tests
+test a_bare_word_before_the_separator_is_rejected_as_unrecognized ... ok
+test a_flag_shaped_argument_after_the_separator_is_passed_through_verbatim ... ok
+test a_command_with_no_extra_arguments_parses ... ok
+test an_unrecognized_flag_before_the_separator_is_rejected ... ok
+test a_well_formed_invocation_parses ... ok
+test a_second_separator_after_the_first_is_a_literal_workload_argument ... ok
+test empty_argv_is_rejected_as_not_run ... ok
+test empty_command_after_separator_is_rejected ... ok
+test missing_profile_is_rejected ... ok
+test missing_run_subcommand_is_rejected ... ok
+test missing_separator_with_nothing_after_profile_is_rejected ... ok
+test non_utf8_workload_arguments_round_trip_unchanged ... ok
+test profile_given_twice_is_rejected ... ok
+test profile_missing_its_value_is_rejected ... ok
+test shell_metacharacters_in_workload_arguments_are_preserved_verbatim_not_reparsed ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/canonical_e2e.rs (/tmp/eltanin-horo1015-target/debug/deps/canonical_e2e-a1868950fbf1bd50)
+
+running 3 tests
+test deny_journey_never_spawns_the_workload ... ok
+test allow_journey_authorizes_and_runs_the_workload ... ok
+test deny_journey_is_explainable_via_the_audit_log ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+
+     Running tests/docs_sync.rs (/tmp/eltanin-horo1015-target/debug/deps/docs_sync-708186a6495fd0a3)
+
+running 8 tests
+test canonical_scenario_id_appears_in_quickstart_and_its_track_b_record ... ok
+test canonical_scenario_id_matches_the_e2e_test_source ... ok
+test cli_and_agent_default_socket_paths_stay_pinned_together_on_every_platform ... ok
+test eltanin_run_policy_example_is_byte_identical_to_the_committed_fixture ... ok
+test quickstart_profile_example_is_byte_identical_to_the_committed_fixture ... ok
+test quickstart_shows_the_exact_command_the_allow_journey_runs ... ok
+test quickstart_names_every_env_var_the_canonical_scenario_sets ... ok
+test cli_contract_exit_code_table_matches_the_exit_code_enum ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/exit_code_contract.rs (/tmp/eltanin-horo1015-target/debug/deps/exit_code_contract-e1ebfe7d55a1b624)
+
+running 6 tests
+test every_eltanin_exit_code_avoids_spawn_failure_and_signal_ranges ... ok
+test authorization_lapsed_exit_code_does_not_collide_with_any_128_plus_n_signal_code ... ok
+test every_eltanin_exit_code_is_pairwise_distinct ... ok
+test every_exit_code_matches_the_documented_table ... ok
+test workload_signal_exit_code_saturates_rather_than_overflows ... ok
+test workload_signal_exit_code_uses_the_128_plus_n_convention ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/failure_messages.rs (/tmp/eltanin-horo1015-target/debug/deps/failure_messages-7c2f4ebc582c2b7a)
+
+running 7 tests
+test a_denied_response_classifies_to_a_denied_failure ... ok
+test a_denials_next_action_names_eltanin_explain_by_pid_never_request_id ... ok
+test a_lease_granted_response_classifies_to_no_failure ... ok
+test agent_internal_error_message_does_not_overclaim_a_specific_cause ... ok
+test an_error_response_classifies_to_an_agent_error_failure ... ok
+test responses_eltanin_run_never_sends_a_request_for_classify_to_an_agent_error_not_a_panic ... ok
+test every_launch_failure_has_a_non_empty_message_and_next_action ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/launch_lifecycle.rs (/tmp/eltanin-horo1015-target/debug/deps/launch_lifecycle-d4a616372298eb05)
+
+running 13 tests
+test a_missing_workload_exits_127_and_still_releases ... ok
+test an_unreachable_agent_exits_69_without_spawning ... ok
+test a_denied_lease_never_spawns_the_workload ... ok
+test a_non_executable_workload_exits_126_and_still_releases ... ok
+test an_agent_error_never_spawns_the_workload ... ok
+test a_zero_exit_status_passes_through ... ok
+test a_signal_terminated_workload_exits_128_plus_n ... ok
+test a_granted_lease_spawns_and_passes_through_the_exit_status ... ok
+test a_failed_release_warns_but_does_not_change_the_exit_status ... ok
+test a_renewal_denial_does_not_terminate_the_workload_early ... ok
+test a_forwarded_sigterm_reaches_the_workload_exactly_once ... ok
+test renewal_exhaustion_terminates_the_workload_and_exits_76 ... ok
+test a_renewal_acquires_before_releasing_the_old_lease ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.20s
+
+     Running tests/profile_contract.rs (/tmp/eltanin-horo1015-target/debug/deps/profile_contract-c79efd86e8d34c2e)
+
+running 11 tests
+test a_name_containing_a_newline_is_rejected ... ok
+test a_name_containing_a_nul_byte_is_rejected ... ok
+test a_name_at_the_length_limit_is_accepted ... ok
+test a_name_containing_a_slash_is_rejected ... ok
+test a_non_utf8_name_is_rejected ... ok
+test a_profile_document_carries_no_executable_identity_field ... ok
+test a_simple_name_is_accepted ... ok
+test an_empty_name_is_rejected ... ok
+test a_profile_document_round_trips_through_the_versioned_envelope ... ok
+test dot_and_dotdot_are_rejected_as_path_traversal ... ok
+test a_name_over_the_length_limit_is_rejected ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/profile_loader.rs (/tmp/eltanin-horo1015-target/debug/deps/profile_loader-3d16031300573902)
+
+running 5 tests
+test eltanin_profile_dir_takes_precedence_over_xdg_config_home ... ok
+test a_missing_profile_names_the_path_it_tried ... ok
+test an_unsupported_schema_version_is_reported_as_version ... ok
+test a_malformed_json_profile_is_reported_as_json ... ok
+test a_valid_profile_document_loads ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/qa_governance_sync.rs (/tmp/eltanin-horo1015-target/debug/deps/qa_governance_sync-c9653fa536f30429)
+
+running 8 tests
+test covers_feature_ids_exactly_match_the_f_m1_008_record_coverage_table ... ok
+test covers_feature_ids_exactly_match_the_e2e_index_manifest_row ... ok
+test every_feature_id_appears_in_the_e2e_index_with_a_scenario_or_na_or_blocked_marker ... ok
+test every_e2e_index_manifest_link_resolves_to_a_real_file ... ok
+test every_feature_verification_record_is_cited_by_the_readme_inventory ... ok
+test every_feature_id_appears_once_in_the_inventory_with_a_non_empty_status ... ok
+test every_readme_inventory_record_link_resolves_to_a_real_file ... ok
+test every_test_path_cited_by_the_mvp_1_0_test_plan_exists ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_core-a6c9d9ede5d1717c)
+
+running 6 tests
+test peer::tests::a_self_asserted_match_is_never_treated_as_consistent ... ok
+test peer::tests::both_sides_unreadable_is_indeterminate_not_divergence ... ok
+test peer::tests::matching_effective_uid_alone_is_consistent ... ok
+test peer::tests::matching_neither_is_credential_divergence ... ok
+test peer::tests::matching_real_uid_is_consistent ... ok
+test peer::tests::one_side_unreadable_and_the_other_mismatching_is_divergence_not_indeterminate ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/architecture_no_vendor_leak.rs (/tmp/eltanin-horo1015-target/debug/deps/architecture_no_vendor_leak-24ee77e2e3cba0b5)
+
+running 1 test
+test core_source_names_no_vendor_or_platform_concept ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/identity_adversarial.rs (/tmp/eltanin-horo1015-target/debug/deps/identity_adversarial-9a6ceef823a33034)
+
+running 7 tests
+test missing_evidence_never_reports_present_or_yields_a_value ... ok
+test pid_reused_by_unrelated_process_is_reported_different_not_same ... ok
+test process_exit_race_reports_indeterminate_not_a_confirmed_answer ... ok
+test same_claimed_path_with_different_process_start_is_not_the_same_identity ... ok
+test same_pid_different_binary_disguised_as_restart_is_not_reported_same ... ok
+test self_asserted_claim_never_compares_equal_to_the_same_kernel_observed_value ... ok
+test self_asserted_start_token_matching_the_real_value_is_not_reported_same ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/identity_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/identity_golden-4118971da320573c)
+
+running 9 tests
+test different_pid_with_present_tokens_is_reported_as_different ... ok
+test same_pid_different_start_is_pid_reuse_reported_as_different ... ok
+test missing_start_token_is_indeterminate_not_different_and_not_same ... ok
+test spoof_prone_fields_alone_cannot_be_used_to_assert_trust ... ok
+test unsupported_start_token_is_indeterminate ... ok
+test workload_identity_golden_json ... ok
+test execution_context_carries_workload_and_cgroup_evidence ... ok
+test same_pid_same_start_is_the_same_process ... ok
+test workload_identity_roundtrips ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lease_binding.rs (/tmp/eltanin-horo1015-target/debug/deps/lease_binding-afc316d73176397e)
+
+running 7 tests
+test lease_issue_fails_when_policy_denies ... ok
+test lease_rejects_a_different_pid_with_the_same_start_token ... ok
+test lease_rejects_a_different_resource ... ok
+test lease_rejects_a_different_action ... ok
+test lease_rejects_a_different_workload_pid_and_start_token ... ok
+test lease_rejects_an_in_place_execve_into_a_different_binary ... ok
+test lease_validates_when_presented_context_matches_exactly ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lease_expiry.rs (/tmp/eltanin-horo1015-target/debug/deps/lease_expiry-c0228dd1b6036d9e)
+
+running 9 tests
+test issue_rejects_ttl_exceeding_issuer_maximum ... ok
+test issue_rejects_an_expiry_that_would_overflow_monotonic_time ... ok
+test issue_accepts_ttl_exactly_at_the_issuer_maximum ... ok
+test issue_rejects_zero_ttl ... ok
+test lease_is_expired_after_expiry_even_with_identical_matching_context ... ok
+test lease_is_expired_at_the_exact_expiry_instant ... ok
+test lease_is_valid_strictly_before_expiry ... ok
+test narrow_expiry_to_a_later_instant_is_a_no_op ... ok
+test narrow_expiry_to_an_earlier_instant_shortens_the_lease ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lease_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/lease_golden-6661eb877b219294)
+
+running 2 tests
+test lease_serializes_to_the_expected_shape ... ok
+test compute_lease_source_never_derives_deserialize ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lease_renewal.rs (/tmp/eltanin-horo1015-target/debug/deps/lease_renewal-0bafe9721e0a5ca0)
+
+running 3 tests
+test re_issuing_after_expiry_mints_a_distinct_lease_id_not_a_continuation ... ok
+test the_expired_lease_stays_expired_after_a_sibling_is_renewed ... ok
+test revoking_a_renewed_lease_does_not_revoke_the_lease_it_replaced ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lease_restart.rs (/tmp/eltanin-horo1015-target/debug/deps/lease_restart-99c35915b956c618)
+
+running 7 tests
+test indeterminate_workload_evidence_is_neither_valid_nor_a_confirmed_mismatch ... ok
+test revoked_lease_is_rejected_even_when_otherwise_still_valid ... ok
+test lease_from_a_prior_issuer_instance_is_rejected_as_foreign ... ok
+test revoking_a_lease_from_a_foreign_issuer_is_reported_as_foreign ... ok
+test revoking_a_lease_id_that_was_never_issued_is_reported_as_not_issued ... ok
+test workload_restart_with_a_new_process_start_token_is_a_mismatch_not_valid ... ok
+test revoking_an_already_revoked_lease_reports_already_revoked ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_decision.rs (/tmp/eltanin-horo1015-target/debug/deps/policy_decision-2ae91dd120fe37f1)
+
+running 13 tests
+test decision_carries_policy_provenance ... ok
+test empty_policy_denies_every_request ... ok
+test best_effort_source_matches_a_best_effort_floor_condition ... ok
+test deny_rule_blocked_by_missing_evidence_still_denies_an_otherwise_matching_allow ... ok
+test indeterminate_allow_rule_does_not_allow ... ok
+test deny_rule_overrides_a_matching_allow_rule ... ok
+test indeterminate_deny_outranks_a_definitively_matching_allow_rule ... ok
+test no_matching_rule_denies ... ok
+test repeated_evaluation_of_the_same_inputs_is_byte_identical ... ok
+test request_with_unknown_action_never_matches_any_rule ... ok
+test self_asserted_only_context_cannot_produce_an_allow ... ok
+test rule_authoring_order_does_not_change_the_decision ... ok
+test single_matching_allow_rule_allows ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_evidence.rs (/tmp/eltanin-horo1015-target/debug/deps/policy_evidence-f6370129d7171e07)
+
+running 8 tests
+test best_effort_floor_admits_both_unforgeable_sources ... ok
+test kernel_observed_floor_rejects_best_effort ... ok
+test no_trust_floor_admits_self_asserted_evidence ... ok
+test present_evidence_at_or_above_the_trust_floor_with_matching_value_matches ... ok
+test present_evidence_below_the_trust_floor_does_not_match ... ok
+test missing_evidence_never_matches_regardless_of_floor ... ok
+test unsupported_evidence_never_matches_regardless_of_floor ... ok
+test present_evidence_with_a_different_value_does_not_match_even_at_full_trust ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/policy_golden-170dc507474a1b46)
+
+running 4 tests
+test explicit_allow_decision_golden_json ... ok
+test explicit_deny_overriding_allow_decision_golden_json ... ok
+test indeterminate_evidence_decision_golden_json ... ok
+test no_matching_rule_decision_golden_json ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_replay.rs (/tmp/eltanin-horo1015-target/debug/deps/policy_replay-93fcbcde452bfab5)
+
+running 8 tests
+test docs_policy_example_is_byte_identical_to_the_committed_fixture ... ok
+test malformed_condition_with_unknown_field_tag_fails_to_deserialize ... ok
+test document_with_unsupported_schema_version_is_never_evaluable_even_with_valid_rules ... ok
+test a_policy_document_serialized_then_deserialized_produces_the_same_decision ... ok
+test malformed_effect_value_fails_to_deserialize_rather_than_defaulting_to_deny ... ok
+test example_policy_from_the_docs_matches_the_committed_fixture ... ok
+test replaying_the_same_document_against_a_different_context_still_denies_correctly ... ok
+test malformed_policy_document_missing_required_field_fails_to_deserialize ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_spoof_signals.rs (/tmp/eltanin-horo1015-target/debug/deps/policy_spoof_signals-a6c99484b800ee75)
+
+running 5 tests
+test both_signals_trusted_and_correct_grants_allow ... ok
+test both_signals_self_asserted_never_grants_allow_even_with_correct_values ... ok
+test both_signals_trusted_but_wrong_values_denies ... ok
+test spoofed_uid_matching_a_deny_rule_still_denies_via_no_matching_rule_not_by_luck ... ok
+test one_trusted_signal_and_one_spoofed_signal_never_grants_allow ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_validation.rs (/tmp/eltanin-horo1015-target/debug/deps/policy_validation-a33d070b10a0a161)
+
+running 10 tests
+test duplicate_rule_id_is_rejected ... ok
+test empty_policy_document_with_no_rules_is_valid ... ok
+test distinct_condition_kinds_on_one_rule_are_accepted ... ok
+test empty_rule_id_is_rejected ... ok
+test empty_policy_id_is_rejected ... ok
+test rule_naming_unknown_action_is_rejected ... ok
+test rule_with_duplicate_condition_kind_is_rejected ... ok
+test rule_without_conditions_is_rejected ... ok
+test versioned_envelope_at_the_current_version_is_accepted ... ok
+test versioned_envelope_with_unsupported_version_is_rejected ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/provenance_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/provenance_golden-865f4a79a8deaa64)
+
+running 3 tests
+test provenance_record_links_the_exact_request_it_was_built_with ... ok
+test provenance_record_round_trips_through_json ... ok
+test provenance_record_preserves_missing_and_unsupported_evidence_verbatim ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resource_capability_states.rs (/tmp/eltanin-horo1015-target/debug/deps/resource_capability_states-61aa3211d326fdce)
+
+running 5 tests
+test an_absent_capability_is_not_evaluated_and_never_supported ... ok
+test an_empty_capabilities_set_reports_every_dimension_not_evaluated ... ok
+test is_proven_agrees_with_supports_for_every_state ... ok
+test new_marks_every_listed_capability_supported_and_nothing_else ... ok
+test supports_is_true_only_for_the_supported_state_across_every_dimension ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resource_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/resource_golden-663526c64dd24476)
+
+running 11 tests
+test an_omitted_memory_field_decodes_as_not_reportable ... ok
+test arbitrary_vendor_tag_round_trips_without_data_loss ... ok
+test an_unrecognized_support_state_string_fails_decode_explicitly ... ok
+test capability_check_reflects_actual_support_not_assumption ... ok
+test enforcement_result_unsupported_is_distinct_from_allowed ... ok
+test dedicated_memory_resource_round_trips_with_its_reported_byte_count ... ok
+test protected_resource_golden_json ... ok
+test protected_resource_roundtrips_through_versioned_envelope ... ok
+test unknown_action_deserializes_explicitly ... ok
+test unsupported_schema_version_fails_explicitly ... ok
+test unified_memory_resource_round_trips_with_no_fabricated_byte_count ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_linux-116b9bd254c603f8)
+
+running 1 test
+test imp::tests::non_linux_build_reports_unsupported_not_a_guess ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/linux_integration.rs (/tmp/eltanin-horo1015-target/debug/deps/linux_integration-22f1e7225b6a854f)
+
+running 2 tests
+test self_pid_round_trip_is_internally_consistent ... ok
+test two_collections_of_same_process_compare_as_same ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/peer_credential.rs (/tmp/eltanin-horo1015-target/debug/deps/peer_credential-fd92a572baabf8cc)
+
+running 1 test
+test non_linux_build_reports_unsupported_platform ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_macos-d27e909575e48170)
+
+running 6 tests
+test imp::tests::nonexistent_pid_reports_explicit_missing_not_panic ... ok
+test imp::tests::ancestry_walk_terminates_and_does_not_include_self ... ok
+test imp::tests::collects_own_execution_context_with_unsupported_cgroup_path ... ok
+test imp::tests::collects_own_workload_identity_with_kernel_observed_evidence ... ok
+test peer::imp::tests::a_self_connected_peer_reports_its_own_credential_as_consistent ... ok
+test peer::imp::tests::effective_uid_matches_the_process_euid ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/macos_integration.rs (/tmp/eltanin-horo1015-target/debug/deps/macos_integration-9d906eb879a22e04)
+
+running 3 tests
+test two_collections_of_same_process_compare_as_same ... ok
+test self_pid_round_trip_is_internally_consistent ... ok
+test exited_child_process_reports_missing_or_a_genuinely_different_process ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/peer_credential.rs (/tmp/eltanin-horo1015-target/debug/deps/peer_credential-acaa264859dde806)
+
+running 2 tests
+test a_self_connected_peer_reports_its_own_credential_as_consistent ... ok
+test effective_uid_matches_the_process_real_uid ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/tmp/eltanin-horo1015-target/debug/deps/eltanin_protocol-0c6061e660431ef7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_client_direction.rs (/tmp/eltanin-horo1015-target/debug/deps/protocol_client_direction-935d992d69bc7c3b)
+
+running 7 tests
+test decode_response_reports_a_version_mismatch_precisely_even_with_a_malformed_payload ... ok
+test decode_response_rejects_a_frame_exceeding_the_max_size ... ok
+test a_denied_response_round_trips_through_the_client_direction ... ok
+test decode_response_fails_closed_as_malformed_on_an_unrecognized_shape ... ok
+test a_response_encoded_by_the_agent_decodes_on_the_client_side ... ok
+test a_request_encoded_by_the_client_decodes_on_the_agent_side ... ok
+test encode_request_rejects_a_payload_over_the_max_without_writing_a_header ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_correlation.rs (/tmp/eltanin-horo1015-target/debug/deps/protocol_correlation-5bb529917a814c5f)
+
+running 5 tests
+test request_id_is_not_fabricated_for_a_truncated_frame ... ok
+test version_is_recoverable_independent_of_request_id_recoverability ... ok
+test request_id_is_not_fabricated_when_the_payload_is_not_an_object ... ok
+test a_well_formed_request_id_round_trips_through_decode ... ok
+test request_id_is_recoverable_even_when_the_body_is_garbage ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_fail_closed.rs (/tmp/eltanin-horo1015-target/debug/deps/protocol_fail_closed-fd224d52db450ca3)
+
+running 13 tests
+test a_frame_exceeding_the_max_size_fails_closed_before_deserialization ... ok
+test a_truncated_frame_fails_closed_as_malformed ... ok
+test a_non_object_payload_fails_closed_as_malformed ... ok
+test decode_frame_len_accepts_a_header_naming_the_max_exactly ... ok
+test decode_frame_len_rejects_a_header_naming_a_length_over_the_max ... ok
+test a_well_formed_request_decodes_successfully ... ok
+test encode_frame_prepends_the_exact_big_endian_length ... ok
+test encode_frame_rejects_a_payload_over_the_max_without_writing_a_header ... ok
+test trailing_bytes_after_a_valid_document_fail_closed_as_malformed ... ok
+test unknown_field_alongside_a_unit_variant_operation_fails_closed_as_malformed ... ok
+test unknown_version_is_reported_precisely_even_with_a_malformed_payload ... ok
+test unknown_operation_fails_closed_as_malformed ... ok
+test unknown_field_in_a_request_body_fails_closed_as_malformed ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_golden.rs (/tmp/eltanin-horo1015-target/debug/deps/protocol_golden-18a91999859f9417)
+
+running 8 tests
+test agent_status_request_matches_fixture ... ok
+test response_released_matches_fixture ... ok
+test response_status_matches_fixture ... ok
+test request_lease_matches_fixture ... ok
+test release_lease_matches_fixture ... ok
+test response_error_unsupported_version_matches_fixture ... ok
+test response_lease_denied_matches_fixture ... ok
+test response_lease_granted_matches_fixture ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_no_self_asserted_identity.rs (/tmp/eltanin-horo1015-target/debug/deps/protocol_no_self_asserted_identity-1f3c3eeffd967bb3)
+
+running 2 tests
+test provenance_for_is_actually_present_and_is_the_only_exempted_function ... ok
+test protocol_wire_types_never_name_derived_identity_or_authority_types ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_platform_neutral.rs (/tmp/eltanin-horo1015-target/debug/deps/protocol_platform_neutral-1f4d49c4e1c8ecfd)
+
+running 1 test
+test protocol_source_names_no_transport_or_platform_mechanism ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_agent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_apple
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_audit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_backend
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_cli
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_linux
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_macos
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests eltanin_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== cargo test -p eltanin-apple --test metal_compute_probe -- --nocapture ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running tests/metal_compute_probe.rs (/tmp/eltanin-horo1015-target/debug/deps/metal_compute_probe-6e7901b617249059)
+
+running 2 tests
+test a_trivial_metal_kernel_computes_the_correct_result_on_real_hardware ... ok
+test the_input_hash_is_deterministic_across_independent_probe_runs_on_real_hardware ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+
+=== cargo test -p eltanin-cli --test apple_metal_canonical_e2e -- --ignored --nocapture ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running tests/apple_metal_canonical_e2e.rs (/tmp/eltanin-horo1015-target/debug/deps/apple_metal_canonical_e2e-5eb2e28317a111cb)
+
+running 5 tests
+test deny_journey_never_spawns_the_real_metal_workload ... ok
+test deny_journey_is_explainable_via_the_audit_log ... ok
+test allow_journey_is_explainable_via_the_audit_log ... ok
+test allow_journey_runs_the_real_metal_workload_and_verifies_output ... ok
+test lifecycle_is_deterministic_across_repeated_allow_and_deny_cycles ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+
+
+=== cargo test -p eltanin-apple --test real_discovery -- --nocapture ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running tests/real_discovery.rs (/tmp/eltanin-horo1015-target/debug/deps/real_discovery-94b84e667a8392d2)
+
+running 2 tests
+test discovered_resource_capability_state_matches_the_honesty_table ... ok
+test discover_finds_at_least_one_real_apple_gpu ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
