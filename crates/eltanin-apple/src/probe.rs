@@ -15,9 +15,40 @@ use eltanin_core::resource::Capability;
 pub struct ComputeProbeReport {
     /// The name of the Metal device the probe ran on.
     pub device_name: String,
+    /// The device's `registryID` (see `crate::device::DeviceSnapshot`) —
+    /// a stable-enough local identifier for this device on this host,
+    /// included so evidence built from this report can be correlated
+    /// with `AppleBackend::discover`'s own reported identity.
+    pub registry_id: u64,
+    /// Whether the device reported a unified (shared-with-host) memory
+    /// architecture, per `MTLDevice::hasUnifiedMemory`.
+    pub has_unified_memory: bool,
+    /// A deterministic (non-cryptographic) 64-bit hash of the kernel's
+    /// input buffer, computed by [`fnv1a_64`] — lets a caller assert two
+    /// runs used bit-identical input without embedding the raw floats.
+    pub input_hash: u64,
+    /// How many input/output elements the kernel dispatched over.
+    pub element_count: usize,
     /// How many output elements were checked against the expected
     /// doubled value.
     pub verified_elements: usize,
+}
+
+/// A small, dependency-free deterministic hash (FNV-1a, 64-bit) used to
+/// give machine-readable evidence a stable "input fingerprint" without
+/// pulling in a cryptographic-hash crate for a non-security purpose (see
+/// this module's doc comment: this probe never makes a security claim,
+/// only a determinism/audit-trail one).
+#[must_use]
+pub fn fnv1a_64(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET_BASIS;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
 }
 
 /// Compile a trivial inline kernel that doubles each input element,
@@ -73,7 +104,7 @@ mod imp {
 
     use eltanin_backend::contract::BackendError;
 
-    use super::ComputeProbeReport;
+    use super::{fnv1a_64, ComputeProbeReport};
 
     /// Doubles each `float` in `input`, writing the result to `output`.
     /// One thread per element — `dispatchThreadgroups_threadsPerThreadgroup`
@@ -105,6 +136,8 @@ mod imp {
             .next()
             .ok_or_else(|| transient("no Metal device is currently present"))?;
         let device_name = device.name().to_string();
+        let registry_id = device.registryID();
+        let has_unified_memory = device.hasUnifiedMemory();
 
         let queue = device
             .newCommandQueue()
@@ -129,6 +162,11 @@ mod imp {
         #[allow(clippy::cast_precision_loss)]
         let input: [f32; ELEMENT_COUNT] = std::array::from_fn(|i| i as f32);
         let byte_len = std::mem::size_of_val(&input);
+        // A plain, safe byte-serialization of `input` (no `unsafe`
+        // transmute needed) purely to feed the deterministic
+        // fingerprint hash below.
+        let input_bytes: Vec<u8> = input.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let input_hash = fnv1a_64(&input_bytes);
 
         let input_buffer = device
             .newBufferWithLength_options(byte_len, MTLResourceOptions::StorageModeShared)
@@ -210,6 +248,10 @@ mod imp {
 
         Ok(ComputeProbeReport {
             device_name,
+            registry_id,
+            has_unified_memory,
+            input_hash,
+            element_count: ELEMENT_COUNT,
             verified_elements: ELEMENT_COUNT,
         })
     }

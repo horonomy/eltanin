@@ -69,6 +69,25 @@ evidence — producing that is HORO-1015's scope (physical M3 Max E2E,
 QA, and capability/documentation closure), separate from this ticket.
 This test plan does not claim CI coverage for it that does not exist.
 
+## Apple Silicon native Metal workload fixture (F-M1-010, HORO-1014)
+
+`crates/eltanin-apple/src/bin/metal_workload_fixture.rs` is a deterministic,
+repository-owned, spawnable Metal compute workload — see
+[`docs/product/APPLE_SILICON_FIXTURE.md`](../../product/APPLE_SILICON_FIXTURE.md)
+for what it proves and does not prove. Its real-hardware canonical
+Product/Business E2E scenario,
+`crates/eltanin-cli/tests/apple_metal_canonical_e2e.rs`, exercises the
+same `eltanin run` ALLOW/DENY journey as `canonical_e2e.rs` but with
+this real Metal fixture as the managed workload instead of `echo`/`sh`.
+Both tests are `#[ignore]`d and the file is `#![cfg(target_os =
+"macos")]` — `cargo test --workspace` compiles but never executes them,
+same CI-exclusion rationale as `metal_compute_probe.rs` above (ADR
+0007's decision against a macOS CI runner for real Metal dispatch).
+Verified for real by hand on this ticket's physical M3 Max; not a
+Feature Verification Record or a formal Track B scenario ID — HORO-1015
+owns producing the formal `B-M1-APPLE` Track B record and the F-M1-010
+Feature Verification Record, per its own Jira scope.
+
 ## Hardware requirement (F-M1-002, F-M1-007, HORO-790)
 
 **Zero hardware evidence exists today.** No representative bare-metal

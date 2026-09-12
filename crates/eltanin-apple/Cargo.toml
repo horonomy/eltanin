@@ -6,12 +6,25 @@ publish = false
 license.workspace = true
 description = "Apple Silicon adapter that discovers the system Metal GPU device through supported Metal APIs (F-M1-010, HORO-1012)."
 
+[[bin]]
+# The deterministic native Metal workload fixture (F-M1-010, HORO-1014) —
+# a standalone spawnable program, not part of the `AppleBackend` adapter
+# surface. See its own doc comment for what it proves and its exit codes.
+name = "metal_workload_fixture"
+path = "src/bin/metal_workload_fixture.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
 eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
 eltanin-backend = { path = "../eltanin-backend", version = "0.1.0" }
+# Only for the `metal_workload_fixture` bin's JSON evidence report — the
+# `AppleBackend` library surface itself has no serialization need. Both
+# are already workspace dependencies (see the root Cargo.toml), so this
+# introduces no new dependency to the workspace's dependency graph.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # objc2/objc2-metal are Apple-only bindings and must never enter the
 # dependency graph of a non-macOS build (e.g. this repo's ubuntu-latest

@@ -144,3 +144,11 @@ cites as Track B evidence for F-M1-009 (local audit & explain).
 | exit `78` | the profile name doesn't resolve — check `ELTANIN_PROFILE_DIR` and that `<name>.json` exists there. |
 | exit `74` | the governed execution context could not be established (MVP 1.0's context is a no-op today, so this is unexpected — check the error message). |
 | `eltanin-agentd` refuses to start, naming its socket's parent directory | that directory is world/group-writable; create a private one (`mkdir -m 0700 ...`) and point `ELTANIN_AGENT_SOCKET` inside it. |
+
+## Running a real GPU workload on Apple Silicon
+
+Step 3 above uses `echo` so this journey runs on any platform. To run
+the exact same ALLOW/DENY journey against a real Metal GPU compute
+workload on physical Apple Silicon hardware instead of `echo`, see
+[`APPLE_SILICON_FIXTURE.md`](APPLE_SILICON_FIXTURE.md) (F-M1-010,
+HORO-1014) — including what that evidence proves and does not prove.
