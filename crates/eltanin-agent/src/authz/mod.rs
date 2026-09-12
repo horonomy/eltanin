@@ -76,10 +76,10 @@ use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::{
     IssuerInstanceId, LeaseError, LeaseIssuer, LeaseValidity, MonotonicTime,
 };
+use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
 use eltanin_core::provenance::ProvenanceRecord;
 use eltanin_core::resource::EnforcementResult;
-use eltanin_linux::peer::PeerContext;
 use eltanin_protocol::request::{provenance_for, ClientRequest, LeaseRequest, ReleaseRequest};
 use eltanin_protocol::response::{
     AgentResponse, AgentStatusView, DenialReason, ErrorCode, LeaseView, ReleaseOutcome,

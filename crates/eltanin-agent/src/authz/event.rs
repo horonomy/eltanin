@@ -18,9 +18,9 @@
 //! [`crate::authz`] to get it.
 
 use eltanin_core::lease::{LeaseError, LeaseId, LeaseValidity, MonotonicTime, RevocationOutcome};
+use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::PolicyDecision;
 use eltanin_core::resource::EnforcementResult;
-use eltanin_linux::peer::PeerContext;
 
 use eltanin_backend::contract::BackendError;
 use eltanin_protocol::request::ClientRequest;

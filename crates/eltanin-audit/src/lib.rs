@@ -14,7 +14,7 @@
 //! select an audit sink, so if this crate depended on `eltanin-agent` to
 //! see its `EventSink`/`AuthorizationEvent` types, that would be a
 //! dependency cycle. The adapter — converting
-//! `eltanin_linux::peer::{PeerCredential, PeerConsistency}` into this
+//! `eltanin_core::peer::{PeerCredential, PeerConsistency}` into this
 //! crate's plain [`record::RecordedPeerCredential`]/
 //! [`record::RecordedPeerConsistency`] mirrors, and implementing
 //! `eltanin_agent::authz::event::EventSink` — lives agent-side, in

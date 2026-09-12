@@ -14,7 +14,7 @@ use eltanin_agent::handler::StatusOnlyHandler;
 use eltanin_agent::peer::PeerContextSource;
 use eltanin_core::envelope::{Versioned, DOMAIN_SCHEMA_VERSION};
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
-use eltanin_linux::peer::{PeerConsistency, PeerContext, PeerCredential, PeerCredentialError};
+use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential, PeerCredentialError};
 use eltanin_protocol::request::{ClientRequest, RequestBody, RequestId};
 use eltanin_protocol::response::{AgentResponse, ErrorCode, ResponseBody};
 use support::temp_socket_path;

@@ -19,19 +19,26 @@
 //! | Deployment | Privilege needed |
 //! |---|---|
 //! | MVP 1.0 happy path — agent and every workload run as the **same** uid | none — not root, no capability |
-//! | Multi-user host — agent must derive executable paths for peers of other uids | `CAP_SYS_PTRACE` only (`readlink /proc/<pid>/exe` requires `PTRACE_MODE_READ_FSCREDS` for a foreign uid; every other `/proc/<pid>/*` entry this crate reads is world-readable) |
+//! | Multi-user host (Linux) — agent must derive executable paths for peers of other uids | `CAP_SYS_PTRACE` only (`readlink /proc/<pid>/exe` requires `PTRACE_MODE_READ_FSCREDS` for a foreign uid; every other `/proc/<pid>/*` entry this crate reads is world-readable) |
 //! | Hardened `/proc` (`hidepid=1/2`, systemd `ProtectProc=`) | membership in the mount's `gid=` group, or `CAP_SYS_PTRACE` — otherwise all peer evidence is `Missing` and every request fails closed |
-//! | Socket at a root-owned path (e.g. `/run/eltanin`) | root only at install time (or systemd `RuntimeDirectory=`), not at runtime |
+//! | Multi-user host (macOS) — agent must derive `proc_pidpath`/`proc_pidinfo` for peers of other uids (HORO-1013) | root only — macOS's `proc_pidpath`/`proc_pidinfo` refuse a foreign-uid pid for any non-root caller, with no capability-style narrower grant like Linux's `CAP_SYS_PTRACE`; every other field `eltanin-macos` reads is available to any caller |
+//! | Socket at a root-owned path (e.g. `/run/eltanin` on Linux, `/var/run/eltanin` on macOS) | root only at install time (or systemd `RuntimeDirectory=`/an equivalent macOS launchd provisioning step), not at runtime |
 //!
 //! F-M1-007's cgroup device-BPF attachment will separately need
 //! `CAP_BPF`/`CAP_SYS_ADMIN` — not required by this crate; stated so
-//! nothing here is assumed to already run privileged.
+//! nothing here is assumed to already run privileged. This table has no
+//! macOS-specific device-enforcement row: F-M1-010/HORO-1013 grants no
+//! device-level Metal enforcement privilege of any kind, on any target
+//! (see `docs/adr/0008-macos-platform-adapter-and-local-peer-identity.md`).
 //!
 //! # Trust boundary
 //!
-//! Peer identity comes solely from `SO_PEERCRED` plus a `/proc` read,
-//! both derived by [`eltanin_linux::peer`] — never from anything a
-//! client sends. `eltanin-protocol`'s wire types already carry no
+//! Peer identity comes solely from a kernel peer-credential mechanism
+//! plus independently observed process state, both derived by the
+//! platform collector (`eltanin_linux`/`eltanin_macos`) into the
+//! shared [`eltanin_core::peer::PeerContext`] contract — never from
+//! anything a client sends. `eltanin-protocol`'s wire types already
+//! carry no
 //! identity field at all (HORO-838); this crate additionally never
 //! constructs a [`eltanin_core::identity::WorkloadIdentity`] or
 //! [`eltanin_core::identity::ExecutionContext`] from client-controlled

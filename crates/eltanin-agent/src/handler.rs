@@ -5,7 +5,7 @@
 //! implementation; HORO-840 implements the real one (policy evaluation,
 //! lease issue/release) without this crate needing to change.
 
-use eltanin_linux::peer::PeerContext;
+use eltanin_core::peer::PeerContext;
 use eltanin_protocol::request::ClientRequest;
 use eltanin_protocol::response::{AgentResponse, AgentStatusView, ErrorCode};
 
