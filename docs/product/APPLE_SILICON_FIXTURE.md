@@ -115,14 +115,15 @@ protection**:
 ## Formal QA status
 
 This fixture and its real-hardware canonical E2E test
-(`apple_metal_canonical_e2e.rs`) are verified by hand on a real M3 Max
-(HORO-1014) but do not themselves constitute a formal Feature
-Verification Record or a named Track B scenario ID — see
-[`docs/qa/test-plans/mvp-1.0.md`](../qa/test-plans/mvp-1.0.md)'s "Apple
-Silicon real-hardware probe" section. Producing the formal `B-M1-APPLE`
-Track B record and F-M1-010 Feature Verification Record is HORO-1015's
-scope (physical M3 Max QA and capability/documentation closure), not
-this ticket's.
+(`apple_metal_canonical_e2e.rs`) were first verified by hand on a real M3
+Max at HORO-1014. HORO-1015 closed the formal QA gate: the Track B
+scenario is [`B-M1-APPLE-v1`](../qa/e2e/B-M1-APPLE.md) (extending this
+test file with ALLOW/DENY audit-explain coverage and a repeated-cycle
+determinism test) and the Feature Verification Record is
+[`F-M1-010.md`](../qa/feature-verification/F-M1-010.md) — **Status:
+PASS**, scoped to E2 functional evidence only (never device-level
+enforcement, and never a replacement for F-M1-007's Linux/NVIDIA
+evidence — see that record for the full scope statement).
 
 ## Optional MLX scenario — not added
 
