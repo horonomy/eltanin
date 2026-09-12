@@ -53,7 +53,8 @@ returns `Ok(EnforcementResult::Unsupported{..})`, never `Ok(Allowed)`.
 `crates/eltanin-core/tests/architecture_no_vendor_leak.rs` and
 `crates/eltanin-backend/tests/architecture_no_vendor_leak.rs` scan all
 non-comment source lines in their crate for vendor/platform terms
-(`nvidia`, `cuda`, `cgroup`, `nvml`, ...) and fail CI if any appear — this
+(`nvidia`, `cuda`, `cgroup`, `nvml`, `metal`, `mtl`, `objc`, `apple`,
+`darwin`, ...) and fail CI if any appear — this
 is HORO-825/826's "architecture test/review rule catches vendor-specific
 concepts leaking into core" acceptance criterion, enforced mechanically
 rather than by review discipline alone. The backend crate's test also

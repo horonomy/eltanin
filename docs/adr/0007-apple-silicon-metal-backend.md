@@ -82,11 +82,18 @@ explicit, narrow feature list (`MTLDevice`, `MTLLibrary`,
 `MTLComputeCommandEncoder`, `MTLBuffer`, `MTLResource`, `MTLTypes`, `std`)
 rather than its ~104-feature default set, which pulls in bindings for
 subsystems (ray tracing, indirect command buffers, `MTL4*` types, capture
-management, and more) this crate never calls. License:
-`Zlib OR Apache-2.0 OR MIT` (verified against `deny.toml`'s allow-list,
-which already permits `MIT`/`Apache-2.0`); `cargo deny check licenses`
-was run against the real dependency graph this Cargo.toml produces
-before this PR, not assumed.
+management, and more) this crate never calls.
+
+License, verified per-crate against the real resolved dependency graph
+(`cargo metadata`), not assumed: `objc2` 0.6.4, `objc2-encode` 4.1.0,
+and `objc2-foundation` 0.3.2 are each plain `MIT`; `objc2-metal` 0.3.2
+is `Zlib OR Apache-2.0 OR MIT`. Every one of these is satisfied by
+`deny.toml`'s allow-list (`MIT`, `Apache-2.0`, ...) — `objc2-metal`'s
+`Zlib` alternative is not itself on the allow-list and does not need to
+be, since `cargo-deny` accepts an OR-expression once any one alternative
+is allowed, and `MIT`/`Apache-2.0` both already are. `cargo deny check`
+(advisories, bans, licenses, and sources) was run against the real
+dependency graph this Cargo.toml produces before this PR, not assumed.
 
 ## Decision — unsafe boundary
 
