@@ -12,9 +12,11 @@ field-level detail.
 | `ResourceVendor` | Opaque string-backed tag for which vendor owns a resource (e.g. `"fake"`; a real vendor's tag is defined by that vendor's own adapter crate, never named here). Round-trips any tag without data loss — no lossy `Unknown` placeholder. |
 | `ResourceKind` | Opaque string-backed tag for the resource class (e.g. `"gpu"`), same round-trip guarantee as `ResourceVendor`. |
 | `ResourceIdentity` | Stable identity: vendor + kind + opaque `local_id`. |
-| `Capability` | One of DISCOVER/OBSERVE/ATTRIBUTE/AUTHORIZE/ENFORCE/REVOKE/ATTEST. |
-| `ResourceCapabilities` | The capability set a backend actually supports for a resource — a value type so downgrade is checkable data, not an assumption. |
-| `ProtectedResource` | `ResourceIdentity` + `ResourceCapabilities`. |
+| `Capability` | Nine independently-evaluated dimensions: `DiscoverResource`/`ObserveResource`/`ObserveWorkload`/`AttributeWorkload`/`Authorize`/`ControlledLaunch`/`DeviceEnforce`/`DeviceRevoke`/`Attest`. Amended by HORO-1011 (see [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md)) from the original HORO-784 five-variant set so a backend's functional capabilities (e.g. `ControlledLaunch`) can never be conflated with device-level enforcement (`DeviceEnforce`/`DeviceRevoke`) — the distinction an Apple Silicon backend requires. |
+| `SupportState` | Per-capability support level: `Supported`/`Partial`/`Unsupported`/`NotEvaluated`. Only `Supported` is "proven" (`is_proven()`); a caller relying on `ResourceCapabilities::supports` never has to separately check for `Partial`. |
+| `ResourceCapabilities` | Capability → `SupportState` map a backend actually reports for a resource — a value type so a downgrade (or a state short of full support) is checkable data, not an assumption. An absent capability is `NotEvaluated`, never `Supported`. |
+| `AcceleratorMemory` | `Dedicated{total_bytes}` / `Unified` / `NotReportable` — a truthful, vendor-neutral accelerator memory topology. `Unified` carries no byte count: a shared-memory backend (e.g. Apple Silicon) is never required to report a fictitious VRAM size. |
+| `ProtectedResource` | `ResourceIdentity` + `ResourceCapabilities` + `AcceleratorMemory` (the last, added by HORO-1011, decodes as `NotReportable` when absent from older-shaped JSON). |
 | `Action` | What a workload asks to do (`Compute`, `Unknown`). |
 | `ComputeRequest` | `ResourceIdentity` + `Action` — the seam F-M1-004/005 evaluate against. Carries no caller identity; that's `WorkloadIdentity`/`ExecutionContext` (F-M1-003), composed alongside it. |
 | `EnforcementResult` | `Allowed` / `Denied{reason}` / `Unsupported{capability}` / `Error{message}` — `Unsupported` is first-class so a capability downgrade can never masquerade as `Allowed`. |
@@ -25,7 +27,14 @@ field-level detail.
 `into_current()` fails explicitly (`UnsupportedVersion`) rather than
 silently reinterpreting bytes from a schema this build doesn't
 understand. `DOMAIN_SCHEMA_VERSION` is bumped whenever a wrapped type's
-wire shape changes incompatibly.
+wire shape changes incompatibly — **but not automatically**: HORO-1011's
+resource-shape change deliberately did not bump it, because the constant
+is shared with the IPC framing and user-published policy-document
+formats, and `ProtectedResource` has zero persisted/IPC-exposed
+instances in this repository. See
+[ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md)
+for the full reasoning and the one real casualty (a pre-existing local
+audit-log line's `capability` string).
 
 ## Backend contract (F-M1-001, HORO-826) — `eltanin_backend::contract`
 
@@ -36,8 +45,8 @@ wire shape changes incompatibly.
 
 `ComputeBackend::enforce` does not decide authorization (F-M1-004 already
 did) — it only reports whether the backend could carry out or verify the
-already-decided action. A backend lacking `Capability::Enforce` returns
-`Ok(EnforcementResult::Unsupported{..})`, never `Ok(Allowed)`.
+already-decided action. A backend lacking `Capability::DeviceEnforce`
+returns `Ok(EnforcementResult::Unsupported{..})`, never `Ok(Allowed)`.
 
 ## Architecture enforcement
 
