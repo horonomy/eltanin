@@ -106,6 +106,18 @@ fn capability_check_reflects_actual_support_not_assumption() {
 }
 
 #[test]
+fn an_unrecognized_support_state_string_fails_decode_explicitly() {
+    // No #[serde(other)] on SupportState: an unrecognized value must be a
+    // hard decode error, never silently collapsed into NotEvaluated or any
+    // other state — a typo or a future variant this build doesn't know
+    // about must not be misread as a known, weaker guarantee.
+    let json = r#"{"identity":{"vendor":"fake","kind":"gpu","local_id":"x"},
+        "capabilities":{"support":{"device_enforce":"probably"}}}"#;
+    let result: Result<ProtectedResource, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+}
+
+#[test]
 fn enforcement_result_unsupported_is_distinct_from_allowed() {
     let downgraded = EnforcementResult::Unsupported {
         capability: Capability::DeviceEnforce,
