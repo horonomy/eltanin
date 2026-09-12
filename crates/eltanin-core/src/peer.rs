@@ -22,7 +22,7 @@
 //! the freshly observed uid evidence. No production code path anywhere
 //! in this workspace can hand-construct
 //! `PeerConsistency::Consistent` and thereby make an unverified
-//! `PeerContext` pass [`PeerContext::authorizable`]. [`PeerContext::for_test`]
+//! `PeerContext` pass [`PeerContext::authorizable`]. `PeerContext::for_test`
 //! exists for test doubles only, gated behind the `test-support`
 //! feature (not merely documented as test-only) so no downstream crate
 //! can construct one in a normal build.
@@ -38,7 +38,7 @@ pub struct PeerCredential {
     pid: u32,
     /// The peer's **effective** uid — see the collecting crate's module
     /// docs on why this is not directly comparable to
-    /// [`eltanin_core::identity::WorkloadIdentity::uid`].
+    /// [`crate::identity::WorkloadIdentity::uid`].
     effective_uid: u32,
     effective_gid: u32,
 }
@@ -49,6 +49,11 @@ impl PeerCredential {
     /// platform collector (`eltanin-linux`, `eltanin-macos`) calls this
     /// with values read directly from an OS peer-credential mechanism,
     /// never from anything a caller could self-assert.
+    // `effective_uid`/`effective_gid` are the correct, precise names for
+    // these two fields (see the struct docs on why "uid"/"gid" alone
+    // would be ambiguous with a real-uid/gid) — clippy's similarity
+    // heuristic is a false positive here, not a naming problem to fix.
+    #[allow(clippy::similar_names)]
     #[must_use]
     pub fn from_kernel(pid: u32, effective_uid: u32, effective_gid: u32) -> Self {
         Self {
