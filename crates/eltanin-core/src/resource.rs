@@ -17,6 +17,39 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+/// How well a backend supports a given [`Capability`] for a resource.
+///
+/// This is what lets the system distinguish *functional compatibility*
+/// from *device-level protection*: a backend can be `Supported` on
+/// `ControlledLaunch` while remaining `Unsupported` on `DeviceEnforce` —
+/// see `docs/adr/0006-cross-accelerator-capability-and-memory-model.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportState {
+    /// The capability is fully implemented and proven for this resource.
+    Supported,
+    /// The capability works in some but not all cases (e.g. a subset of
+    /// requests, or with reduced guarantees).
+    Partial,
+    /// The backend has determined this capability does not work for this
+    /// resource.
+    Unsupported,
+    /// No determination has been made yet. This is also the implicit
+    /// state of any capability not present in a
+    /// [`ResourceCapabilities`]'s map — absence means "not evaluated,"
+    /// never "supported."
+    NotEvaluated,
+}
+
+impl SupportState {
+    /// True only for [`SupportState::Supported`] — the sole state in
+    /// which a caller may rely on the capability actually working.
+    #[must_use]
+    pub fn is_proven(self) -> bool {
+        matches!(self, Self::Supported)
+    }
+}
+
 /// The vendor that owns a protected resource, as an opaque tag. This
 /// crate never matches on a specific vendor's value — see the module
 /// docs above for why it isn't a closed enum naming real vendors.
