@@ -1,0 +1,35 @@
+   Compiling eltanin-apple v0.1.0 (/Users/bryant/Bryant-Developments/horonomy/eltanin-mvp-1.0-HORO-1015-physical_m3_max_qa/crates/eltanin-apple)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running tests/real_discovery.rs (/tmp/eltanin-horo1015-target/debug/deps/real_discovery-94b84e667a8392d2)
+
+running 2 tests
+capability report: ProtectedResource {
+    identity: ResourceIdentity {
+        vendor: ResourceVendor(
+            "apple",
+        ),
+        kind: ResourceKind(
+            "gpu",
+        ),
+        local_id: "4294968406",
+    },
+    capabilities: ResourceCapabilities {
+        support: {
+            DiscoverResource: Supported,
+            ObserveResource: Partial,
+            ObserveWorkload: Unsupported,
+            AttributeWorkload: Unsupported,
+            Authorize: Unsupported,
+            ControlledLaunch: NotEvaluated,
+            DeviceEnforce: Unsupported,
+            DeviceRevoke: Unsupported,
+            Attest: Unsupported,
+        },
+    },
+    memory: Unified,
+}
+test discovered_resource_capability_state_matches_the_honesty_table ... ok
+test discover_finds_at_least_one_real_apple_gpu ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+

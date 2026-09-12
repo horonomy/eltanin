@@ -1,0 +1,18 @@
+DENY journey — pid=4749 exit_status=77 (expect 77)
+
+=== eltanin run stdout ===
+
+=== eltanin run stderr ===
+eltanin: request denied: no policy rule allows this request
+eltanin: run `eltanin-explain --pid <this process's pid>` for the full decision record, or contact your policy administrator
+
+=== eltanin-explain --log audit.ndjson --pid 4749 ===
+event: agent-pid-4729-start-1789234655176012#0
+recorded_at: unix 1789234655s.293660000n
+operation: RequestLease
+requested: RequestLease { resource: ResourceIdentity { vendor: ResourceVendor("fake"), kind: ResourceKind("gpu"), local_id: "gpu-0" }, action: Compute }
+peer: pid=4749 consistency=Consistent
+workload: uid=Present { value: 501, source: KernelObserved } executable_path=Present { value: "/private/tmp/eltanin-horo1015-target/debug/eltanin", source: KernelObserved } executable_hash=Missing { reason: "executable hashing not implemented by this collector" } cgroup=Unsupported
+outcome: PolicyDenied { decision: RecordedPolicyDecision { effect: Deny, reason: NoMatchingRule, policy: RecordedPolicyProvenance { policy_id: PolicyId("dev-workstation-gpu-eltanin-run"), policy_revision: 1, schema_version: 1 } } }
+response: LeaseDenied { reason: NoMatchingRule }
+

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "fixture": "eltanin-apple-metal-workload-fixture",
+  "host": {
+    "arch": "aarch64",
+    "os": "macos"
+  },
+  "device": {
+    "name": "Apple M3 Max",
+    "registry_id": "0x100000456",
+    "has_unified_memory": true
+  },
+  "workload": {
+    "kernel": "double_elements",
+    "element_count": 16,
+    "input_hash": "0x13fdf84d829c1708"
+  },
+  "result": {
+    "verified_elements": 16,
+    "all_elements_verified": true,
+    "gpu_command_completed": true
+  }
+}

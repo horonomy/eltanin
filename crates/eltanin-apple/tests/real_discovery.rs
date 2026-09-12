@@ -39,6 +39,15 @@ fn discover_finds_at_least_one_real_apple_gpu() {
         "expected at least one real Metal device to be discovered on physical Apple Silicon \
          hardware, found none"
     );
+    // Printed (not asserted on) so a `--nocapture` run doubles as a
+    // human-readable capability-report evidence artifact
+    // (HORO-1015's Jira "capability report" evidence ask) — the actual
+    // AC is verified by the typed assertions below and in
+    // `discovered_resource_capability_state_matches_the_honesty_table`,
+    // not by this text.
+    for resource in &resources {
+        println!("capability report: {resource:#?}");
+    }
     for resource in &resources {
         assert_eq!(
             resource.identity.vendor,
