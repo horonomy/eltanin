@@ -28,7 +28,16 @@ architecture decision.
   must not leak into `crates/eltanin-core` or `crates/eltanin-agent`.
   Those crates depend on `crates/eltanin-backend`'s trait contract, never
   on a concrete vendor backend. The vendor backend (`crates/eltanin-nvidia`,
-  added by F-M1-002) depends on `eltanin-backend`, never the reverse.
+  added by F-M1-002) depends on `eltanin-backend`, never the reverse. The
+  same rule applies to the Apple Silicon adapter added by the MVP 1.0
+  scope amendment (HORO-1010+): `eltanin-core::resource::Capability`'s
+  nine dimensions (HORO-1011,
+  [ADR 0006](../adr/0006-cross-accelerator-capability-and-memory-model.md))
+  are the vendor-neutral vocabulary every adapter reports itself
+  against — no adapter-specific capability name may leak into
+  `eltanin-core`, and a unified-memory backend is representable via
+  `AcceleratorMemory::Unified` without fabricating a dedicated-VRAM
+  byte count.
 - **Zero-code enforcement is the product requirement.** A protected
   workload must not need to link an Eltanin SDK to be enforced. An SDK
   (`sdk/`) may exist for *richer* integration (e.g. self-reporting
