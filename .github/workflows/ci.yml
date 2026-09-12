@@ -72,18 +72,27 @@ jobs:
     # exists at all. This is genuine functional evidence (real
     # LOCAL_PEERCRED/LOCAL_PEERPID/libproc calls against a real macOS
     # kernel), not a cross-compile check.
+    #
+    # Deliberately `--exclude eltanin-apple`: that crate's
+    # `metal_compute_probe.rs` unconditionally dispatches a real Metal
+    # kernel and asserts success with no hardware-availability skip.
+    # ADR 0007 explicitly decided against a macOS CI runner for that
+    # probe (a virtualized/hosted GPU is not the evidence class it
+    # exists to produce), and producing that Feature Verification
+    # Record is HORO-1015's scope, not this ticket's — see ADR 0008's
+    # CI section. Every other crate still builds and runs here.
     name: test (macos)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --all-targets
+      - run: cargo build --workspace --all-targets --exclude eltanin-apple
       - name: Track B — canonical Product/Business E2E
         run: cargo test -p eltanin-cli --test canonical_e2e
-      - name: Track A — full hardware-free suite
+      - name: Track A — full hardware-free suite (excludes eltanin-apple's real-hardware Metal probe)
         if: success() || failure()
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude eltanin-apple
 
   deny:
     name: cargo-deny (license/advisory)
