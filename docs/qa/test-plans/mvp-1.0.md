@@ -65,7 +65,12 @@ them from this table.
 Linux/NVIDIA host has been identified in this environment (see
 `docs/development/campaign-state.md`'s "Hardware evidence state"). This
 section states what a real evidence-producing host would need, so the
-ask is concrete rather than perpetually vague:
+ask is concrete rather than perpetually vague. A full setup/test/cleanup
+runbook — GPU/kernel/driver requirements, exact commands, and
+automated pre-flight/evidence-capture scripts — is prepared in
+[`docs/development/hardware-validation-runbook.md`](../../development/hardware-validation-runbook.md);
+that document is preparation only and does not itself contain any
+hardware evidence.
 
 - **Platform**: bare-metal Linux (not a VM — cgroup v2 device-BPF
   enforcement and NVML GPU access are the things under test, and both
