@@ -211,3 +211,37 @@ deliberately collapses several distinct internal causes (backend
 failure, enforcement refusal, capacity exhaustion) into one wire
 variant, by design (`docs/product/SECURITY_MODEL.md`) — `eltanin run`
 reports that honestly rather than guessing which one occurred.
+
+## `eltanin session` — Trusted Compute Session lifecycle (F-M2-001, HORO-791)
+
+A separate, independent top-level subcommand — `eltanin run`'s own
+grammar above is completely unchanged by its existence, and there is no
+new `--session` flag on `eltanin run` anywhere. See
+`docs/adr/0009-trusted-compute-session.md` and
+`docs/product/SECURITY_MODEL.md`'s Trusted Compute Session section for
+the security model this establishes.
+
+```
+eltanin session start --profile <name> [--profile <name>...] --ttl <duration>
+eltanin session list
+eltanin session end
+```
+
+- `--profile` reuses this document's own `Profiles` section's resolution
+  wholesale — each flag resolves to a `(resource, action)` pair, and
+  `start` unions every named profile's `resource` into the new
+  session's scope. The `action` component is ignored at session level:
+  actions stay per-lease, decided later by `eltanin run`, unchanged.
+  `start` requires at least one `--profile`.
+- `--ttl` accepts a bare non-negative integer (seconds), or an integer
+  followed by `s`/`m`/`h` (seconds/minutes/hours) — e.g. `1800`, `30m`,
+  `2h`. Required for `start`.
+- `list` and `end` take no arguments — in particular, `end` never takes
+  a session id: it always ends the **caller's own** session, derived by
+  the agent from kernel-observed membership, never named by the client.
+  This is deliberate (it avoids an id-based enumeration oracle), not an
+  omission.
+- No new exit codes. A `NoTrustedSession` denial (from a later `eltanin
+  run` under a deployment that requires an active session) reuses the
+  existing `ExitCode::Denied` (77) with a stderr message directing the
+  user to run `eltanin session start`.
