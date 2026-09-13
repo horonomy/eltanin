@@ -29,6 +29,10 @@ const FORBIDDEN_DIRECT_EMBED: &[&str] = &[
     ": PolicyProvenance",
     ": LeaseValidity",
     ": LeaseError",
+    // HORO-793: DelegationGrant is `Serialize`-only, ephemeral,
+    // in-memory-only authority — same discipline as the types above.
+    // `RecordedDelegation` is the deliberately minimal mirror.
+    ": DelegationGrant",
 ];
 
 #[test]

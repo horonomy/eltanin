@@ -887,6 +887,89 @@ adjacency, the protocol's zero-identity-field invariant, and
 impossible today. A future workload-attestation ADR-0005 amendment is
 the prerequisite; tracked as a follow-up ticket, out of scope here.
 
+## Bounded Compute Delegation (F-M2-003, HORO-793) — `eltanin_core::delegation`, `eltanin-agent::authz::delegation`/`delegation_state`
+
+`eltanin_core::delegation` types: `DelegationGrant` (ephemeral,
+in-memory only — `Serialize` but no `Deserialize` at all, mirroring
+`TrustedSession`'s discipline rather than `Approval`'s), minted only by
+`DelegationGrant::mint(lease: &ComputeLease, bounds: &DelegationBounds,
+holder, owner_uid, session_key, cgroup_path, depth, parent) ->
+Option<Self>` — `lease_id`/`not_after`/the scope seed all come from the
+real, already-issued lease, and `DelegationScope` has no public
+constructor at all. `DelegationBounds::new(...)` is a fallible
+constructor rejecting `Action::Unknown` as delegable, `max_depth >
+MAX_ANCESTRY_DEPTH` (32, matching the collectors' own bound), and a
+zero `min_remaining`.
+
+`WorkloadIdentity::compare_ancestor` (new on the existing type) gives
+`delegated_admission` the same three-state `Same`/`Different`/
+`Indeterminate` semantics `compare_process` already has, applied to one
+ancestry-chain entry.
+
+`delegated_admission(grant, bounds, requester, requester_session_key,
+observed_holder, request, now) -> DelegationVerdict` is the one
+combined verification function, mirroring `recall`/`membership`'s
+established shape: holder liveness and ancestry linkage (both
+corroboration-only — see ADR 0011's headline invariant that ancestry
+can never itself produce `Admitted`), owner uid, a trust-transition
+scan over the ancestry span strictly between the requester and the
+holder, session/cgroup binding when required, resource/action scope,
+depth, and duration are all checked together. `ExceededBound` is a
+`BTreeSet`-accumulating rich enum (mirroring `ChangedDimension`); any
+unusable evidence needed to decide a dimension returns
+`DelegationVerdict::Indeterminate` immediately, fail-closed.
+
+`eltanin-agent::authz::delegation`/`delegation_state` (both under
+`authz/`, covered by that module's existing architecture-guard
+exemption): `delegation::grant_binding_from_observed` derives a
+grant's non-lease fields from the peer's already-observed context —
+same "no second collection, no TOCTOU window" discipline as
+`approval::binding_from_observed`. `delegation_state::DelegationState`
+holds every currently outstanding grant plus a parent→child lease-id
+index, lazily reaped (holder-liveness re-check, structural expiry) like
+`SessionState`'s sessions, with `remove_cascade` recursively removing a
+revoked lease's grant and every descendant grant chained under it.
+`AuthorizationConfig::with_delegation(approval_store, bounds)` is the
+only way to set the `delegation` field — it sets
+`ApprovalRequirement::Required` and the store path in the same call, so
+delegation cannot be configured without approvals also being required.
+
+Gate placement: delegation is consulted **only** inside
+`handle_request_lease`'s approval-gate `ApprovalAdmission::Refused`
+arm, before returning `DenialReason::ApprovalRequired` — an explicit
+`Deny` approval still returns before delegation is ever consulted
+(deny-overrides inherited by construction), and `PolicySet::evaluate`
+still runs, unmodified, inside `LeaseIssuer::issue` for every delegated
+request exactly as for an ordinary one. A `DelegationGrant` is minted
+on **every** successful grant (ordinary: depth 0, no parent; delegated:
+the verdict's own depth/parent) — never only on delegated ones — using
+`ComputeLease::narrow_expiry` to structurally cap a delegated child's
+TTL before `enforce_and_finalize` ever runs. Revoking a lease (explicit
+`ReleaseLease`, or session-termination teardown) now cascades through
+`remove_cascade` to revoke every descendant delegated lease too.
+
+`eltanin-audit` additions: `RecordedOutcome::{GrantedByDelegation,
+DelegationRefused, DelegationIndeterminate}` plus the deliberately
+minimal `RecordedDelegation` mirror (`parent_lease`/`depth`/
+`holder_pid` — never the full `DelegationGrant`, which stays
+`Serialize`-only/ephemeral by design); `AuditRecord::lease_id()`
+extended to match `GrantedByDelegation`. No new wire (`eltanin-protocol`)
+variant — a delegation refusal is client-facing identical to
+`DenialReason::ApprovalRequired`. `DOMAIN_SCHEMA_VERSION` bumps from 3
+to 4 for these additive, internally tagged enum variants (same bump
+criterion as HORO-791's 1→2 and HORO-792's 2→3).
+
+**Named limitations, disclosed, not hidden** (see
+[ADR 0011](../adr/0011-bounded-compute-delegation.md) for the full
+list): a descendant that never calls `eltanin run` is invisible to this
+model entirely (topology, not a shortcut); the requester→holder
+ancestry span is expected same-uid but not verified
+(`ProcessAncestor` carries no uid field); `require_same_cgroup` is
+Linux-only in practice (fails closed to `Indeterminate` on macOS, never
+silently satisfied); trust-transition detection is path-only, so an
+interpreter's script identity stays invisible exactly as ADR 0010
+already disclosed for its own mechanism.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`

@@ -31,7 +31,7 @@ outright, regardless of what else matches.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "payload": {
     "id": "dev-workstation-gpu",
     "revision": 1,
@@ -127,7 +127,7 @@ launch path in MVP 1.0.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "payload": {
     "id": "dev-workstation-gpu-eltanin-run",
     "revision": 1,

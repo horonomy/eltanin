@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod approval;
+pub mod delegation;
 pub mod envelope;
 pub mod identity;
 pub mod lease;

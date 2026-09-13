@@ -24,10 +24,10 @@
 use std::path::Path;
 
 use eltanin_audit::record::{
-    AuditClock, RecordedDecisionReason, RecordedLeaseError, RecordedLeaseValidity,
-    RecordedOperation, RecordedOutcome, RecordedPeer, RecordedPeerConsistency,
-    RecordedPeerCredential, RecordedPolicyDecision, RecordedPolicyProvenance, RecordedRequest,
-    RecordedSessionAdmissionError,
+    AuditClock, RecordedDecisionReason, RecordedDelegation, RecordedLeaseError,
+    RecordedLeaseValidity, RecordedOperation, RecordedOutcome, RecordedPeer,
+    RecordedPeerConsistency, RecordedPeerCredential, RecordedPolicyDecision,
+    RecordedPolicyProvenance, RecordedRequest, RecordedSessionAdmissionError,
 };
 use eltanin_audit::sink::{AuditEntry, AuditFileSink, AuditSinkError};
 use eltanin_core::lease::{IssuerInstanceId, LeaseError, LeaseValidity};
@@ -193,6 +193,9 @@ fn recorded_lease_validity(validity: &LeaseValidity) -> RecordedLeaseValidity {
     }
 }
 
+// A purely mechanical 1:1 variant mapping (HORO-793 added three more
+// arms and pushed this one line over clippy's default line-count bound).
+#[allow(clippy::too_many_lines)]
 fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
     match outcome.clone() {
         AuthorizationOutcome::Granted {
@@ -272,6 +275,27 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
         }
         AuthorizationOutcome::ApprovalInternalError { reason } => {
             RecordedOutcome::ApprovalInternalError { reason }
+        }
+        AuthorizationOutcome::GrantedByDelegation {
+            lease_id,
+            expires_at,
+            parent_lease,
+            depth,
+            holder_pid,
+        } => RecordedOutcome::GrantedByDelegation {
+            lease_id,
+            expires_at,
+            delegation: RecordedDelegation {
+                parent_lease,
+                depth,
+                holder_pid,
+            },
+        },
+        AuthorizationOutcome::DelegationRefused { exceeded } => {
+            RecordedOutcome::DelegationRefused { exceeded }
+        }
+        AuthorizationOutcome::DelegationIndeterminate { reason } => {
+            RecordedOutcome::DelegationIndeterminate { reason }
         }
     }
 }

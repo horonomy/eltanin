@@ -247,7 +247,11 @@ pub struct ProtectedResource {
 
 /// What a workload is asking to do. MVP 1.0 has exactly one meaningful
 /// action; `Unknown` exists so a future action is additive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `PartialOrd`/`Ord` (HORO-793) exist solely so `Action` can be a
+/// `BTreeSet<Action>` element (e.g. `delegation::DelegationScope`'s
+/// `actions` field) — they carry no semantic ranking meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Compute,

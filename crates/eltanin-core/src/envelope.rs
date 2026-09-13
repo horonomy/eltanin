@@ -30,7 +30,18 @@ use serde::{Deserialize, Serialize};
 /// approval fail `recall`'s security-posture dimension and require
 /// re-approval — a deliberate consequence of the schema version being
 /// part of what "security posture" means, not a bug to work around.
-pub const DOMAIN_SCHEMA_VERSION: u16 = 3;
+///
+/// Bumped to `4` for HORO-793/F-M2-003, by the same criterion:
+/// `eltanin-audit`'s `RecordedOutcome` — internally tagged
+/// (`#[serde(tag = "outcome")]`) with no `#[serde(other)]` catch-all,
+/// written per-line as `Versioned<AuditRecord>` — gains three new
+/// variants (`GrantedByDelegation`/`DelegationRefused`/
+/// `DelegationIndeterminate`) for bounded compute delegation. Same side
+/// effect as the `3` bump: every pre-existing durable `Approval` embeds
+/// the old `schema_version` in its recorded `PolicyProvenance`, so this
+/// bump alone makes every one of them fail `recall`'s security-posture
+/// dimension and require re-approval.
+pub const DOMAIN_SCHEMA_VERSION: u16 = 4;
 
 /// Wraps a domain payload with an explicit schema version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

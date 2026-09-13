@@ -30,13 +30,13 @@ fn unknown_version_is_reported_precisely_even_with_a_malformed_payload() {
 
 #[test]
 fn unknown_operation_fails_closed_as_malformed() {
-    let body = br#"{"version":3,"payload":{"request_id":1,"body":{"op":"delete_everything"}}}"#;
+    let body = br#"{"version":4,"payload":{"request_id":1,"body":{"op":"delete_everything"}}}"#;
     assert_eq!(decode_request(body).unwrap_err(), ProtocolError::Malformed);
 }
 
 #[test]
 fn unknown_field_in_a_request_body_fails_closed_as_malformed() {
-    let body = br#"{"version":3,"payload":{"request_id":1,"body":{"op":"request_lease","resource":{"vendor":"fake","kind":"gpu","local_id":"gpu-0"},"action":"compute","extra":"field"}}}"#;
+    let body = br#"{"version":4,"payload":{"request_id":1,"body":{"op":"request_lease","resource":{"vendor":"fake","kind":"gpu","local_id":"gpu-0"},"action":"compute","extra":"field"}}}"#;
     assert_eq!(decode_request(body).unwrap_err(), ProtocolError::Malformed);
 }
 
@@ -48,13 +48,13 @@ fn unknown_field_alongside_a_unit_variant_operation_fails_closed_as_malformed() 
     // independent review, which demonstrated this exact input decoding
     // successfully before the enum-level attribute was added.
     let body =
-        br#"{"version":3,"payload":{"request_id":1,"body":{"op":"agent_status","sneaky":"data"}}}"#;
+        br#"{"version":4,"payload":{"request_id":1,"body":{"op":"agent_status","sneaky":"data"}}}"#;
     assert_eq!(decode_request(body).unwrap_err(), ProtocolError::Malformed);
 }
 
 #[test]
 fn a_non_object_payload_fails_closed_as_malformed() {
-    let body = br#"{"version":3,"payload":42}"#;
+    let body = br#"{"version":4,"payload":42}"#;
     assert_eq!(decode_request(body).unwrap_err(), ProtocolError::Malformed);
 }
 
