@@ -352,3 +352,31 @@ fn response_lease_denied_approval_required_matches_fixture() {
         include_str!("fixtures/response_lease_denied_approval_required.json"),
     );
 }
+
+#[test]
+fn response_lease_denied_step_up_required_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(1)),
+        body: AgentResponse::LeaseDenied {
+            reason: DenialReason::StepUpRequired,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_lease_denied_step_up_required.json"),
+    );
+}
+
+#[test]
+fn response_lease_denied_risk_denied_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(1)),
+        body: AgentResponse::LeaseDenied {
+            reason: DenialReason::RiskDenied,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_lease_denied_risk_denied.json"),
+    );
+}

@@ -1,0 +1,10 @@
+{
+  "version": 5,
+  "payload": {
+    "request_id": 1,
+    "body": {
+      "result": "lease_denied",
+      "reason": "step_up_required"
+    }
+  }
+}
