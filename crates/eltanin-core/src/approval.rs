@@ -115,7 +115,7 @@ impl ApprovalId {
     /// `eltanin approve`/`approve list` printed back). Carries no
     /// entropy and is not a capability: constructing one this way
     /// grants nothing by itself, it is only useful if it happens to
-    /// match a stored approval's own [`ApprovalId::compute`]-derived
+    /// match a stored approval's own `ApprovalId::compute`-derived
     /// value.
     #[must_use]
     pub fn from_raw(raw: impl Into<String>) -> Self {

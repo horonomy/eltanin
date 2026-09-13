@@ -12,7 +12,7 @@
 //! collector call. `PeerContext::authorizable()` already hands
 //! `handle_request_lease` a freshly-observed [`ExecutionContext`] for
 //! every request (the same one `provenance_for` binds the eventual
-//! lease to) — [`binding_from_observed`] derives an [`ApprovalBinding`]
+//! lease to) — `binding_from_observed` derives an [`ApprovalBinding`]
 //! from *that* context, not a second, independently-timed collection.
 //! This closes what would otherwise be a TOCTOU window between "the
 //! context the approval gate checked" and "the context the lease is
