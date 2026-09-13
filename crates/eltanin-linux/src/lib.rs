@@ -24,6 +24,7 @@
 #![forbid(unsafe_code)]
 
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
+use eltanin_core::session::SessionKey;
 
 pub mod peer;
 
@@ -44,6 +45,17 @@ pub fn collect_execution_context(pid: u32) -> ExecutionContext {
     imp::collect_execution_context(pid)
 }
 
+/// Collect `pid`'s POSIX session id (F-M2-001, HORO-791) as a
+/// [`SessionKey`], from `/proc/<pid>/stat` field 6 (1-indexed per `man
+/// proc`) — the same file and parsing discipline
+/// [`collect_workload_identity`] already uses for `starttime`/`ppid`.
+/// Never panics; an unreadable or malformed `/proc/<pid>/stat` is
+/// reported as [`Evidence::Missing`], never a default value.
+#[must_use]
+pub fn collect_session_key(pid: u32) -> Evidence<SessionKey> {
+    imp::collect_session_key(pid)
+}
+
 /// Read the **real** and **effective** uid/gid pair for `pid` from
 /// `/proc/<pid>/status` in one parse. [`collect_workload_identity`] only
 /// ever surfaces the real value (`WorkloadIdentity`'s established
@@ -58,7 +70,7 @@ pub(crate) fn read_status_ids(pid: u32, label: &str) -> (Evidence<u32>, Evidence
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use super::{Evidence, ExecutionContext, WorkloadIdentity};
+    use super::{Evidence, ExecutionContext, SessionKey, WorkloadIdentity};
     use eltanin_core::identity::{EvidenceSource, ProcessAncestor, ProcessStartToken};
     use std::fs;
 
@@ -72,6 +84,7 @@ mod imp {
     /// Parsed fields from `/proc/<pid>/stat` that this collector needs.
     struct StatFields {
         ppid: u32,
+        session: u64,
         starttime: u64,
     }
 
@@ -101,8 +114,15 @@ mod imp {
             .ok_or_else(|| "missing starttime field".to_string())?
             .parse::<u64>()
             .map_err(|e| format!("parse starttime: {e}"))?;
+        // Field 6 (session id), 1-indexed per `man proc` — `fields[6 - 3]`.
+        let session = fields
+            .get(6 - 3)
+            .ok_or_else(|| "missing session field".to_string())?
+            .parse::<u64>()
+            .map_err(|e| format!("parse session: {e}"))?;
         Ok(StatFields {
             ppid: parent,
+            session,
             starttime,
         })
     }
@@ -283,21 +303,44 @@ mod imp {
         }
     }
 
+    pub(super) fn collect_session_key(pid: u32) -> Evidence<SessionKey> {
+        match parse_stat(pid) {
+            Ok(stat) => Evidence::Present {
+                value: SessionKey(stat.session),
+                source: EvidenceSource::KernelObserved,
+            },
+            Err(reason) => Evidence::Missing { reason },
+        }
+    }
+
     pub(super) fn collect_execution_context(pid: u32) -> ExecutionContext {
         ExecutionContext {
             workload: collect_workload_identity(pid),
             cgroup_path: cgroup_path(pid),
-            // Namespace/container/session hints require correlating
-            // multiple additional signals (e.g. `/proc/<pid>/ns/*`
-            // inode comparison against this process's own namespace,
-            // container-runtime-specific cgroup path heuristics,
-            // controlling-terminal/session leader lookups). None of
-            // those are implemented by this collector yet; reporting
+            // Namespace/container hints require correlating multiple
+            // additional signals (e.g. `/proc/<pid>/ns/*` inode
+            // comparison against this process's own namespace,
+            // container-runtime-specific cgroup path heuristics). None
+            // of those are implemented by this collector yet; reporting
             // `Unsupported` here is honest about that rather than
             // guessing from a partial heuristic.
             namespace_hint: Evidence::Unsupported,
             container_hint: Evidence::Unsupported,
-            session_origin: Evidence::Unsupported,
+            // Populated by HORO-791/F-M2-001: the canonical string form
+            // of the POSIX session id observed for `pid`, tagged
+            // `KernelObserved`. Still deliberately unmatchable by
+            // `eltanin_core::policy::Condition` (see that module's
+            // docs): a per-boot integer isn't something a static policy
+            // document can usefully reference by value, so this field
+            // remains a Trusted-Compute-Session-only signal, not a
+            // policy condition input.
+            session_origin: match parse_stat(pid) {
+                Ok(stat) => Evidence::Present {
+                    value: stat.session.to_string(),
+                    source: EvidenceSource::KernelObserved,
+                },
+                Err(reason) => Evidence::Missing { reason },
+            },
         }
     }
 
@@ -379,7 +422,11 @@ mod imp {
 
 #[cfg(not(target_os = "linux"))]
 mod imp {
-    use super::{Evidence, ExecutionContext, WorkloadIdentity};
+    use super::{Evidence, ExecutionContext, SessionKey, WorkloadIdentity};
+
+    pub(super) fn collect_session_key(_pid: u32) -> Evidence<SessionKey> {
+        Evidence::Unsupported
+    }
 
     pub(super) fn collect_workload_identity(pid: u32) -> WorkloadIdentity {
         WorkloadIdentity {

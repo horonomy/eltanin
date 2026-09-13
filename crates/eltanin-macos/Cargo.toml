@@ -22,6 +22,11 @@ eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
 # 0007). Both `nix` and `libproc` wrap their respective syscalls in safe
 # Rust, preserving this workspace's #![forbid(unsafe_code)] on every
 # crate (see ADR 0004/0008) — no hand-written unsafe libc FFI needed.
+# "process" (added HORO-791/F-M2-001) gates `nix::unistd::getsid`, used
+# by `collect_session_key` — verified a safe (non-`unsafe`) function in
+# this pinned nix version, preserving this workspace's
+# #![forbid(unsafe_code)] the same way the existing "socket" feature
+# already does for LOCAL_PEERCRED/LOCAL_PEERPID.
 [target.'cfg(target_os = "macos")'.dependencies]
-nix = { version = "0.30", default-features = false, features = ["socket"] }
+nix = { version = "0.30", default-features = false, features = ["socket", "process"] }
 libproc = "0.14"

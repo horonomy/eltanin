@@ -52,6 +52,7 @@
 #![forbid(unsafe_code)]
 
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
+use eltanin_core::session::SessionKey;
 
 pub mod peer;
 
@@ -73,12 +74,33 @@ pub fn collect_execution_context(pid: u32) -> ExecutionContext {
     imp::collect_execution_context(pid)
 }
 
+/// Collect `pid`'s POSIX session id (F-M2-001, HORO-791) as a
+/// [`SessionKey`], via `nix::unistd::getsid`. **Measured on this
+/// campaign's actual Apple Silicon development host (Darwin 25.4.0,
+/// 2026-09) for HORO-791**: `getsid` succeeded for every pid tried,
+/// including a root-owned, unrelated system daemon queried by an
+/// unprivileged, non-root caller — no `EPERM` was observed for any
+/// foreign-session or foreign-owner pid. This differs from Linux's
+/// permission model only in that Linux exposes the same value via a
+/// world-readable `/proc/<pid>/stat` field; macOS's `getsid` is
+/// evidently unrestricted by session or ownership in the same way. See
+/// ADR 0009 for the full measurement record and its "readable but not
+/// joinable" security argument: this function's honest return value
+/// never claims *presence of a value* implies membership — see
+/// [`eltanin_core::session::membership`] for the check that actually
+/// matters.
+#[must_use]
+pub fn collect_session_key(pid: u32) -> Evidence<SessionKey> {
+    imp::collect_session_key(pid)
+}
+
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::{Evidence, ExecutionContext, WorkloadIdentity};
+    use super::{Evidence, ExecutionContext, SessionKey, WorkloadIdentity};
     use eltanin_core::identity::{EvidenceSource, ProcessAncestor, ProcessStartToken};
     use libproc::bsd_info::BSDInfo;
     use libproc::proc_pid::{pidinfo, pidpath};
+    use nix::unistd::{getsid, Pid};
 
     /// Maximum ancestor hops walked before giving up. Bounds the work
     /// done against a corrupted or adversarially long ancestry chain,
@@ -218,6 +240,23 @@ mod imp {
         }
     }
 
+    pub(super) fn collect_session_key(pid: u32) -> Evidence<SessionKey> {
+        let Ok(signed_pid) = i32::try_from(pid) else {
+            return Evidence::Missing {
+                reason: format!("pid {pid} out of range"),
+            };
+        };
+        match getsid(Some(Pid::from_raw(signed_pid))) {
+            Ok(sid) => Evidence::Present {
+                value: SessionKey(u64::try_from(sid.as_raw()).unwrap_or_default()),
+                source: EvidenceSource::KernelObserved,
+            },
+            Err(e) => Evidence::Missing {
+                reason: format!("getsid({pid}): {e}"),
+            },
+        }
+    }
+
     pub(super) fn collect_execution_context(pid: u32) -> ExecutionContext {
         ExecutionContext {
             workload: collect_workload_identity(pid),
@@ -228,15 +267,24 @@ mod imp {
             // `Evidence`-contract distinction `eltanin-linux` already
             // draws elsewhere.
             cgroup_path: Evidence::Unsupported,
-            // Namespace/container/session hints require correlating
-            // multiple additional signals this collector does not
-            // implement — exact parity with `eltanin-linux`, which
-            // reports the same three fields `Unsupported` for the same
-            // reason (no partial heuristic reported as if it were
-            // complete).
+            // Namespace/container hints require correlating multiple
+            // additional signals this collector does not implement —
+            // exact parity with `eltanin-linux`, which reports the same
+            // two fields `Unsupported` for the same reason (no partial
+            // heuristic reported as if it were complete).
             namespace_hint: Evidence::Unsupported,
             container_hint: Evidence::Unsupported,
-            session_origin: Evidence::Unsupported,
+            // Populated by HORO-791/F-M2-001, matching `eltanin-linux`'s
+            // treatment: the canonical string form of the POSIX session
+            // id observed via `getsid`, tagged `KernelObserved`.
+            session_origin: match collect_session_key(pid) {
+                Evidence::Present { value, source } => Evidence::Present {
+                    value: value.0.to_string(),
+                    source,
+                },
+                Evidence::Missing { reason } => Evidence::Missing { reason },
+                Evidence::Unsupported => Evidence::Unsupported,
+            },
         }
     }
 
@@ -261,7 +309,23 @@ mod imp {
             assert!(matches!(ctx.cgroup_path, Evidence::Unsupported));
             assert!(matches!(ctx.namespace_hint, Evidence::Unsupported));
             assert!(matches!(ctx.container_hint, Evidence::Unsupported));
-            assert!(matches!(ctx.session_origin, Evidence::Unsupported));
+            // Measured for HORO-791: `getsid` succeeds unconditionally on
+            // this platform (see `collect_session_key`'s doc comment), so
+            // a live test process's own session id is always `Present`,
+            // never `Unsupported`.
+            assert!(matches!(ctx.session_origin, Evidence::Present { .. }));
+        }
+
+        #[test]
+        fn collects_own_session_key_as_present_kernel_observed() {
+            let key = collect_session_key(std::process::id());
+            assert!(matches!(
+                key,
+                Evidence::Present {
+                    source: EvidenceSource::KernelObserved,
+                    ..
+                }
+            ));
         }
 
         #[test]
@@ -282,7 +346,11 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::{Evidence, ExecutionContext, WorkloadIdentity};
+    use super::{Evidence, ExecutionContext, SessionKey, WorkloadIdentity};
+
+    pub(super) fn collect_session_key(_pid: u32) -> Evidence<SessionKey> {
+        Evidence::Unsupported
+    }
 
     pub(super) fn collect_workload_identity(pid: u32) -> WorkloadIdentity {
         WorkloadIdentity {
