@@ -25,6 +25,10 @@ test-support = []
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
+# F-M2-002/HORO-792: deterministic, restart-stable `approval::ApprovalId`
+# content digest. See the workspace Cargo.toml for why `sha2` over
+# `blake3`.
+sha2 = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

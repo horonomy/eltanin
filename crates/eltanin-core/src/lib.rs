@@ -6,6 +6,7 @@
 //! `policy` (F-M1-004, HORO-834), `lease` (F-M1-005, HORO-836).
 #![forbid(unsafe_code)]
 
+pub mod approval;
 pub mod envelope;
 pub mod identity;
 pub mod lease;
