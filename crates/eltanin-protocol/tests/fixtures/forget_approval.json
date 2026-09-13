@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "payload": {
+    "request_id": 9,
+    "body": {
+      "op": "forget_approval",
+      "id": "fixture-approval-id"
+    }
+  }
+}

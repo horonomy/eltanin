@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "payload": {
+    "request_id": 8,
+    "body": {
+      "op": "list_approvals"
+    }
+  }
+}

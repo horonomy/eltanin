@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "payload": {
+    "request_id": 7,
+    "body": {
+      "result": "approval_recorded",
+      "approval": {
+        "id": "fixture-approval-id",
+        "resource": {
+          "vendor": "fake",
+          "kind": "gpu",
+          "local_id": "gpu-0"
+        },
+        "action": "compute",
+        "disposition": "remember"
+      }
+    }
+  }
+}

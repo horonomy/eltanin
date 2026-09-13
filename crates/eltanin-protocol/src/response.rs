@@ -15,8 +15,9 @@
 
 use std::time::Duration;
 
+use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
 use eltanin_core::lease::LeaseId;
-use eltanin_core::resource::ResourceIdentity;
+use eltanin_core::resource::{Action, ResourceIdentity};
 use eltanin_core::session::SessionId;
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +58,15 @@ pub enum DenialReason {
     ExplicitDeny,
     IndeterminateEvidence,
     NoTrustedSession,
+    /// F-M2-002/HORO-792: the approval-admission gate found no
+    /// [`eltanin_core::approval::RecallVerdict::Matched`] candidate for
+    /// this `(resource, action)` — pre-policy, exactly like
+    /// `NoTrustedSession`. The CLI's failure path maps this to the
+    /// exact `eltanin approve` command to run next.
+    ApprovalRequired,
+    /// F-M2-002/HORO-792: a `Deny` approval matched (deny-overrides).
+    /// Also pre-policy — this is never `PolicySet::evaluate` speaking.
+    ApprovalDenied,
 }
 
 /// A deliberately coarser, client-facing projection of
@@ -95,6 +105,36 @@ pub struct SessionView {
 #[serde(rename_all = "snake_case")]
 pub enum TerminationOutcome {
     Terminated,
+    Refused,
+}
+
+/// A client-facing, non-replayable view of one recorded approval
+/// (F-M2-002, HORO-792). Deliberately **not**
+/// `eltanin_core::approval::Approval` itself — the module docs' "load-
+/// bearing structural fact" above forbids embedding it here even though
+/// `Approval` (unlike `ComputeLease`/`PolicyDecision`) is reconstructible
+/// from disk via `ApprovalSet::from_document`: that path exists for
+/// this agent's own durable store, not for the wire, and this module's
+/// discipline is "no type that must never be bearer authority is
+/// embedded here," applied uniformly regardless of whether a given type
+/// happens to have *some* other `Deserialize` path elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalView {
+    pub id: ApprovalId,
+    pub resource: ResourceIdentity,
+    pub action: Action,
+    pub disposition: ApprovalDisposition,
+}
+
+/// A deliberately coarser, client-facing projection of whether
+/// `eltanin approve forget` actually removed an entry — every
+/// non-`Forgotten` case (unknown id, foreign owner) collapses to
+/// `Refused`, same enumeration-resistance reason as
+/// [`ReleaseOutcome`]/[`TerminationOutcome`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgetOutcome {
+    Forgotten,
     Refused,
 }
 
@@ -152,6 +192,17 @@ pub enum AgentResponse {
     },
     SessionTerminated {
         outcome: TerminationOutcome,
+    },
+    /// An approval was recorded (F-M2-002, HORO-792).
+    ApprovalRecorded {
+        approval: ApprovalView,
+    },
+    /// The calling peer's own recorded approvals.
+    ApprovalList {
+        approvals: Vec<ApprovalView>,
+    },
+    ApprovalForgotten {
+        outcome: ForgetOutcome,
     },
 }
 

@@ -7,17 +7,18 @@
 
 use std::time::Duration;
 
+use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::{IssuerInstanceId, LeaseId};
 use eltanin_core::resource::{Action, ResourceIdentity, ResourceKind, ResourceVendor};
 use eltanin_core::session::SessionId;
 use eltanin_protocol::request::{
-    ClientRequest, CreateSessionRequest, LeaseRequest, ReleaseRequest, Request, RequestBody,
-    RequestId,
+    ApproveRequest, ClientRequest, CreateSessionRequest, ForgetApprovalRequest, LeaseRequest,
+    ReleaseRequest, Request, RequestBody, RequestId,
 };
 use eltanin_protocol::response::{
-    AgentResponse, AgentStatusView, DenialReason, ErrorCode, LeaseView, ReleaseOutcome, Response,
-    ResponseBody, SessionView, TerminationOutcome,
+    AgentResponse, AgentStatusView, ApprovalView, DenialReason, ErrorCode, ForgetOutcome,
+    LeaseView, ReleaseOutcome, Response, ResponseBody, SessionView, TerminationOutcome,
 };
 
 fn resource() -> ResourceIdentity {
@@ -251,5 +252,100 @@ fn response_lease_denied_no_trusted_session_matches_fixture() {
     assert_golden(
         &value,
         include_str!("fixtures/response_lease_denied_no_trusted_session.json"),
+    );
+}
+
+fn approval_id() -> ApprovalId {
+    serde_json::from_str(r#""fixture-approval-id""#).unwrap()
+}
+
+#[test]
+fn approve_matches_fixture() {
+    let value: Request = Versioned::current(RequestBody {
+        request_id: RequestId(7),
+        body: ClientRequest::Approve(ApproveRequest {
+            resource: resource(),
+            action: Action::Compute,
+            disposition: ApprovalDisposition::Remember,
+        }),
+    });
+    assert_golden(&value, include_str!("fixtures/approve.json"));
+}
+
+#[test]
+fn list_approvals_matches_fixture() {
+    let value: Request = Versioned::current(RequestBody {
+        request_id: RequestId(8),
+        body: ClientRequest::ListApprovals {},
+    });
+    assert_golden(&value, include_str!("fixtures/list_approvals.json"));
+}
+
+#[test]
+fn forget_approval_matches_fixture() {
+    let value: Request = Versioned::current(RequestBody {
+        request_id: RequestId(9),
+        body: ClientRequest::ForgetApproval(ForgetApprovalRequest { id: approval_id() }),
+    });
+    assert_golden(&value, include_str!("fixtures/forget_approval.json"));
+}
+
+#[test]
+fn response_approval_recorded_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(7)),
+        body: AgentResponse::ApprovalRecorded {
+            approval: ApprovalView {
+                id: approval_id(),
+                resource: resource(),
+                action: Action::Compute,
+                disposition: ApprovalDisposition::Remember,
+            },
+        },
+    });
+    assert_golden(&value, include_str!("fixtures/response_approval_recorded.json"));
+}
+
+#[test]
+fn response_approval_list_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(8)),
+        body: AgentResponse::ApprovalList {
+            approvals: vec![ApprovalView {
+                id: approval_id(),
+                resource: resource(),
+                action: Action::Compute,
+                disposition: ApprovalDisposition::Remember,
+            }],
+        },
+    });
+    assert_golden(&value, include_str!("fixtures/response_approval_list.json"));
+}
+
+#[test]
+fn response_approval_forgotten_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(9)),
+        body: AgentResponse::ApprovalForgotten {
+            outcome: ForgetOutcome::Forgotten,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_approval_forgotten.json"),
+    );
+}
+
+#[test]
+fn response_lease_denied_approval_required_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(1)),
+        body: AgentResponse::LeaseDenied {
+            reason: DenialReason::ApprovalRequired,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_lease_denied_approval_required.json"),
     );
 }
