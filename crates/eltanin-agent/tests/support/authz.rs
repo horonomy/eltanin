@@ -57,7 +57,14 @@ impl TestPeer {
                 source: EvidenceSource::KernelObserved,
             },
             gid: Evidence::Unsupported,
-            executable_path: Evidence::Unsupported,
+            // Present (not Unsupported) so F-M2-002/HORO-792's approval
+            // gate — which needs a launcher path to bind an
+            // ApprovalBinding — has something to observe. No existing
+            // test asserts this field is Unsupported.
+            executable_path: Evidence::Present {
+                value: "/usr/bin/eltanin-test-workload".to_string(),
+                source: EvidenceSource::KernelObserved,
+            },
             executable_hash: Evidence::Present {
                 value: self.executable_hash.to_string(),
                 source: EvidenceSource::KernelObserved,
