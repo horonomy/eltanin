@@ -51,7 +51,15 @@
 //! contextual-signal-as-authority mistake), `ancestry` (HORO-787: parent
 //! process alone cannot imply ALLOW — excluding it structurally means
 //! this can't be written), and `namespace_hint`/`container_hint`/
-//! `session_origin` (never populated by any collector today).
+//! `session_origin`. `namespace_hint`/`container_hint` are never
+//! populated by any collector today. `session_origin` **is** now
+//! populated (HORO-791/F-M2-001, by `eltanin-linux`'s and
+//! `eltanin-macos`'s collectors) but remains deliberately excluded from
+//! `Condition`: a per-boot kernel session id is not stable across a
+//! reboot or a fresh session, so a static, authored policy document has
+//! no useful way to reference it by value — it is a live signal for
+//! [`crate::session::membership`]'s freshly-observed comparison, never
+//! a value a policy author could sensibly pin in advance.
 //!
 //! # Scope
 //!
