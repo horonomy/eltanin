@@ -44,6 +44,12 @@ const REQUIRED_SCANNED: &[&str] = &[
     "runtime.rs",
     "server.rs",
     "eltanin-agentd.rs",
+    // Test-only fixture binary (F-M2-001, HORO-791) — not a transport
+    // module, but registered here rather than widening the `authz/`
+    // exemption to cover it: it lives under `src/bin/`, and this list's
+    // own purpose is to make sure no `src/` file is silently
+    // unaccounted for, transport or not.
+    "session_probe_fixture.rs",
 ];
 
 /// Path component that marks a file as belonging to the one exempted
