@@ -97,12 +97,18 @@ evidence — run on a genuinely non-virtualized host per §1 below,
 confirmed by `hardware-preflight-check.sh` reporting
 `E3_PASS_ELIGIBLE` (i.e. `systemd-detect-virt: none`) before any setup
 effort is spent. §6–§12 below are already written as this stage's
-one-shot runbook (setup → build → run → evidence → cleanup); the target
-is that once HORO-828/829/841/842/843/844 land (informed and de-risked
-by Stage-1 findings), the paid/physical window is spent executing that
-existing sequence, not inventing it live. See "F. Exact eventual
-bare-metal one-shot command" below for the single command this window
-should reduce to once those tickets land.
+one-shot runbook (setup → build → run → evidence → cleanup), and
+`scripts/e3-bare-metal-oneshot.sh` (new) already collapses the
+build/run/evidence-collection portion into one command today —
+it runs the workspace baseline and the Stage-1 device-BPF probe
+now, auto-detects and runs each of the NVIDIA-discovery/device-guard/
+canonical-e2e hardware-gated suites once its crate/test file exists,
+and explicitly refuses to print an `E3_PASS_CANDIDATE` verdict while
+anything is still `SKIPPED` or the host isn't confirmed non-
+virtualized — so the target is that once HORO-828/829/841/842/843/844
+land (informed and de-risked by Stage-1 findings), the paid/physical
+window is spent running that one script, not assembling the sequence
+live. See §12's end-to-end sequence for exactly where it slots in.
 
 ### Provider strategy (cheapest technically valid option first)
 
@@ -559,10 +565,11 @@ returned host before releasing it.
 
 ## 11. Automation
 
-Three scripts, all committed alongside this document
+Four scripts, all committed alongside this document
 (`scripts/hardware-preflight-check.sh`,
 `scripts/hardware-evidence-capture.sh`,
-`scripts/e3-preflight-device-bpf-probe.sh`). The first two are
+`scripts/e3-preflight-device-bpf-probe.sh`,
+`scripts/e3-bare-metal-oneshot.sh`). The first two are
 read-mostly by design — they check and record, they don't install or
 modify system state, so they're safe to run on any candidate host
 without a "did this just change something" question. The third
@@ -570,7 +577,11 @@ without a "did this just change something" question. The third
 disposable cgroups/processes/BPF programs, but never touches anything
 that pre-existed its own run — see its own header comment and
 `docs/qa/privileged-enforcement-testing.md` for the blast-radius
-guarantees this implies. The setup steps that do modify system
+guarantees this implies. The fourth (the Stage-2 one-shot runner)
+orchestrates the first three plus the workspace build/test baseline and
+whichever hardware-gated suites already exist, into the single command
+a paid bare-metal window should actually run — see its own header for
+exactly what it does and does not prove today. The setup steps that do modify system
 state (§6) stay as explicit, reviewable commands rather than a single
 opaque install script, because package names and driver-branch numbers
 genuinely drift across distros and time — an unattended installer here
@@ -632,19 +643,29 @@ source .venv-hardware-eval/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 python3 -c "import torch; x = torch.rand(2048, 2048, device='cuda'); print((x @ x).sum().item())"
 
-# 5. Start an evidence bundle for this run.
-EVIDENCE_DIR_LINE=$(bash scripts/hardware-evidence-capture.sh | tee /dev/stderr | grep '^Writing evidence to:')
-EVIDENCE_DIR=${EVIDENCE_DIR_LINE#"Writing evidence to: "}
+# 5. Steps 5-6 below (evidence bundle + hardware-gated suites) collapse
+#    into ONE command: scripts/e3-bare-metal-oneshot.sh. It runs the
+#    baseline build/test, the Stage-1 device-BPF probe (valid on real
+#    bare metal too), and each of the suites below IF the crate/test
+#    file implementing it already exists in the workspace at run time —
+#    skipping (never fabricating a result for) whatever hasn't landed
+#    yet, and only prints an E3_PASS_CANDIDATE verdict when nothing was
+#    skipped and this host is confirmed non-virtualized:
+bash scripts/e3-bare-metal-oneshot.sh --json
 
-# 6. Once HORO-828/829/841/842/843/844 have landed, run the real
-#    hardware-gated suites, each redirected into the evidence bundle:
-cargo test -p eltanin-nvidia --test hardware_integration -- --ignored --nocapture \
-  > "$EVIDENCE_DIR/nvidia-hardware-integration.log" 2>&1
-cargo test -p eltanin-device-guard --test hardware_integration -- --ignored --nocapture \
-  > "$EVIDENCE_DIR/device-guard-hardware-integration.log" 2>&1
-cargo test -p eltanin-cli --test canonical_e2e_hardware -- --ignored --nocapture \
-  > "$EVIDENCE_DIR/canonical-e2e-hardware.log" 2>&1
+# Equivalent to running these individually once HORO-828/829/841/842/
+# 843/844 have all landed (kept here for reference / manual debugging
+# of one suite in isolation):
+#   EVIDENCE_DIR_LINE=$(bash scripts/hardware-evidence-capture.sh | tee /dev/stderr | grep '^Writing evidence to:')
+#   EVIDENCE_DIR=${EVIDENCE_DIR_LINE#"Writing evidence to: "}
+#   cargo test -p eltanin-nvidia --test hardware_integration -- --ignored --nocapture \
+#     > "$EVIDENCE_DIR/nvidia-hardware-integration.log" 2>&1
+#   cargo test -p eltanin-device-guard --test hardware_integration -- --ignored --nocapture \
+#     > "$EVIDENCE_DIR/device-guard-hardware-integration.log" 2>&1
+#   cargo test -p eltanin-cli --test canonical_e2e_hardware -- --ignored --nocapture \
+#     > "$EVIDENCE_DIR/canonical-e2e-hardware.log" 2>&1
 
-# 7. Promote the run into a committed Release Quality Report
-#    (docs/qa/reports/TEMPLATE.md), then clean up (§10).
+# 6. Promote an E3_PASS_CANDIDATE run into a committed Release Quality
+#    Report (docs/qa/reports/TEMPLATE.md) after independent review, then
+#    clean up (§10) and terminate the host.
 ```
