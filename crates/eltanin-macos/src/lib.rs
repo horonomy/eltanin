@@ -150,16 +150,78 @@ mod imp {
         }
     }
 
-    /// Hashing the executable's full contents on every collection is
-    /// expensive and, for a large binary, would make identity
-    /// collection itself a resource-consumption vector. This collector
-    /// deliberately does not implement it yet and reports that
-    /// explicitly rather than silently returning an empty or
-    /// placeholder hash — exact parity with `eltanin-linux`'s own
-    /// stance (see its `executable_hash`).
-    fn executable_hash(_pid: u32) -> Evidence<String> {
-        Evidence::Missing {
-            reason: "executable hashing not implemented by this collector".to_string(),
+    /// Maximum executable size this collector will hash (F-M2-002,
+    /// HORO-792) — same bound as `eltanin-linux`'s.
+    const EXECUTABLE_HASH_SIZE_CAP: u64 = 256 * 1024 * 1024;
+
+    /// Bounded executable-content digest (F-M2-002, HORO-792). This
+    /// reverses an earlier documented decision not to hash at all — see
+    /// ADR 0010, and `eltanin-linux`'s own `executable_hash` for the
+    /// Linux-side rationale this mirrors.
+    ///
+    /// **Weaker than `eltanin-linux`'s equivalent, disclosed plainly**:
+    /// macOS's `libproc` (this crate's pinned `0.14.11`) has no
+    /// `/proc/<pid>/exe`-style fd that names the exec'd inode directly
+    /// (`pidcwd` and friends are unimplemented for macOS in this pinned
+    /// version) — the only path available is `pidpath`'s
+    /// currently-reported executable path. This collector re-reads
+    /// *that path*, which proves "the file at that path right now," not
+    /// "the image that was actually exec'd": a same-uid attacker who
+    /// replaces the on-disk file *after* the process has already
+    /// exec'd it defeats this check on macOS in a way Linux's
+    /// `/proc/<pid>/exe` fd approach does not. See ADR 0010's
+    /// macOS-specific-limitation disclosure.
+    fn executable_hash(pid: u32) -> Evidence<String> {
+        use sha2::{Digest, Sha256};
+        use std::fs;
+        use std::io::Read;
+
+        let path = match &executable_path(pid) {
+            Evidence::Present { value, .. } => value.clone(),
+            Evidence::Missing { reason } => {
+                return Evidence::Missing {
+                    reason: format!("no executable path to hash: {reason}"),
+                }
+            }
+            Evidence::Unsupported => return Evidence::Unsupported,
+        };
+
+        let mut file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(e) => {
+                return Evidence::Missing {
+                    reason: format!("open {path}: {e}"),
+                }
+            }
+        };
+
+        let mut hasher = Sha256::new();
+        let mut buf = [0u8; 64 * 1024];
+        let mut total: u64 = 0;
+        loop {
+            let read = match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    return Evidence::Missing {
+                        reason: format!("read {path}: {e}"),
+                    }
+                }
+            };
+            total += read as u64;
+            if total > EXECUTABLE_HASH_SIZE_CAP {
+                return Evidence::Missing {
+                    reason: format!(
+                        "{path} exceeds hash size cap ({EXECUTABLE_HASH_SIZE_CAP} bytes)"
+                    ),
+                };
+            }
+            hasher.update(&buf[..read]);
+        }
+
+        Evidence::Present {
+            value: format!("sha256:{:x}", hasher.finalize()),
+            source: EvidenceSource::BestEffort,
         }
     }
 
@@ -298,9 +360,17 @@ mod imp {
             assert!(identity.process_start.is_present());
             assert!(identity.uid.is_present());
             assert!(identity.executable_path.is_present());
-            // Deliberately not implemented yet (see `executable_hash`)
-            // — must stay explicit `Missing`, never silently `Present`.
-            assert!(!identity.executable_hash.is_present());
+            // F-M2-002/HORO-792: now implemented — the test binary's own
+            // executable is well under the size cap, so this must be
+            // `Present` (and, per this collector's disclosed weaker
+            // guarantee, `BestEffort` rather than `KernelObserved`).
+            let Evidence::Present { source, .. } = &identity.executable_hash else {
+                panic!(
+                    "expected a present executable hash, got {:?}",
+                    identity.executable_hash
+                );
+            };
+            assert_eq!(*source, EvidenceSource::BestEffort);
         }
 
         #[test]
