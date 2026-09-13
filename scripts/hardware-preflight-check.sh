@@ -139,10 +139,42 @@ else
   record WARN "rust.cargo" "cargo not found on PATH — install via https://rustup.rs before building the workspace"
 fi
 
+# --- 9. Virtualization detection (E3_PASS vs. E3_PREFLIGHT_ONLY gate) ---
+#
+# HORO-790's AC is explicit: VM-only, container-only, or GPU-passthrough
+# -only evidence does not satisfy the final E3 bare-metal gate. This
+# check is what makes that a mechanically-checked fact about the host
+# running this script, not something a human has to remember to assert.
+# See docs/development/hardware-validation-runbook.md's two-stage
+# strategy section for what EVIDENCE_CLASS means downstream.
+
+VIRT_TYPE="unknown"
+if command -v systemd-detect-virt >/dev/null 2>&1; then
+  # systemd-detect-virt exits non-zero when it detects "none" (bare
+  # metal) — capture output regardless of exit status.
+  VIRT_TYPE="$(systemd-detect-virt 2>/dev/null || true)"
+  [[ -z "$VIRT_TYPE" ]] && VIRT_TYPE="none"
+  if [[ "$VIRT_TYPE" == "none" ]]; then
+    record PASS "virt.detect" "systemd-detect-virt: none (bare metal) — eligible for E3_PASS evidence"
+  else
+    record WARN "virt.detect" "systemd-detect-virt: ${VIRT_TYPE} — this host is virtualized; any evidence captured here can only be labeled E3_PREFLIGHT_ONLY, never E3_PASS (HORO-790 AC excludes VM/container/passthrough-only evidence)"
+  fi
+else
+  VIRT_TYPE="undetermined"
+  record WARN "virt.detect" "systemd-detect-virt not installed — bare-metal status could not be mechanically confirmed; treat this host as E3_PREFLIGHT_ONLY until confirmed otherwise (check /sys/class/dmi/id/product_name and /proc/cpuinfo 'hypervisor' flag manually, or install systemd's detect-virt)"
+fi
+
+if [[ "$VIRT_TYPE" == "none" ]]; then
+  EVIDENCE_CLASS="E3_PASS_ELIGIBLE"
+else
+  EVIDENCE_CLASS="E3_PREFLIGHT_ONLY"
+fi
+
 # --- Summary -------------------------------------------------------------
 
 if [[ "$JSON" -eq 1 ]]; then
-  printf '{"pass":%d,"warn":%d,"fail":%d,"checks":[' "$PASS" "$WARN" "$FAIL"
+  printf '{"pass":%d,"warn":%d,"fail":%d,"evidence_class":"%s","virt_type":"%s","checks":[' \
+    "$PASS" "$WARN" "$FAIL" "$EVIDENCE_CLASS" "$VIRT_TYPE"
   first=1
   for r in "${RESULTS[@]}"; do
     IFS='|' read -r status name detail <<<"$r"
@@ -161,6 +193,13 @@ else
   done
   echo "=================================================================="
   echo "PASS=$PASS WARN=$WARN FAIL=$FAIL"
+  echo "EVIDENCE_CLASS=$EVIDENCE_CLASS (virt_type=$VIRT_TYPE)"
+  if [[ "$EVIDENCE_CLASS" != "E3_PASS_ELIGIBLE" ]]; then
+    echo "This host cannot produce final E3_PASS evidence for HORO-790 —"
+    echo "only E3_PREFLIGHT_ONLY. Use it for Stage-1 preflight/spike-harness"
+    echo "iteration only; the final bare-metal certification run still"
+    echo "requires a genuinely non-virtualized host (see runbook §1)."
+  fi
   if [[ "$FAIL" -gt 0 ]]; then
     echo
     echo "This host does not yet satisfy the hardware-validation prerequisites."
