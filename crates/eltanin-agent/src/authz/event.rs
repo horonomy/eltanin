@@ -162,6 +162,23 @@ pub enum AuthorizationOutcome {
     DelegationIndeterminate {
         reason: String,
     },
+    /// The risk layer (F-M2-004, HORO-794) classified an approval/
+    /// delegation refusal as remediable via step-up. `signals` names
+    /// every fired [`eltanin_core::risk::RiskSignal`]. Client-facing
+    /// wire response is `DenialReason::StepUpRequired` — the fired
+    /// signals themselves stay off the wire, same lossy-wire discipline
+    /// as every other pre-policy denial reason.
+    StepUpRequired {
+        signals: std::collections::BTreeSet<eltanin_core::risk::RiskSignal>,
+    },
+    /// The risk layer (F-M2-004, HORO-794) classified an approval/
+    /// delegation refusal as hard-denied. `signals` names every fired
+    /// [`eltanin_core::risk::RiskSignal`] (at least one of which is
+    /// configured `SignalDisposition::Deny`). Client-facing wire
+    /// response is `DenialReason::RiskDenied`.
+    RiskDenied {
+        signals: std::collections::BTreeSet<eltanin_core::risk::RiskSignal>,
+    },
 }
 
 /// One authorization event: what was asked, who asked (as observed —

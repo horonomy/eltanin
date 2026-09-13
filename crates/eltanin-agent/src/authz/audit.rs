@@ -297,6 +297,10 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
         AuthorizationOutcome::DelegationIndeterminate { reason } => {
             RecordedOutcome::DelegationIndeterminate { reason }
         }
+        AuthorizationOutcome::StepUpRequired { signals } => {
+            RecordedOutcome::StepUpRequired { signals }
+        }
+        AuthorizationOutcome::RiskDenied { signals } => RecordedOutcome::RiskDenied { signals },
     }
 }
 

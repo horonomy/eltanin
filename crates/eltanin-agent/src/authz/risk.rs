@@ -41,7 +41,6 @@ pub(crate) fn is_linked_grant_failure(exceeded: &BTreeSet<ExceededBound>) -> boo
 /// the raw, unfiltered union — so `eltanin_core::risk::RiskSignal::
 /// DelegationScopeExpanded` is never fired by an unrelated stored grant.
 #[must_use]
-#[allow(dead_code)] // consumed by the refusal-path wiring, next commit
 pub(crate) fn assess_refusal(
     membership: &MembershipVerdict,
     recall: &[RecallVerdict],
