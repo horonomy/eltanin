@@ -67,6 +67,7 @@
 //! for, only the value shown to the client, so this exception does not
 //! weaken the guarantee above.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -76,7 +77,7 @@ use eltanin_core::approval::{recall, Approval, ApprovalDisposition, ApprovalId, 
 use eltanin_core::envelope::Versioned;
 use eltanin_core::identity::{Evidence, EvidenceSource};
 use eltanin_core::lease::{
-    IssuerInstanceId, LeaseError, LeaseIssuer, LeaseValidity, MonotonicTime,
+    IssuerInstanceId, LeaseError, LeaseId, LeaseIssuer, LeaseValidity, MonotonicTime,
 };
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
@@ -386,6 +387,37 @@ enum ApprovalAdmission {
     ObserveFailed(BackendError),
 }
 
+/// The result of [`AuthorizationHandler::delegation_admission`] — the
+/// delegation-gate counterpart to [`ApprovalAdmission`]. Consulted only
+/// from the approval gate's own `Refused` arm (see this module's docs).
+enum DelegationAdmission {
+    Admitted {
+        not_after: MonotonicTime,
+        parent_lease: LeaseId,
+        depth: u8,
+        holder_pid: u32,
+    },
+    Refused {
+        exceeded: BTreeSet<eltanin_core::delegation::ExceededBound>,
+    },
+    Indeterminate {
+        reason: String,
+    },
+}
+
+/// Context threaded from a successful [`DelegationAdmission::Admitted`]
+/// through `handle_request_lease`'s common issue/enforce path to
+/// [`AuthorizationHandler::enforce_and_finalize`] — everything needed to
+/// cap the lease's expiry, mint the child grant, and report
+/// [`AuthorizationOutcome::GrantedByDelegation`] instead of the plain
+/// `Granted` variant.
+struct DelegatedGrantContext {
+    not_after: MonotonicTime,
+    parent_lease: LeaseId,
+    depth: u8,
+    holder_pid: u32,
+}
+
 /// Why [`AuthorizationHandler::issue_reserving_capacity`] did not
 /// produce a lease.
 enum IssueFailure {
@@ -533,8 +565,20 @@ impl AuthorizationHandler {
     /// exactly [`MembershipVerdict::Member`]) alongside the full
     /// verdict, so a caller needing only the pass/fail gate and a
     /// caller needing to associate a freshly granted lease with a
-    /// session can both use this one evaluation.
-    fn membership_for_peer(&self, peer: &PeerContext) -> (Option<SessionId>, MembershipVerdict) {
+    /// session can both use this one evaluation. Also returns the
+    /// [`Evidence<SessionKey>`] collected for `peer` along the way (HORO-793)
+    /// — the delegation gate needs this same evidence for its own
+    /// `require_same_session` check and must reuse it rather than
+    /// collecting it a second time (see `authz::delegation`'s module
+    /// docs on why re-collection would reopen a closed TOCTOU window).
+    fn membership_for_peer(
+        &self,
+        peer: &PeerContext,
+    ) -> (
+        Option<SessionId>,
+        MembershipVerdict,
+        Evidence<eltanin_core::session::SessionKey>,
+    ) {
         let now = self.clock.now();
         let mut sessions = session_state::lock(&self.sessions);
         sessions.reap(now, session::collect_workload_identity);
@@ -550,13 +594,14 @@ impl AuthorizationHandler {
                 MembershipVerdict::Indeterminate {
                     reason: "no session found for this peer's session key".to_string(),
                 },
+                peer_key,
             );
         };
 
         let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
         let verdict = membership(candidate, &peer_key, &leader);
         let matched = matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
-        (matched, verdict)
+        (matched, verdict, peer_key)
     }
 
     /// The result of [`AuthorizationHandler::approval_admission`].
@@ -598,6 +643,165 @@ impl AuthorizationHandler {
         ApprovalAdmission::Refused
     }
 
+    /// The result of [`AuthorizationHandler::delegation_admission`].
+    /// Consulted **only** from `handle_request_lease`'s
+    /// `ApprovalAdmission::Refused` arm — see this module's docs. Scans
+    /// every currently stored [`eltanin_core::delegation::DelegationGrant`]
+    /// and returns the first that admits (mirroring
+    /// `approval_admission`'s identical "first matching candidate wins"
+    /// loop). If none admits: any `Indeterminate` verdict wins over a
+    /// `NotAdmitted` one (fail-closed — an unresolved candidate must
+    /// never be silently treated as a clean refusal), otherwise every
+    /// `NotAdmitted` candidate's `exceeded` set is unioned for the audit
+    /// trail.
+    fn delegation_admission(
+        &self,
+        request: &LeaseRequest,
+        observed: &eltanin_core::identity::ExecutionContext,
+        peer_session_key: &Evidence<eltanin_core::session::SessionKey>,
+        bounds: &eltanin_core::delegation::DelegationBounds,
+    ) -> DelegationAdmission {
+        let now = self.clock.now();
+        let mut delegations = delegation_state::lock(&self.delegations);
+        delegations.reap(now, session::collect_workload_identity);
+
+        let compute_request = ComputeRequest {
+            resource: request.resource.clone(),
+            action: request.action,
+        };
+
+        let mut union_exceeded = BTreeSet::new();
+        let mut indeterminate_reason: Option<String> = None;
+        for grant in delegations.candidates() {
+            let observed_holder = session::collect_workload_identity(grant.holder().pid);
+            match eltanin_core::delegation::delegated_admission(
+                grant,
+                bounds,
+                observed,
+                peer_session_key,
+                &observed_holder,
+                &compute_request,
+                now,
+            ) {
+                eltanin_core::delegation::DelegationVerdict::Admitted {
+                    depth,
+                    not_after,
+                    parent_lease,
+                } => {
+                    return DelegationAdmission::Admitted {
+                        not_after,
+                        parent_lease,
+                        depth,
+                        holder_pid: grant.holder().pid,
+                    };
+                }
+                eltanin_core::delegation::DelegationVerdict::NotAdmitted { exceeded } => {
+                    union_exceeded.extend(exceeded);
+                }
+                eltanin_core::delegation::DelegationVerdict::Indeterminate { reason } => {
+                    indeterminate_reason.get_or_insert(reason);
+                }
+            }
+        }
+        drop(delegations);
+        if let Some(reason) = indeterminate_reason {
+            return DelegationAdmission::Indeterminate { reason };
+        }
+        DelegationAdmission::Refused {
+            exceeded: union_exceeded,
+        }
+    }
+
+    /// The approval-admission gate (F-M2-002, HORO-792) extended by the
+    /// delegation gate (F-M2-003, HORO-793). Runs *after* the session
+    /// gate and *before* policy is ever consulted — same structural
+    /// placement as both. A complete no-op when `approval_requirement`
+    /// is `NotRequired` (the default): no lock is even acquired.
+    ///
+    /// `Ok(delegated)` means `handle_request_lease` should proceed to
+    /// `issue_reserving_capacity`/`enforce_and_finalize`; `delegated` is
+    /// `Some` only when this particular request was admitted via the
+    /// delegation gate rather than an ordinary matching approval.
+    /// `Err(response)` is the exact `(outcome, response)` pair
+    /// `handle_request_lease` should return immediately.
+    ///
+    /// The delegation gate is consulted **only** from the approval
+    /// gate's own `Refused` arm below, and can only turn that refusal
+    /// into a bounded admission — never turn an admission or an
+    /// explicit `Deny` into a refusal. Deny-overrides is inherited by
+    /// construction: `ApprovalAdmission::Denied` returns before
+    /// delegation is ever consulted.
+    // `(AuthorizationOutcome, AgentResponse)` is the exact pair
+    // `handle_request_lease` already returns from every other early-exit
+    // branch in this file; boxing it here to satisfy `result_large_err`
+    // would just move the allocation, not remove it, and this method is
+    // called at most once per `RequestLease`, never in a hot loop.
+    #[allow(clippy::result_large_err)]
+    fn approval_and_delegation_gate(
+        &self,
+        request: &LeaseRequest,
+        observed: &eltanin_core::identity::ExecutionContext,
+        peer_session_key: &Evidence<eltanin_core::session::SessionKey>,
+    ) -> Result<Option<DelegatedGrantContext>, (AuthorizationOutcome, AgentResponse)> {
+        if self.approval_requirement != ApprovalRequirement::Required {
+            return Ok(None);
+        }
+        match self.approval_admission(request, observed) {
+            ApprovalAdmission::Denied => Err((
+                AuthorizationOutcome::ApprovalDenied,
+                AgentResponse::LeaseDenied {
+                    reason: DenialReason::ApprovalDenied,
+                },
+            )),
+            ApprovalAdmission::Refused => {
+                let Some(bounds) = &self.delegation else {
+                    return Err((
+                        AuthorizationOutcome::ApprovalRequired,
+                        AgentResponse::LeaseDenied {
+                            reason: DenialReason::ApprovalRequired,
+                        },
+                    ));
+                };
+                match self.delegation_admission(request, observed, peer_session_key, bounds) {
+                    DelegationAdmission::Admitted {
+                        not_after,
+                        parent_lease,
+                        depth,
+                        holder_pid,
+                    } => Ok(Some(DelegatedGrantContext {
+                        not_after,
+                        parent_lease,
+                        depth,
+                        holder_pid,
+                    })),
+                    DelegationAdmission::Refused { exceeded } => Err((
+                        AuthorizationOutcome::DelegationRefused { exceeded },
+                        AgentResponse::LeaseDenied {
+                            reason: DenialReason::ApprovalRequired,
+                        },
+                    )),
+                    DelegationAdmission::Indeterminate { reason } => Err((
+                        AuthorizationOutcome::DelegationIndeterminate { reason },
+                        AgentResponse::LeaseDenied {
+                            reason: DenialReason::ApprovalRequired,
+                        },
+                    )),
+                }
+            }
+            ApprovalAdmission::ObserveFailed(error) => Err((
+                AuthorizationOutcome::ApprovalGateObserveFailed { error },
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            )),
+            ApprovalAdmission::Admitted { once_id: Some(id) } => {
+                approval_state::lock(&self.approvals).consume_once(&id);
+                Ok(None)
+            }
+            ApprovalAdmission::Admitted { once_id: None } => Ok(None),
+        }
+    }
+
     fn handle_request_lease(
         &self,
         request: &LeaseRequest,
@@ -621,7 +825,7 @@ impl AuthorizationHandler {
         // issued while a session happens to be active gets associated
         // with it (for session-termination revocation) even when that
         // session was not required for admission.
-        let (matched_session, verdict) = self.membership_for_peer(peer);
+        let (matched_session, verdict, peer_session_key) = self.membership_for_peer(peer);
         if self.session_requirement == SessionRequirement::Required
             && !matches!(verdict, MembershipVerdict::Member)
         {
@@ -633,43 +837,15 @@ impl AuthorizationHandler {
             );
         }
 
-        // Pre-policy approval-admission gate (F-M2-002, HORO-792): runs
-        // *after* the session gate and *before* policy is ever
-        // consulted — same structural placement, same reason. A
-        // complete no-op when `approval_requirement` is `NotRequired`
-        // (the default): no lock is even acquired.
-        if self.approval_requirement == ApprovalRequirement::Required {
-            match self.approval_admission(request, observed) {
-                ApprovalAdmission::Denied => {
-                    return (
-                        AuthorizationOutcome::ApprovalDenied,
-                        AgentResponse::LeaseDenied {
-                            reason: DenialReason::ApprovalDenied,
-                        },
-                    );
-                }
-                ApprovalAdmission::Refused => {
-                    return (
-                        AuthorizationOutcome::ApprovalRequired,
-                        AgentResponse::LeaseDenied {
-                            reason: DenialReason::ApprovalRequired,
-                        },
-                    );
-                }
-                ApprovalAdmission::ObserveFailed(error) => {
-                    return (
-                        AuthorizationOutcome::ApprovalGateObserveFailed { error },
-                        AgentResponse::Error {
-                            code: ErrorCode::Internal,
-                        },
-                    );
-                }
-                ApprovalAdmission::Admitted { once_id: Some(id) } => {
-                    approval_state::lock(&self.approvals).consume_once(&id);
-                }
-                ApprovalAdmission::Admitted { once_id: None } => {}
-            }
-        }
+        // Pre-policy approval-admission gate (F-M2-002, HORO-792),
+        // extended by the delegation gate (F-M2-003, HORO-793) — see
+        // `approval_and_delegation_gate`'s own doc comment. Split out
+        // only to stay under this crate's line-count lint.
+        let delegated =
+            match self.approval_and_delegation_gate(request, observed, &peer_session_key) {
+                Ok(delegated) => delegated,
+                Err(response) => return response,
+            };
 
         let provenance = provenance_for(request, observed.clone());
 
@@ -700,7 +876,23 @@ impl AuthorizationHandler {
             }
         };
 
-        self.enforce_and_finalize(lease, matched_session.as_ref())
+        // `narrow_expiry` here — before `enforce_and_finalize` ever runs
+        // — is what makes a delegated grant's TTL bound structural
+        // rather than merely checked: the lease this call produces can
+        // never carry an expiry later than the delegation verdict's own
+        // `not_after`.
+        let lease = match &delegated {
+            Some(ctx) => lease.narrow_expiry(ctx.not_after),
+            None => lease,
+        };
+
+        self.enforce_and_finalize(
+            lease,
+            matched_session.as_ref(),
+            observed,
+            &peer_session_key,
+            delegated,
+        )
     }
 
     /// The grant-path tail of `handle_request_lease`, split out only to
@@ -708,11 +900,22 @@ impl AuthorizationHandler {
     /// `matched_session`, when present, is the session this lease
     /// should be associated with for later termination-triggered
     /// revocation (see `handle_request_lease`'s own doc comment on why
-    /// this happens regardless of `session_requirement`).
+    /// this happens regardless of `session_requirement`). `observed`/
+    /// `peer_session_key` are the same already-observed evidence
+    /// `handle_request_lease` collected — reused (never re-collected)
+    /// to derive the [`eltanin_core::delegation::DelegationGrant`] minted
+    /// for every successful grant (HORO-793). `delegated`, when `Some`,
+    /// means this grant itself was admitted via the delegation gate:
+    /// [`AuthorizationOutcome::GrantedByDelegation`] is reported instead
+    /// of the plain `Granted`, and the newly minted grant's `depth`/
+    /// `parent` come from it instead of being `0`/`None`.
     fn enforce_and_finalize(
         &self,
         lease: eltanin_core::lease::ComputeLease,
         matched_session: Option<&SessionId>,
+        observed: &eltanin_core::identity::ExecutionContext,
+        peer_session_key: &Evidence<eltanin_core::session::SessionKey>,
+        delegated: Option<DelegatedGrantContext>,
     ) -> (AuthorizationOutcome, AgentResponse) {
         match self.backend.enforce(&lease.origin().request) {
             Ok(EnforcementResult::Allowed) => {
@@ -732,6 +935,37 @@ impl AuthorizationHandler {
                         },
                     );
                 }
+                // Mint a DelegationGrant for *every* successful grant
+                // (HORO-793) — depth 0/no parent for an ordinary grant,
+                // or the delegation verdict's own depth/parent for a
+                // delegated one — before `lease` is moved into `insert`
+                // below. A no-op when delegation isn't configured, when
+                // the peer's owner-uid evidence isn't usable, or when
+                // this lease's action isn't delegable under these
+                // bounds (`mint` itself returns `None` in that last
+                // case).
+                if let Some(bounds) = &self.delegation {
+                    if let Some(binding) =
+                        delegation::grant_binding_from_observed(observed, peer_session_key)
+                    {
+                        let (depth, parent) = match &delegated {
+                            Some(ctx) => (ctx.depth, Some(ctx.parent_lease.clone())),
+                            None => (0, None),
+                        };
+                        if let Some(grant) = eltanin_core::delegation::DelegationGrant::mint(
+                            &lease,
+                            bounds,
+                            observed.workload.clone(),
+                            binding.owner_uid,
+                            binding.session_key,
+                            binding.cgroup_path,
+                            depth,
+                            parent,
+                        ) {
+                            delegation_state::lock(&self.delegations).insert(grant);
+                        }
+                    }
+                }
                 // `insert` itself releases the reservation this lease
                 // was issued under, in the same lock acquisition.
                 state::lock(&self.state).insert(lease);
@@ -739,11 +973,21 @@ impl AuthorizationHandler {
                     session_state::lock(&self.sessions)
                         .associate_lease(session_id, lease_id.clone());
                 }
-                (
-                    AuthorizationOutcome::Granted {
+                let outcome = match delegated {
+                    Some(ctx) => AuthorizationOutcome::GrantedByDelegation {
+                        lease_id: lease_id.clone(),
+                        expires_at,
+                        parent_lease: ctx.parent_lease,
+                        depth: ctx.depth,
+                        holder_pid: ctx.holder_pid,
+                    },
+                    None => AuthorizationOutcome::Granted {
                         lease_id: lease_id.clone(),
                         expires_at,
                     },
+                };
+                (
+                    outcome,
                     AgentResponse::LeaseGranted {
                         lease: LeaseView {
                             lease_id,
@@ -844,6 +1088,12 @@ impl AuthorizationHandler {
         };
         drop(guard);
 
+        // Cascade to every descendant delegated lease (HORO-793) —
+        // *after* `guard` is dropped, since this recurses into
+        // `revoke_lease_for_session_teardown`, which acquires the same
+        // `state` lock itself.
+        self.revoke_delegation_descendants(&id);
+
         (
             AuthorizationOutcome::Released {
                 revocation,
@@ -859,7 +1109,9 @@ impl AuthorizationHandler {
     /// exactly `handle_release_lease`'s own
     /// `any_other_live_lease_for_same_resource` rule — called when a
     /// Trusted Compute Session is terminated (explicitly or reaped) and
-    /// every lease issued under it must be torn down with it.
+    /// every lease issued under it must be torn down with it, and
+    /// (HORO-793) recursively by [`Self::revoke_delegation_descendants`]
+    /// for every lease chained under a revoked delegation grant.
     fn revoke_lease_for_session_teardown(&self, id: &eltanin_core::lease::LeaseId) {
         let mut guard = state::lock(&self.state);
         if guard.get(id).is_none() {
@@ -878,6 +1130,25 @@ impl AuthorizationHandler {
             let _ = self.backend.revoke(&resource);
         }
         drop(guard);
+        self.revoke_delegation_descendants(id);
+    }
+
+    /// Remove `id`'s own [`eltanin_core::delegation::DelegationGrant`]
+    /// (if any) and recursively cascade-revoke every descendant grant's
+    /// lease (F-M2-003, HORO-793, AC4: "revoking parent/session authority
+    /// invalidates future delegated lease issue"). Called after `id`'s
+    /// own lease has already been revoked/removed at the lease-state
+    /// layer — never while `state`'s lock is held, since this recurses
+    /// into [`Self::revoke_lease_for_session_teardown`], which acquires
+    /// it itself. A no-op when `id` names no stored grant (delegation
+    /// not configured, or this lease was never eligible to seed one).
+    fn revoke_delegation_descendants(&self, id: &eltanin_core::lease::LeaseId) {
+        let removed = delegation_state::lock(&self.delegations).remove_cascade(id);
+        for descendant in removed {
+            if &descendant != id {
+                self.revoke_lease_for_session_teardown(&descendant);
+            }
+        }
     }
 
     fn handle_create_session(
@@ -1001,7 +1272,7 @@ impl AuthorizationHandler {
     }
 
     fn handle_list_sessions(&self, peer: &PeerContext) -> (AuthorizationOutcome, AgentResponse) {
-        let (matched_session, _verdict) = self.membership_for_peer(peer);
+        let (matched_session, _verdict, _peer_key) = self.membership_for_peer(peer);
         let sessions_guard = session_state::lock(&self.sessions);
         let now = self.clock.now();
         let views: Vec<SessionView> = matched_session
@@ -1027,7 +1298,7 @@ impl AuthorizationHandler {
         &self,
         peer: &PeerContext,
     ) -> (AuthorizationOutcome, AgentResponse) {
-        let (matched_session, _verdict) = self.membership_for_peer(peer);
+        let (matched_session, _verdict, _peer_key) = self.membership_for_peer(peer);
         let Some(session_id) = matched_session else {
             return (
                 AuthorizationOutcome::SessionNotFound,

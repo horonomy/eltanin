@@ -65,10 +65,10 @@ impl DelegationState {
     }
 
     /// Drop every grant whose `not_after` has passed, or whose holder
-    /// process is no longer observably the same one it was minted for
-    /// (`observe_holder` returning `None`, or `compare_process` reporting
-    /// `Different` — never on `Indeterminate`, which is left for the
-    /// next touch to re-evaluate rather than reaped speculatively).
+    /// process is confirmed no longer the same one it was minted for
+    /// (`compare_process` reporting `Different` — never on
+    /// `Indeterminate`, which is left for the next touch to re-evaluate
+    /// rather than reaped speculatively).
     /// Cascades to every descendant grant. Returns every removed grant's
     /// [`LeaseId`] (root and cascaded) for the caller to revoke at the
     /// backend/lease-state layer — this module owns no
@@ -77,7 +77,7 @@ impl DelegationState {
     pub(crate) fn reap(
         &mut self,
         now: MonotonicTime,
-        mut observe_holder: impl FnMut(u32) -> Option<WorkloadIdentity>,
+        mut observe_holder: impl FnMut(u32) -> WorkloadIdentity,
     ) -> BTreeSet<LeaseId> {
         let stale: Vec<LeaseId> = self
             .grants
@@ -86,12 +86,10 @@ impl DelegationState {
                 if grant.not_after() <= now {
                     return Some(id.clone());
                 }
-                match observe_holder(grant.holder().pid) {
-                    None => Some(id.clone()),
-                    Some(observed) => match grant.holder().compare_process(&observed) {
-                        IdentityComparison::Different => Some(id.clone()),
-                        IdentityComparison::Same | IdentityComparison::Indeterminate => None,
-                    },
+                let observed = observe_holder(grant.holder().pid);
+                match grant.holder().compare_process(&observed) {
+                    IdentityComparison::Different => Some(id.clone()),
+                    IdentityComparison::Same | IdentityComparison::Indeterminate => None,
                 }
             })
             .collect();
