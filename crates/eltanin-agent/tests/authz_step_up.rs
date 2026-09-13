@@ -65,7 +65,9 @@ fn peer_context_for_pid(pid: u32, uid: u32) -> PeerContext {
 fn real_self_uid() -> u32 {
     match platform::collect_workload_identity(std::process::id()).uid {
         Evidence::Present { value, .. } => value,
-        other => panic!("expected this test process's own uid to be kernel-observed, got {other:?}"),
+        other => {
+            panic!("expected this test process's own uid to be kernel-observed, got {other:?}")
+        }
     }
 }
 
@@ -128,7 +130,10 @@ impl CapturingSink {
     }
 }
 
-fn backend_with_resource(identity: &ResourceIdentity, capabilities: &[Capability]) -> Arc<FakeBackend> {
+fn backend_with_resource(
+    identity: &ResourceIdentity,
+    capabilities: &[Capability],
+) -> Arc<FakeBackend> {
     let backend = Arc::new(FakeBackend::new());
     backend.insert(ProtectedResource {
         identity: identity.clone(),
@@ -268,7 +273,10 @@ fn seeded_digest_change_triggers_step_up_and_audit_names_launcher_identity_chang
         sink.clone(),
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     let mut replaced = peer.clone();
     replaced.executable_hash = "sha256:replaced-binary";
@@ -310,7 +318,10 @@ fn uid_transition_to_root_is_risk_denied_naming_privilege_escalation_to_root() {
         sink.clone(),
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     let root_peer = TestPeer::fresh(0, peer.executable_hash);
     let response = handler.handle(&lease_request(), &root_peer.context());
@@ -349,7 +360,10 @@ fn capability_drift_triggers_security_posture_changed() {
         sink.clone(),
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     // The resource's advertised capabilities changed since the approval
     // was recorded — same identity, different snapshot.
@@ -401,7 +415,10 @@ fn all_informational_config_leaves_refusal_as_plain_approval_required() {
         sink.clone(),
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     let mut replaced = peer.clone();
     replaced.executable_hash = "sha256:replaced-binary";
@@ -546,10 +563,7 @@ fn unrelated_grant_for_a_different_resource_does_not_leak_into_delegation_scope_
         bounds(4),
         step_up_policy(&[
             (RiskSignal::PrivilegeTransition, SignalDisposition::StepUp),
-            (
-                RiskSignal::DelegationScopeExpanded,
-                SignalDisposition::Deny,
-            ),
+            (RiskSignal::DelegationScopeExpanded, SignalDisposition::Deny),
         ]),
         sink.clone(),
     );
@@ -690,7 +704,10 @@ fn steady_state_admission_never_consults_the_risk_layer() {
         sink,
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     // Same exact workload, restarted — an ordinary Matched recall,
     // never a refusal.
@@ -724,7 +741,10 @@ fn approve_remember_then_rerun_produces_no_second_step_up() {
         sink.clone(),
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     let mut replaced = peer.clone();
     replaced.executable_hash = "sha256:replaced-binary";
@@ -774,7 +794,10 @@ fn default_config_without_step_up_is_byte_identical_to_pre_horo_794() {
         sink.clone(),
     );
 
-    handler.handle(&approve_request(ApprovalDisposition::Remember), &peer.context());
+    handler.handle(
+        &approve_request(ApprovalDisposition::Remember),
+        &peer.context(),
+    );
 
     // A digest change, a uid change to root, and a capability drift all
     // would trigger step-up/risk-denial if configured — with no

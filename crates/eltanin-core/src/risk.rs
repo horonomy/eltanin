@@ -216,8 +216,7 @@ impl StepUpPolicy {
         dispositions: BTreeMap<RiskSignal, SignalDisposition>,
         untrusted_path_prefixes: BTreeSet<String>,
     ) -> Result<Self, StepUpPolicyError> {
-        if dispositions.get(&RiskSignal::UntrustedExecutionPath) == Some(&SignalDisposition::Deny)
-        {
+        if dispositions.get(&RiskSignal::UntrustedExecutionPath) == Some(&SignalDisposition::Deny) {
             return Err(StepUpPolicyError::PathSignalCannotDeny);
         }
         Ok(Self {
@@ -398,7 +397,10 @@ pub fn assess(
             .recall
             .iter()
             .any(|verdict| matches!(verdict, RecallVerdict::Indeterminate { .. }))
-        || matches!(verdicts.delegation, Some(DelegationVerdict::Indeterminate { .. }));
+        || matches!(
+            verdicts.delegation,
+            Some(DelegationVerdict::Indeterminate { .. })
+        );
     if any_indeterminate {
         signals.insert(RiskSignal::EvidenceIndeterminate);
     }

@@ -269,7 +269,10 @@ fn ancestry_linkage_and_holder_liveness_never_fire_delegation_scope_expanded() {
     // the caller (see eltanin-agent's `linked_exceeded`) before it ever
     // reaches `assess` — but even if one leaked through, it must not be
     // classified as scope expansion.
-    for bound in [ExceededBound::AncestryLinkage, ExceededBound::HolderLiveness] {
+    for bound in [
+        ExceededBound::AncestryLinkage,
+        ExceededBound::HolderLiveness,
+    ] {
         let ctx = context(1000, "/usr/bin/tool");
         let delegation = DelegationVerdict::NotAdmitted {
             exceeded: BTreeSet::from([bound]),
@@ -442,10 +445,7 @@ fn step_up_disposition_elevates_to_step_up_required() {
 fn deny_overrides_step_up_regardless_of_order() {
     let ctx = context(1000, "/usr/bin/tool");
     let changed = [RecallVerdict::NotMatched {
-        changed: BTreeSet::from([
-            ChangedDimension::LauncherDigest,
-            ChangedDimension::OwnerUid,
-        ]),
+        changed: BTreeSet::from([ChangedDimension::LauncherDigest, ChangedDimension::OwnerUid]),
     }];
     let verdicts = GateVerdicts {
         membership: &member(),

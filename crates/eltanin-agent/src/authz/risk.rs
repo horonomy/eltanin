@@ -14,9 +14,9 @@
 
 use std::collections::BTreeSet;
 
+use eltanin_core::approval::RecallVerdict;
 use eltanin_core::delegation::{DelegationVerdict, ExceededBound};
 use eltanin_core::identity::ExecutionContext;
-use eltanin_core::approval::RecallVerdict;
 use eltanin_core::risk::{assess, GateVerdicts, StepUpPolicy, StepUpVerdict};
 use eltanin_core::session::MembershipVerdict;
 
