@@ -970,6 +970,94 @@ silently satisfied); trust-transition detection is path-only, so an
 interpreter's script identity stays invisible exactly as ADR 0010
 already disclosed for its own mechanism.
 
+## Risk-Based Step-Up (F-M2-004, HORO-794) — `eltanin_core::risk`, `eltanin-agent::authz::risk`
+
+MVP 2.0's fourth Feature. A classification layer over refusals already
+produced by the session (HORO-791), approval (HORO-792), and delegation
+(HORO-793) gates — see [ADR 0012](../adr/0012-risk-based-step-up.md)
+for the full design record, the honest disclosure of what remains
+unbuilt, and the rejected alternatives. Not a fourth admission gate:
+the set of requests Eltanin refuses is unchanged by this ticket.
+
+`eltanin_core::risk` types: `RiskSignal` (11 variants, `Ord` — a
+`BTreeSet<RiskSignal>`'s serialization/iteration order is declaration
+order; each variant composes exactly one existing HORO-791/792/793
+verdict, never re-collecting evidence); `SignalDisposition::{Informational,
+StepUp, Deny}` (defaulting to `Informational` — the same "safe
+blast-radius default" convention `SessionRequirement`/`ApprovalRequirement`
+established for their own `NotRequired` default); `StepUpPolicy`
+(validated construction — `StepUpPolicyError::PathSignalCannotDeny` if
+`RiskSignal::UntrustedExecutionPath` is mapped to `Deny`, structural
+because `--remember`'s remediation records the very path this signal
+flags); `GateVerdicts` (borrows the membership/recall/delegation
+verdicts `assess` classifies); `StepUpVerdict::{NoStepUp, StepUpRequired,
+RiskDenied}` (no admit/proceed variant at all, so this layer cannot
+loosen a gate by construction; no `Indeterminate` variant either — every
+evidence-freshness failure surfaces as `RiskSignal::EvidenceIndeterminate`
+instead).
+
+`assess(verdicts: &GateVerdicts, observed: &ExecutionContext, policy:
+&StepUpPolicy) -> StepUpVerdict` is the one classification entry point:
+deny-overrides, order-independent, mirroring `PolicySet::evaluate`'s own
+precedence discipline (any fired `Deny` signal wins, else any `StepUp`
+signal, else `NoStepUp`).
+
+`eltanin-agent::authz::risk` (new, under `authz/`, covered by that
+module's existing architecture-guard exemption): glue only —
+`is_linked_grant_failure` names the HORO-793 bug-fix predicate (a
+grant's `exceeded` set counts as genuinely about this requester only
+when it contains neither `ExceededBound::AncestryLinkage` nor
+`ExceededBound::HolderLiveness`); `assess_refusal` thinly composes
+`GateVerdicts` and calls `assess`.
+
+**A real bug in HORO-793 found and fixed as part of this ticket**:
+`DelegationState::candidates()` returns every stored grant with no
+resource/action filter (unlike `ApprovalSet::candidates`, which is
+filtered), so the existing `union_exceeded` aggregation in
+`authz::delegation_admission` could mix in `Resource`/`Action`
+failures from a grant belonging to a completely different resource — a
+lookup miss mistaken for a scope-expansion attempt. A second, narrower
+`linked_exceeded` set is now computed alongside the existing
+`union_exceeded` in the same loop, restricted to grants that passed
+ancestry linkage and holder liveness; `union_exceeded`'s meaning and
+every existing consumer are unchanged, `linked_exceeded` feeds only
+`RiskSignal::DelegationScopeExpanded`.
+
+Gate placement: `AuthorizationHandler::approval_and_delegation_gate`'s
+three refusal arms (plain `ApprovalAdmission::Refused` with no
+delegation configured, `DelegationAdmission::Refused`,
+`DelegationAdmission::Indeterminate`) each call a new `refuse_with_risk`
+helper, which falls back to the pre-HORO-794 `(outcome, wire reason)`
+pair unchanged whenever `step_up` is not configured or `assess` returns
+`NoStepUp`. `ApprovalAdmission::Denied` (deny-overrides) and
+`ApprovalAdmission::ObserveFailed` (internal error) both return before
+`refuse_with_risk` is ever reachable. `AuthorizationConfig::with_step_up(approval_store,
+policy)` sets `approval_requirement = Required` and `approval_store_path`
+alongside `step_up` in the same call, mirroring `with_delegation`'s
+identical coupling. `ApprovalAdmission::Refused` now carries every
+scanned candidate's own `RecallVerdict` (previously discarded) so
+`assess` can classify every candidate's miss.
+
+`eltanin-protocol` additions: `DenialReason::{StepUpRequired, RiskDenied}`
+— both deliberately lossy, like every other `DenialReason` variant; the
+fired signals live in the audit trail only. `DOMAIN_SCHEMA_VERSION`
+bumps from 4 to 5 for these additive, internally tagged enum variants
+(same bump criterion as every prior MVP 2.0 bump).
+
+`eltanin-audit` additions: `RecordedOutcome::{StepUpRequired, RiskDenied}{signals:
+BTreeSet<RiskSignal>}`. No `signals` field on `RecordedOutcome::Granted`/
+`GrantedByDelegation` — under the refusal-only design it would always
+be empty there.
+
+`eltanin-cli` additions: `describe_denial_reason` gains the two new
+arms — `StepUpRequired` points back at `eltanin approve --remember`/
+`--once` (the same remediation as `ApprovalRequired`); `RiskDenied`
+states plainly that re-approving will not admit the request.
+
+**Named limitation, disclosed, not hidden**: remote-origin-launch
+detection has no `RiskSignal` variant and no collector anywhere in this
+workspace — declared unbuilt in ADR 0012, not silently narrowed scope.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`
