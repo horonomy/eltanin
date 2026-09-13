@@ -105,6 +105,7 @@ pub mod audit;
 mod delegation;
 mod delegation_state;
 pub mod event;
+mod risk;
 pub mod session;
 mod session_state;
 mod state;
@@ -717,10 +718,7 @@ impl AuthorizationHandler {
                     // ancestry linkage and holder liveness is actually
                     // about this requester — see `linked_exceeded`'s own
                     // doc comment on `DelegationAdmission::Refused`.
-                    if !exceeded.contains(&eltanin_core::delegation::ExceededBound::AncestryLinkage)
-                        && !exceeded
-                            .contains(&eltanin_core::delegation::ExceededBound::HolderLiveness)
-                    {
+                    if risk::is_linked_grant_failure(&exceeded) {
                         linked_exceeded.extend(exceeded.iter().copied());
                     }
                     union_exceeded.extend(exceeded);
