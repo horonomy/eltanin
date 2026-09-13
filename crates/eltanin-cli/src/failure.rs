@@ -126,7 +126,10 @@ pub fn classify_response(response: &AgentResponse) -> Option<LaunchFailure> {
         | AgentResponse::Status { .. }
         | AgentResponse::SessionEstablished { .. }
         | AgentResponse::SessionList { .. }
-        | AgentResponse::SessionTerminated { .. } => {
+        | AgentResponse::SessionTerminated { .. }
+        | AgentResponse::ApprovalRecorded { .. }
+        | AgentResponse::ApprovalList { .. }
+        | AgentResponse::ApprovalForgotten { .. } => {
             Some(LaunchFailure::AgentError(ErrorCode::Internal))
         }
     }
@@ -172,6 +175,14 @@ fn describe_denial_reason(reason: DenialReason) -> &'static str {
         DenialReason::NoTrustedSession => {
             "no Trusted Compute Session is active for this terminal — run `eltanin session \
              start --profile <name> --ttl <duration>` first"
+        }
+        DenialReason::ApprovalRequired => {
+            "no remembered approval matches this launcher/context — run `eltanin approve \
+             --profile <name> --remember` (or `--once` for a single run) first"
+        }
+        DenialReason::ApprovalDenied => {
+            "a remembered approval explicitly denies this request — run `eltanin approve \
+             forget <id>` to remove it, or contact your policy administrator"
         }
     }
 }

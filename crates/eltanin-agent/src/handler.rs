@@ -83,7 +83,10 @@ impl RequestHandler for StatusOnlyHandler {
             | ClientRequest::ReleaseLease(_)
             | ClientRequest::CreateSession(_)
             | ClientRequest::ListSessions {}
-            | ClientRequest::TerminateSession {} => AgentResponse::Error {
+            | ClientRequest::TerminateSession {}
+            | ClientRequest::Approve(_)
+            | ClientRequest::ListApprovals {}
+            | ClientRequest::ForgetApproval(_) => AgentResponse::Error {
                 code: ErrorCode::Internal,
             },
         }
