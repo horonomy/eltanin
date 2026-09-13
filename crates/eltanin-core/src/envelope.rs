@@ -41,7 +41,17 @@ use serde::{Deserialize, Serialize};
 /// the old `schema_version` in its recorded `PolicyProvenance`, so this
 /// bump alone makes every one of them fail `recall`'s security-posture
 /// dimension and require re-approval.
-pub const DOMAIN_SCHEMA_VERSION: u16 = 4;
+///
+/// Bumped to `5` for HORO-794/F-M2-004, by the same criterion:
+/// `eltanin-protocol`'s `DenialReason` and `eltanin-audit`'s
+/// `RecordedOutcome` — both internally tagged with no
+/// `#[serde(other)]` catch-all — gain two new variants each
+/// (`StepUpRequired`/`RiskDenied`) for risk-based step-up. Same side
+/// effect as the `3`/`4` bumps: every pre-existing durable `Approval`
+/// embeds the old `schema_version` in its recorded `PolicyProvenance`,
+/// so this bump alone makes every one of them fail `recall`'s
+/// security-posture dimension and require re-approval.
+pub const DOMAIN_SCHEMA_VERSION: u16 = 5;
 
 /// Wraps a domain payload with an explicit schema version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

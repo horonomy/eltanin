@@ -184,6 +184,14 @@ fn describe_denial_reason(reason: DenialReason) -> &'static str {
             "a remembered approval explicitly denies this request — run `eltanin approve \
              forget <id>` to remove it, or contact your policy administrator"
         }
+        DenialReason::StepUpRequired => {
+            "a trust-boundary change was detected and requires re-approval — run `eltanin \
+             approve --profile <name> --remember` (or `--once` for a single run) again"
+        }
+        DenialReason::RiskDenied => {
+            "a trust-boundary change was detected and is configured to hard-deny this request \
+             — re-approving will not admit it; contact your policy administrator"
+        }
     }
 }
 

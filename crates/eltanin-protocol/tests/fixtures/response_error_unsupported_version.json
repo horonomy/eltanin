@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "payload": {
     "request_id": null,
     "body": {
@@ -7,7 +7,7 @@
       "code": {
         "error": "unsupported_version",
         "found": 99,
-        "expected": 4
+        "expected": 5
       }
     }
   }

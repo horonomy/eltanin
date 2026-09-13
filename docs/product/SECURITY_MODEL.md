@@ -429,6 +429,66 @@ descendant specifically (as opposed to mere admission-refusal, which is
 implemented) — actual confinement would need the same privileged,
 non-delegated cgroup subtree as F-M1-007.
 
+## Risk-Based Step-Up (F-M2-004, HORO-794) — MVP 2.0
+
+A classification layer (`eltanin_core::risk::assess`) over refusals
+already produced by the session, approval, and delegation gates above —
+**not** a fourth admission gate. The set of requests Eltanin refuses is
+unchanged by this feature; what changes is that a refusal now names the
+trust change that caused it (a `RiskSignal`, e.g. `LauncherIdentityChanged`,
+`PrivilegeEscalationToRoot`, `DelegationScopeExpanded`), and a deployment
+can configure each signal class as `Informational` (audit only, the
+default), `StepUp` (elevates the refusal to `DenialReason::StepUpRequired`),
+or `Deny` (elevates to `DenialReason::RiskDenied`, hard, unremediable by
+re-approving). See [ADR 0012](../adr/0012-risk-based-step-up.md) for the
+full design record, the exhaustive signal-composition table, and the
+rejected alternatives.
+
+**No admit/proceed path exists on the risk layer's own verdict type** —
+`StepUpVerdict` is `NoStepUp`/`StepUpRequired`/`RiskDenied` only, all
+three still refusals, and `assess` is reachable only from a gate's own
+refusal arm, never from an admission path. This is the load-bearing
+invariant: the risk layer can only narrow what is silently admitted, it
+can never independently admit anything.
+
+**The step-up remediation is the already-shipped `eltanin approve
+--remember`/`--once`** — no new CLI subcommand, GUI, or daemon-side
+prompt. Running it re-derives the approval binding from fresh kernel
+state, so the next request's `recall()` returns `Matched` and the
+refusal (and the signal that caused it) self-extinguishes — this is
+the mechanism that keeps a normal declared dev chain silent in steady
+state and prevents a prompt storm.
+
+**`RiskSignal::UntrustedExecutionPath` can never be configured `Deny`**
+— structurally enforced by `StepUpPolicy::new`. Re-approving from an
+untrusted path would record that same path into the binding, making a
+hard deny on this one signal the single way this feature could produce
+a permanent, unremediable block rather than a step-up.
+
+**A real bug in HORO-793 was found and fixed as part of this ticket**:
+the delegation gate's unfiltered candidate scan could mix an unrelated
+stored grant's scope mismatch (a different resource entirely) into the
+same union a genuine scope-expansion attempt would populate. A second,
+narrower set — restricted to grants a fresh ancestry/liveness check
+actually confirmed belong to the requester — now feeds
+`RiskSignal::DelegationScopeExpanded`; the existing audit-facing union
+and its consumers are unchanged.
+
+**No CPU/GPU-utilization-based signal exists, by hard guardrail** —
+"GPU usage looks high" is never a risk basis in this design. Every
+`RiskSignal` variant composes a discrete, already-produced verdict from
+an existing gate, never a numeric threshold.
+
+**Named limitation, disclosed, not hidden**: remote-origin-launch
+detection has no signal variant and no collector anywhere in this
+workspace — declared unbuilt, not silently narrowed scope.
+
+`DOMAIN_SCHEMA_VERSION` bumps from 4 to 5 for
+`DenialReason`/`RecordedOutcome`'s two new variants each (same bump
+criterion as every prior MVP 2.0 bump) — the same side effect as every
+prior bump: every pre-existing durable `Approval` requires re-approval
+after this ships.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of

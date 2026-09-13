@@ -67,6 +67,20 @@ pub enum DenialReason {
     /// F-M2-002/HORO-792: a `Deny` approval matched (deny-overrides).
     /// Also pre-policy — this is never `PolicySet::evaluate` speaking.
     ApprovalDenied,
+    /// F-M2-004/HORO-794: the risk layer classified an approval/
+    /// delegation refusal as remediable via step-up — running
+    /// `eltanin approve --remember` (or `--once`) is expected to clear
+    /// it, same as a plain `ApprovalRequired`. Which trust change(s)
+    /// caused this is recorded in the audit trail only
+    /// (`eltanin_core::risk::RiskSignal`), never on the wire — same
+    /// "lossy wire, rich audit" discipline as every other pre-policy
+    /// denial reason here.
+    StepUpRequired,
+    /// F-M2-004/HORO-794: the risk layer classified an approval/
+    /// delegation refusal as hard-denied — the fired signal(s) are
+    /// configured `SignalDisposition::Deny`, so re-approving will not
+    /// admit this request. Pre-policy, like every other variant above.
+    RiskDenied,
 }
 
 /// A deliberately coarser, client-facing projection of

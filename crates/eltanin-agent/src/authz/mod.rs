@@ -105,6 +105,7 @@ pub mod audit;
 mod delegation;
 mod delegation_state;
 pub mod event;
+mod risk;
 pub mod session;
 mod session_state;
 mod state;
@@ -158,6 +159,13 @@ pub struct AuthorizationConfig {
     /// call — see that method's doc for why delegation cannot be enabled
     /// without approvals also being required.
     delegation: Option<eltanin_core::delegation::DelegationBounds>,
+    /// `Some` only via [`Self::with_step_up`], which sets this alongside
+    /// `approval_requirement`/`approval_store_path` in one call, mirroring
+    /// [`Self::with_delegation`]'s identical coupling. `None` (the
+    /// default) means the risk layer is never consulted at all — every
+    /// refusal path's behavior is then byte-identical to before this
+    /// ticket (HORO-794).
+    step_up: Option<eltanin_core::risk::StepUpPolicy>,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
@@ -213,6 +221,12 @@ impl AuthorizationConfig {
             // pre-HORO-793 test harness and deployment that never heard
             // of delegation must keep behaving exactly as before.
             delegation: None,
+            // HORO-794's own blast-radius obligation, mirroring
+            // HORO-791/792/793's identical ones above: every
+            // pre-HORO-794 test harness and deployment that never heard
+            // of risk-based step-up must keep behaving exactly as
+            // before — the risk layer is never consulted at all.
+            step_up: None,
         })
     }
 
@@ -282,6 +296,30 @@ impl AuthorizationConfig {
         self
     }
 
+    /// Enable risk-based step-up classification (F-M2-004, HORO-794):
+    /// an approval/delegation refusal is classified by
+    /// [`eltanin_core::risk::assess`] into `NoStepUp`/`StepUpRequired`/
+    /// `RiskDenied` per `policy`, naming the trust change(s) that caused
+    /// it. This never loosens any gate — `assess` is only ever consulted
+    /// from a refusal path (see `crate::authz::risk`'s module docs).
+    ///
+    /// Mirrors [`Self::with_delegation`]'s identical coupling
+    /// discipline: there is deliberately no way to enable the risk layer
+    /// without also requiring approvals — this call sets
+    /// `approval_requirement` to [`ApprovalRequirement::Required`] and
+    /// `approval_store_path` to `approval_store` in the same step.
+    #[must_use]
+    pub fn with_step_up(
+        mut self,
+        approval_store: PathBuf,
+        policy: eltanin_core::risk::StepUpPolicy,
+    ) -> Self {
+        self.approval_requirement = ApprovalRequirement::Required;
+        self.approval_store_path = Some(approval_store);
+        self.step_up = Some(policy);
+        self
+    }
+
     #[must_use]
     pub fn lease_ttl(&self) -> Duration {
         self.lease_ttl
@@ -315,6 +353,11 @@ impl AuthorizationConfig {
     #[must_use]
     pub fn delegation(&self) -> Option<&eltanin_core::delegation::DelegationBounds> {
         self.delegation.as_ref()
+    }
+
+    #[must_use]
+    pub fn step_up(&self) -> Option<&eltanin_core::risk::StepUpPolicy> {
+        self.step_up.as_ref()
     }
 
     #[must_use]
@@ -380,8 +423,12 @@ enum ApprovalAdmission {
     /// A `Deny` candidate matched (deny-overrides).
     Denied,
     /// No candidate matched — includes every `NotMatched`/`Indeterminate`
-    /// verdict, fail-closed.
-    Refused,
+    /// verdict, fail-closed. `recall` carries every candidate's own
+    /// [`RecallVerdict`] from the scan (never a `Matched` one — the loop
+    /// returns immediately on the first match), so the risk-gate glue
+    /// (F-M2-004, HORO-794) can classify *why* every candidate missed
+    /// without re-deriving evidence.
+    Refused { recall: Vec<RecallVerdict> },
     /// The backend capability re-check failed — an internal error, not
     /// an approval decision.
     ObserveFailed(BackendError),
@@ -399,6 +446,21 @@ enum DelegationAdmission {
     },
     Refused {
         exceeded: BTreeSet<eltanin_core::delegation::ExceededBound>,
+        /// Bug fix (F-M2-004, HORO-794): `exceeded` above is a union
+        /// across every stored grant, unfiltered by
+        /// [`delegation_state::DelegationState::candidates`] — with more
+        /// than one grant in the store, `Resource`/`Action` in that
+        /// union can come from a grant totally unrelated to this
+        /// request (a lookup miss on an unfiltered candidate list, not a
+        /// scope-expansion attempt). `linked_exceeded` is the same union
+        /// restricted to grants whose own `exceeded` set contains
+        /// neither `ExceededBound::AncestryLinkage` nor
+        /// `ExceededBound::HolderLiveness` — i.e. grants a fresh
+        /// ancestry/liveness check actually confirmed belong to this
+        /// requester. This is what the risk-gate glue consumes for
+        /// `RiskSignal::DelegationScopeExpanded`; the existing
+        /// `exceeded` union's meaning and consumers are unchanged.
+        linked_exceeded: BTreeSet<eltanin_core::delegation::ExceededBound>,
     },
     Indeterminate {
         reason: String,
@@ -447,6 +509,7 @@ pub struct AuthorizationHandler {
     approval_store_path: Option<PathBuf>,
     once_approval_ttl: Duration,
     delegation: Option<eltanin_core::delegation::DelegationBounds>,
+    step_up: Option<eltanin_core::risk::StepUpPolicy>,
 }
 
 impl AuthorizationHandler {
@@ -508,6 +571,7 @@ impl AuthorizationHandler {
             approval_store_path: config.approval_store_path.clone(),
             once_approval_ttl: config.once_approval_ttl,
             delegation: config.delegation.clone(),
+            step_up: config.step_up.clone(),
         }
     }
 
@@ -624,6 +688,7 @@ impl AuthorizationHandler {
             action: request.action,
         };
 
+        let mut recall_verdicts = Vec::new();
         for approval in approvals.candidates(&request.resource, request.action) {
             let verdict = recall(
                 approval,
@@ -639,8 +704,11 @@ impl AuthorizationHandler {
                     ApprovalDisposition::Remember => ApprovalAdmission::Admitted { once_id: None },
                 };
             }
+            recall_verdicts.push(verdict);
         }
-        ApprovalAdmission::Refused
+        ApprovalAdmission::Refused {
+            recall: recall_verdicts,
+        }
     }
 
     /// The result of [`AuthorizationHandler::delegation_admission`].
@@ -671,6 +739,7 @@ impl AuthorizationHandler {
         };
 
         let mut union_exceeded = BTreeSet::new();
+        let mut linked_exceeded = BTreeSet::new();
         let mut indeterminate_reason: Option<String> = None;
         for grant in delegations.candidates() {
             let observed_holder = session::collect_workload_identity(grant.holder().pid);
@@ -696,6 +765,13 @@ impl AuthorizationHandler {
                     };
                 }
                 eltanin_core::delegation::DelegationVerdict::NotAdmitted { exceeded } => {
+                    // Bug fix (HORO-794): only a grant that passed
+                    // ancestry linkage and holder liveness is actually
+                    // about this requester — see `linked_exceeded`'s own
+                    // doc comment on `DelegationAdmission::Refused`.
+                    if risk::is_linked_grant_failure(&exceeded) {
+                        linked_exceeded.extend(exceeded.iter().copied());
+                    }
                     union_exceeded.extend(exceeded);
                 }
                 eltanin_core::delegation::DelegationVerdict::Indeterminate { reason } => {
@@ -709,6 +785,7 @@ impl AuthorizationHandler {
         }
         DelegationAdmission::Refused {
             exceeded: union_exceeded,
+            linked_exceeded,
         }
     }
 
@@ -731,6 +808,12 @@ impl AuthorizationHandler {
     /// explicit `Deny` into a refusal. Deny-overrides is inherited by
     /// construction: `ApprovalAdmission::Denied` returns before
     /// delegation is ever consulted.
+    ///
+    /// The risk layer (F-M2-004, HORO-794) is consulted from every
+    /// refusal arm below via [`Self::refuse_with_risk`] — never from
+    /// `Denied`/`Admitted`/`ObserveFailed` — so it can only ever
+    /// classify a refusal already produced here, never loosen or
+    /// independently produce one.
     // `(AuthorizationOutcome, AgentResponse)` is the exact pair
     // `handle_request_lease` already returns from every other early-exit
     // branch in this file; boxing it here to satisfy `result_large_err`
@@ -742,6 +825,7 @@ impl AuthorizationHandler {
         request: &LeaseRequest,
         observed: &eltanin_core::identity::ExecutionContext,
         peer_session_key: &Evidence<eltanin_core::session::SessionKey>,
+        membership: &MembershipVerdict,
     ) -> Result<Option<DelegatedGrantContext>, (AuthorizationOutcome, AgentResponse)> {
         if self.approval_requirement != ApprovalRequirement::Required {
             return Ok(None);
@@ -753,13 +837,15 @@ impl AuthorizationHandler {
                     reason: DenialReason::ApprovalDenied,
                 },
             )),
-            ApprovalAdmission::Refused => {
+            ApprovalAdmission::Refused { recall } => {
                 let Some(bounds) = &self.delegation else {
-                    return Err((
+                    return Err(self.refuse_with_risk(
+                        membership,
+                        &recall,
+                        None,
+                        observed,
                         AuthorizationOutcome::ApprovalRequired,
-                        AgentResponse::LeaseDenied {
-                            reason: DenialReason::ApprovalRequired,
-                        },
+                        DenialReason::ApprovalRequired,
                     ));
                 };
                 match self.delegation_admission(request, observed, peer_session_key, bounds) {
@@ -774,18 +860,37 @@ impl AuthorizationHandler {
                         depth,
                         holder_pid,
                     })),
-                    DelegationAdmission::Refused { exceeded } => Err((
-                        AuthorizationOutcome::DelegationRefused { exceeded },
-                        AgentResponse::LeaseDenied {
-                            reason: DenialReason::ApprovalRequired,
-                        },
-                    )),
-                    DelegationAdmission::Indeterminate { reason } => Err((
-                        AuthorizationOutcome::DelegationIndeterminate { reason },
-                        AgentResponse::LeaseDenied {
-                            reason: DenialReason::ApprovalRequired,
-                        },
-                    )),
+                    DelegationAdmission::Refused {
+                        exceeded,
+                        linked_exceeded,
+                    } => {
+                        let delegation_verdict =
+                            eltanin_core::delegation::DelegationVerdict::NotAdmitted {
+                                exceeded: linked_exceeded,
+                            };
+                        Err(self.refuse_with_risk(
+                            membership,
+                            &recall,
+                            Some(&delegation_verdict),
+                            observed,
+                            AuthorizationOutcome::DelegationRefused { exceeded },
+                            DenialReason::ApprovalRequired,
+                        ))
+                    }
+                    DelegationAdmission::Indeterminate { reason } => {
+                        let delegation_verdict =
+                            eltanin_core::delegation::DelegationVerdict::Indeterminate {
+                                reason: reason.clone(),
+                            };
+                        Err(self.refuse_with_risk(
+                            membership,
+                            &recall,
+                            Some(&delegation_verdict),
+                            observed,
+                            AuthorizationOutcome::DelegationIndeterminate { reason },
+                            DenialReason::ApprovalRequired,
+                        ))
+                    }
                 }
             }
             ApprovalAdmission::ObserveFailed(error) => Err((
@@ -799,6 +904,54 @@ impl AuthorizationHandler {
                 Ok(None)
             }
             ApprovalAdmission::Admitted { once_id: None } => Ok(None),
+        }
+    }
+
+    /// Classify an already-produced refusal via the risk layer
+    /// (F-M2-004, HORO-794), falling back to `(fallback_outcome,
+    /// fallback_reason)` unchanged when `self.step_up` is not
+    /// configured, or when the classification comes back `NoStepUp` —
+    /// in both cases this is byte-identical to pre-HORO-794 behavior.
+    /// Only called from `approval_and_delegation_gate`'s refusal arms —
+    /// never from an admission or the approval gate's own `Denied`
+    /// (deny-overrides) arm, and never from `ObserveFailed` (an internal
+    /// error, not a decision to classify).
+    fn refuse_with_risk(
+        &self,
+        membership: &MembershipVerdict,
+        recall: &[RecallVerdict],
+        delegation: Option<&eltanin_core::delegation::DelegationVerdict>,
+        observed: &eltanin_core::identity::ExecutionContext,
+        fallback_outcome: AuthorizationOutcome,
+        fallback_reason: DenialReason,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let Some(policy) = &self.step_up else {
+            return (
+                fallback_outcome,
+                AgentResponse::LeaseDenied {
+                    reason: fallback_reason,
+                },
+            );
+        };
+        match risk::assess_refusal(membership, recall, delegation, observed, policy) {
+            eltanin_core::risk::StepUpVerdict::NoStepUp { .. } => (
+                fallback_outcome,
+                AgentResponse::LeaseDenied {
+                    reason: fallback_reason,
+                },
+            ),
+            eltanin_core::risk::StepUpVerdict::StepUpRequired { signals } => (
+                AuthorizationOutcome::StepUpRequired { signals },
+                AgentResponse::LeaseDenied {
+                    reason: DenialReason::StepUpRequired,
+                },
+            ),
+            eltanin_core::risk::StepUpVerdict::RiskDenied { signals } => (
+                AuthorizationOutcome::RiskDenied { signals },
+                AgentResponse::LeaseDenied {
+                    reason: DenialReason::RiskDenied,
+                },
+            ),
         }
     }
 
@@ -842,7 +995,8 @@ impl AuthorizationHandler {
         // `approval_and_delegation_gate`'s own doc comment. Split out
         // only to stay under this crate's line-count lint.
         let delegated =
-            match self.approval_and_delegation_gate(request, observed, &peer_session_key) {
+            match self.approval_and_delegation_gate(request, observed, &peer_session_key, &verdict)
+            {
                 Ok(delegated) => delegated,
                 Err(response) => return response,
             };

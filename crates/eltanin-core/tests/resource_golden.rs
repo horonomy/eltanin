@@ -37,7 +37,7 @@ fn protected_resource_golden_json() {
     let versioned = Versioned::current(sample_resource());
     let json = serde_json::to_string_pretty(&versioned).unwrap();
     let expected = r#"{
-  "version": 4,
+  "version": 5,
   "payload": {
     "identity": {
       "vendor": "fake",

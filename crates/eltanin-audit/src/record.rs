@@ -30,6 +30,7 @@ use eltanin_core::identity::{Evidence, ExecutionContext};
 use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime, RevocationOutcome};
 use eltanin_core::policy::{Effect, PolicyId, RuleId};
 use eltanin_core::resource::{Action, EnforcementResult, ResourceIdentity};
+use eltanin_core::risk::RiskSignal;
 use eltanin_core::session::{SessionId, SessionTerminationOutcome};
 use eltanin_protocol::response::AgentResponse;
 use std::collections::BTreeSet;
@@ -373,6 +374,21 @@ pub enum RecordedOutcome {
     /// `ApprovalRequired` as `DelegationRefused`.
     DelegationIndeterminate {
         reason: String,
+    },
+    /// The risk layer (F-M2-004, HORO-794) classified an approval/
+    /// delegation refusal as remediable via step-up — the client-facing
+    /// wire response is `DenialReason::StepUpRequired`; `signals` names
+    /// every fired `RiskSignal`, recorded here for the audit trail only.
+    StepUpRequired {
+        signals: BTreeSet<RiskSignal>,
+    },
+    /// The risk layer (F-M2-004, HORO-794) classified an approval/
+    /// delegation refusal as hard-denied — the client-facing wire
+    /// response is `DenialReason::RiskDenied`; `signals` names every
+    /// fired `RiskSignal` (at least one of which is configured
+    /// `SignalDisposition::Deny`).
+    RiskDenied {
+        signals: BTreeSet<RiskSignal>,
     },
 }
 
