@@ -24,6 +24,122 @@ convenient. If real hardware evidence contradicts an assumption this
 document makes, the document is wrong and gets corrected — the Jira AC
 is not.
 
+## Two-stage strategy: E3 Stage-1 preflight vs. Stage-2 bare-metal certification
+
+Founder directive (2026-09-13): do not let HORO-790 sit indefinitely
+blocked on scarce/paid bare-metal time. The E3 security standard itself
+is unchanged — **final E3 still requires a physical bare-metal
+Linux/NVIDIA host with a physically attached supported GPU; VM,
+container, and GPU-passthrough evidence still cannot satisfy it** (see
+§1's virtualization trap, unchanged). What changes is sequencing: split
+hardware validation into two stages so the only work that actually
+needs paid/scarce time is the part that mechanically *requires* real
+bare-metal, and everything else — including a great deal of real
+kernel-primitive investigation HORO-841 needs — is eliminated for free
+first.
+
+**Stage 1 — E3 PREFLIGHT.** Everything that remains semantically valid
+under virtualization runs on the cheapest available Linux environment
+(a GPU-free VM/container is sufficient for most of it; a
+virtualized-GPU cloud instance only where NVIDIA discovery specifically
+needs a GPU present). This eliminates ordinary software/tooling/
+environment defects before any paid bare-metal clock starts. Every
+artifact this stage produces — every script's `--json` output, every
+`hardware-evidence-capture.sh` bundle's `evidence-class.json` — is
+labeled `EVIDENCE_CLASS=E3_PREFLIGHT_ONLY`. **Never relabel or cite
+Stage-1 output as `E3_PASS`.** Concretely, in this repository today:
+
+- `bash scripts/hardware-preflight-check.sh [--json]` — now also runs
+  `systemd-detect-virt` and stamps `evidence_class` /
+  `virt_type` in its output: `E3_PASS_ELIGIBLE` only when the host is
+  mechanically confirmed non-virtualized (`virt_type=none`),
+  `E3_PREFLIGHT_ONLY` otherwise. This is a precondition check, not a
+  certification — it tells you which class of evidence *this host* is
+  even capable of producing, before you invest setup effort in it.
+- `bash scripts/e3-preflight-device-bpf-probe.sh` (root required, Linux
+  only) — a disposable, blast-radius-compliant (see
+  `docs/qa/privileged-enforcement-testing.md`) functional probe of
+  `BPF_PROG_TYPE_CGROUP_DEVICE`: deny-before-open and allow-after-
+  authorization, against a synthetic device node that clones
+  `/dev/null`'s major/minor (never a real device, never real hardware).
+  This is possible without any GPU at all because cgroup v2 device-BPF
+  semantics are a generic kernel primitive, not an NVIDIA-specific one
+  — it directly answers several of HORO-841's "Required Investigation"
+  bullets (deny-before-open behavior, attach/detach lifecycle, the
+  root/capability set that actually worked on the target kernel) for
+  the cost of a few minutes on any current-kernel Linux VM. It does
+  **not** test already-open-handle/revoke behavior yet (disclosed as a
+  known gap in the script's own header) and it never touches
+  `/dev/nvidia*` or proves anything about a real GPU discovery/telemetry
+  path — that half of HORO-841/HORO-785 still needs Stage 1b or Stage 2.
+  Run it, read its findings, and file real bugs/ADR updates for
+  anything it gets wrong before ever renting bare-metal time.
+- **Stage 1b (not yet built, correctly out of scope for this pass)**:
+  once `crates/eltanin-nvidia` exists (HORO-828/829, F-M1-002), its
+  hardware-free unit tests run in normal CI as always, and its real
+  NVML/discovery integration test can be preflighted on a cheap
+  virtualized-GPU cloud instance (NVML/`nvidia-smi` work fine under GPU
+  passthrough — only the *enforcement* claim requires bare metal, not
+  discovery/telemetry). That preflight run is still `E3_PREFLIGHT_ONLY`
+  for the same virtualization reason.
+- `bash scripts/hardware-evidence-capture.sh [output-dir]` — every
+  bundle it writes now includes an `evidence-class.json` stamp (virt
+  type + resulting evidence class) alongside the existing environment
+  captures, so a Stage-1 bundle can never later be mistaken for Stage-2
+  certification evidence just because it lives in the same
+  `evidence/` directory structure.
+
+**Stage 2 — E3 BARE-METAL CERTIFICATION.** Only what Stage 1 cannot
+prove: real physical device-node enforcement, authorized minimal device
+access, unauthorized denial before meaningful compute, cleanup/revoke/
+open-handle semantics, and exact physical GPU/kernel/driver/NVML
+evidence — run on a genuinely non-virtualized host per §1 below,
+confirmed by `hardware-preflight-check.sh` reporting
+`E3_PASS_ELIGIBLE` (i.e. `systemd-detect-virt: none`) before any setup
+effort is spent. §6–§12 below are already written as this stage's
+one-shot runbook (setup → build → run → evidence → cleanup); the target
+is that once HORO-828/829/841/842/843/844 land (informed and de-risked
+by Stage-1 findings), the paid/physical window is spent executing that
+existing sequence, not inventing it live. See "F. Exact eventual
+bare-metal one-shot command" below for the single command this window
+should reduce to once those tickets land.
+
+### Provider strategy (cheapest technically valid option first)
+
+In order — do not skip to a paid option before ruling out the free
+ones:
+
+1. **A founder-owned or borrowed physical NVIDIA workstation.**
+   Unambiguously bare-metal by construction (§1's own recommendation),
+   zero incremental cost, no billed-clock pressure on HORO-841's
+   open-ended spike work. This is the recommended path if one exists —
+   see the open question below.
+2. **An inexpensive temporary/used supported NVIDIA GPU added to an
+   existing Linux-capable PC.** Per §2, a Pascal-generation (2016)
+   GTX 10-series card or newer consumer card is sufficient — there is
+   no compute-capability requirement, only "on a currently-supported
+   production driver branch." Secondhand Pascal/Turing consumer cards
+   are commodity-cheap; this converts a one-time hardware purchase into
+   a permanent, zero-marginal-cost bare-metal validation host, avoiding
+   recurring rental cost for HORO-844's later adversarial/regression
+   suite too.
+3. **An hourly dedicated bare-metal Linux/NVIDIA provider** — a genuine
+   dedicated/colo physical server product, never a "GPU cloud instance"
+   SKU (§1's virtualization trap applies in full). Priced per provider
+   at execution time; this runbook does not fabricate a number here
+   (see "D. Expected paid duration/cost" below for why).
+4. **An ordinary GPU VM/Pod, for Stage-1 preflight only, never for
+   Stage-2/final E3 certification.** Useful only for Stage 1b's
+   NVML/discovery preflight (item above) where a GPU specifically needs
+   to be present; never cite its output as `E3_PASS`.
+
+**Open question for the founder** (this runbook cannot answer it from
+source alone — see the "B" item below): does a Linux-capable PC exist
+today with a Pascal-generation-or-newer NVIDIA card already installed,
+or available to install one into? If yes, option 1/2 above likely make
+this ticket's hardware blocker free to resolve. If no, which of options
+2/3 should be priced and actioned.
+
 ## 0. What already exists vs. what this runbook is preparing for
 
 Read this before anything else — it changes how you should sequence
@@ -443,12 +559,18 @@ returned host before releasing it.
 
 ## 11. Automation
 
-Two scripts, both committed alongside this document
+Three scripts, all committed alongside this document
 (`scripts/hardware-preflight-check.sh`,
-`scripts/hardware-evidence-capture.sh`). Both are read-mostly by
-design — they check and record, they don't install or modify system
-state, so they're safe to run on any candidate host without a "did this
-just change something" question. The setup steps that do modify system
+`scripts/hardware-evidence-capture.sh`,
+`scripts/e3-preflight-device-bpf-probe.sh`). The first two are
+read-mostly by design — they check and record, they don't install or
+modify system state, so they're safe to run on any candidate host
+without a "did this just change something" question. The third
+(the device-BPF functional probe) does create and tear down its own
+disposable cgroups/processes/BPF programs, but never touches anything
+that pre-existed its own run — see its own header comment and
+`docs/qa/privileged-enforcement-testing.md` for the blast-radius
+guarantees this implies. The setup steps that do modify system
 state (§6) stay as explicit, reviewable commands rather than a single
 opaque install script, because package names and driver-branch numbers
 genuinely drift across distros and time — an unattended installer here
@@ -457,10 +579,14 @@ seen yet than a human reading five copy-pasted commands.
 
 ```bash
 # Before spending any setup effort on a candidate host: does it even
-# qualify?
+# qualify, and which evidence class can it even produce?
 bash scripts/hardware-preflight-check.sh
 # or, for machine-readable output:
 bash scripts/hardware-preflight-check.sh --json
+
+# Stage-1 preflight: functional cgroup v2 device-BPF investigation,
+# no GPU required, always E3_PREFLIGHT_ONLY:
+sudo bash scripts/e3-preflight-device-bpf-probe.sh --json
 
 # After setup (§6) and after running whichever hardware-gated tests
 # exist at the time (§7), capture the full evidence bundle for the run:
