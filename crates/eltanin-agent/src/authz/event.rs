@@ -17,10 +17,11 @@
 //! future ticket does not have to retrofit richer internal state into
 //! [`crate::authz`] to get it.
 
+use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
 use eltanin_core::lease::{LeaseError, LeaseId, LeaseValidity, MonotonicTime, RevocationOutcome};
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::PolicyDecision;
-use eltanin_core::resource::EnforcementResult;
+use eltanin_core::resource::{Action, EnforcementResult, ResourceIdentity};
 use eltanin_core::session::{SessionId, SessionTerminationOutcome};
 
 use eltanin_backend::contract::BackendError;
@@ -38,6 +39,9 @@ pub enum Operation {
     CreateSession,
     ListSessions,
     TerminateSession,
+    Approve,
+    ListApprovals,
+    ForgetApproval,
 }
 
 /// What actually happened internally, at full fidelity — the richer
@@ -99,6 +103,42 @@ pub enum AuthorizationOutcome {
     /// behalf) found no session the calling peer verifies as a member
     /// of.
     SessionNotFound,
+    /// The pre-policy approval-admission gate (F-M2-002, HORO-792)
+    /// found no [`eltanin_core::approval::RecallVerdict::Matched`]
+    /// non-`Deny` candidate for this `RequestLease`. Reported *before*
+    /// policy is ever consulted, same structural placement as
+    /// [`AuthorizationOutcome::SessionRequired`].
+    ApprovalRequired,
+    /// The approval-admission gate matched a `Deny` disposition
+    /// (deny-overrides). Also pre-policy.
+    ApprovalDenied,
+    /// The approval gate's own capability re-check
+    /// (`ComputeBackend::observe`) failed — an internal error, not a
+    /// policy or approval decision.
+    ApprovalGateObserveFailed {
+        error: BackendError,
+    },
+    ApprovalRecorded {
+        id: ApprovalId,
+        resource: ResourceIdentity,
+        action: Action,
+        disposition: ApprovalDisposition,
+    },
+    /// The calling peer's own recorded approvals, returned by
+    /// `ListApprovals`.
+    ApprovalListed {
+        approvals: Vec<ApprovalId>,
+    },
+    ApprovalForgotten {
+        forgotten: bool,
+    },
+    /// `eltanin approve` could not complete for a reason that is neither
+    /// a policy nor an approval decision (a monotonic-clock overflow
+    /// computing a `Once` expiry, or a durable-store persist failure —
+    /// see `crate::authz::AuthorizationHandler::handle_approve`).
+    ApprovalInternalError {
+        reason: String,
+    },
 }
 
 /// One authorization event: what was asked, who asked (as observed —

@@ -45,3 +45,14 @@ pub fn temp_socket_path(tag: &str) -> PathBuf {
     );
     path
 }
+
+/// A fresh, per-test-process approval-store path inside
+/// [`private_base_dir`] (F-M2-002, HORO-792) — no length constraint
+/// (unlike [`temp_socket_path`], this is a plain file, not a
+/// `sun_path`), and never pre-created: `ApprovalState::load` must
+/// tolerate a missing file as "empty store."
+pub fn temp_approval_store_path(tag: &str) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+    private_base_dir().join(format!("{tag}-{n}-approvals.json"))
+}

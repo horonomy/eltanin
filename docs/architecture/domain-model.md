@@ -801,6 +801,92 @@ tagged enum variants (see `envelope.rs`'s own bump criterion).
 `eltanin session end` — new top-level subcommands, dispatched
 alongside (never modifying) `eltanin run`'s existing argument grammar.
 
+## Remembered Authorization Intent (F-M2-002, HORO-792) — `eltanin_core::approval`, `eltanin-agent::authz::approval`/`approval_state`, `eltanin-cli::approve`
+
+MVP 2.0's second Feature. A second, independent agent-owned admission
+gate layered on top of the Compute Lease model, structurally identical
+in placement to Trusted Compute Session above — see
+[ADR 0010](../adr/0010-remembered-authorization-intent.md) for the full
+design record, rejected alternatives, and the honest disclosure of what
+this mechanism does not protect against.
+
+`eltanin_core::approval` types: `ApprovalId` (a deterministic content
+digest of a launcher's identity-anchoring dimensions plus
+`(resource, action)`, restart-stable, unlike `LeaseId`/`SessionId`
+which embed an `IssuerInstanceId` and are restart-scoped);
+`ExecutableDigest` (opaque newtype, hashed by the platform adapter, not
+this crate); `ApprovalBinding` (owner uid, launcher path, optional
+launcher digest, optional cgroup path, resource capabilities snapshot,
+policy provenance snapshot); `Approval` (private fields, `Serialize`
+only — but, unlike `ComputeLease`/`TrustedSession`, deliberately
+reconstructible from disk via `ApprovalSet::from_document`, since a
+durable approval must survive a restart; see ADR 0010 for why this is
+the safe exception); `ApprovalDisposition::{Once, Remember, Deny}`;
+`ChangedDimension` (six variants, one per material dimension `recall`
+compares); `RecallVerdict::{Matched, NotMatched, Indeterminate}`;
+`ApprovalDocument`/`ApprovalEntry` (the plain, `Deserialize`-safe
+on-disk row shape); `ApprovalSet` (validated collection, mirroring
+`PolicySet`'s document/validated-set split).
+
+`recall(approval, observed, observed_capabilities, current_policy,
+request)` is the one security-critical entry point: a single combined
+check of every material dimension together — never a lookup step
+followed by a separate check (same discipline as `membership`, same
+reason). Candidate lookup (`ApprovalSet::candidates`) is keyed on
+`(resource, action)` only; every other dimension is compared inside
+`recall`, surfacing a named `ChangedDimension` rather than a silent
+lookup miss.
+
+Platform adapters: `eltanin_linux`/`eltanin_macos::executable_hash` now
+implement `WorkloadIdentity::executable_hash` (previously always
+`Evidence::Missing` by deliberate, documented decision — now reversed,
+with a 256 MiB size cap). Linux hashes via the already-open
+`/proc/<pid>/exe` fd (`KernelObserved`, immune to post-exec path
+replacement); macOS re-reads the file at `pidpath`'s reported path
+(`BestEffort`, weaker — this pinned `libproc` version has no
+fd-based equivalent).
+
+`eltanin-agent::authz::approval`/`approval_state` (both under `authz/`,
+covered by that module's existing architecture-guard exemption):
+`approval_state::ApprovalState` holds a durable `ApprovalSet` (persisted
+to disk on every mutation, with the same symlink/ownership/permission
+validation discipline as `listener.rs`'s socket-directory checks) plus a
+separate in-memory map of ephemeral `Once` approvals with a short TTL,
+lazily reaped like `SessionState`'s sessions.
+`AuthorizationConfig::with_approval_store(path)` is the only way to set
+`ApprovalRequirement::Required` (correct-by-construction — no way to
+require approvals without also naming a store path). When `Required`,
+`handle_request_lease` gates on `recall` *after* the session gate and
+*before* policy is consulted, denying with the new
+`DenialReason::ApprovalRequired`/`ApprovalDenied` — reported pre-policy,
+exactly like the session gate. Approval and session requirements are
+independent, conjunctive gates: both must pass when both are
+configured.
+
+`eltanin-protocol` additions: `ClientRequest::Approve`/`ListApprovals {}`/
+`ForgetApproval`; `AgentResponse::ApprovalRecorded`/`ApprovalList`/
+`ApprovalForgotten`; `ApprovalView` (the client-facing, non-replayable
+projection of `Approval`, mirroring `SessionView`/`LeaseView` — never
+embedding `Approval` itself, regardless of its disk-reconstructibility).
+`DOMAIN_SCHEMA_VERSION` bumps from 2 to 3 for these additive, internally
+tagged enum variants (same bump criterion as HORO-791's 1→2).
+
+`eltanin-cli` additions: `eltanin approve --profile <name>
+(--once|--remember|--deny)`, `eltanin approve list`, `eltanin approve
+forget <id>` — new top-level subcommand, dispatched alongside (never
+modifying) `eltanin run`/`eltanin session`'s existing grammars.
+`ApproveRequest` carries `(resource, action)` directly, resolved
+client-side from `--profile` exactly like `eltanin run`/`session start`
+already do — there is no wire-level `--profile` concept (see ADR 0010).
+
+**Named limitation, disclosed, not hidden (AC4 partially met)**: this
+mechanism binds to a launcher *binary*, never to the specific workload
+an interpreter executable runs — `eltanin run`'s S4-before-S6 stage
+adjacency, the protocol's zero-identity-field invariant, and
+`eltanin-audit`'s `cmdline`-reading prohibition make this structurally
+impossible today. A future workload-attestation ADR-0005 amendment is
+the prerequisite; tracked as a follow-up ticket, out of scope here.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`

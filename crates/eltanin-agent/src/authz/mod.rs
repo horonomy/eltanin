@@ -67,11 +67,12 @@
 //! for, only the value shown to the client, so this exception does not
 //! weaken the guarantee above.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use eltanin_backend::contract::ComputeBackend;
+use eltanin_backend::contract::{BackendError, ComputeBackend};
+use eltanin_core::approval::{recall, Approval, ApprovalDisposition, ApprovalId, RecallVerdict};
 use eltanin_core::envelope::Versioned;
 use eltanin_core::identity::{Evidence, EvidenceSource};
 use eltanin_core::lease::{
@@ -80,28 +81,33 @@ use eltanin_core::lease::{
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
 use eltanin_core::provenance::ProvenanceRecord;
-use eltanin_core::resource::EnforcementResult;
+use eltanin_core::resource::{ComputeRequest, EnforcementResult};
 use eltanin_core::session::{
     membership, IntentProof, LocalSessionAnchor, MembershipVerdict, SessionAssurance,
     SessionAuthority, SessionId, SessionScope,
 };
 use eltanin_protocol::request::{
-    provenance_for, ClientRequest, CreateSessionRequest, LeaseRequest, ReleaseRequest,
+    provenance_for, ApproveRequest, ClientRequest, CreateSessionRequest, ForgetApprovalRequest,
+    LeaseRequest, ReleaseRequest,
 };
 use eltanin_protocol::response::{
-    AgentResponse, AgentStatusView, DenialReason, ErrorCode, LeaseView, ReleaseOutcome,
-    SessionView, TerminationOutcome,
+    AgentResponse, AgentStatusView, ApprovalView, DenialReason, ErrorCode, ForgetOutcome,
+    LeaseView, ReleaseOutcome, SessionView, TerminationOutcome,
 };
 
 use crate::handler::RequestHandler;
 use crate::runtime::AgentClock;
 
+pub mod approval;
+mod approval_state;
 pub mod audit;
 pub mod event;
 pub mod session;
 mod session_state;
 mod state;
 
+use approval::ApprovalRequirement;
+use approval_state::ApprovalState;
 use event::{AuthorizationEvent, AuthorizationOutcome, EventSink, Operation};
 use session::{SessionAdmissionError, SessionRequirement};
 use session_state::SessionState;
@@ -140,6 +146,9 @@ pub struct AuthorizationConfig {
     max_outstanding_leases: usize,
     session_requirement: SessionRequirement,
     max_session_ttl: Duration,
+    approval_requirement: ApprovalRequirement,
+    approval_store_path: Option<PathBuf>,
+    once_approval_ttl: Duration,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
@@ -150,6 +159,16 @@ const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
 /// own user outcome statement — eight hours is a generous single
 /// working day, not an attempt to guess an exact number.
 const DEFAULT_MAX_SESSION_TTL: Duration = Duration::from_hours(8);
+
+/// Default `AllowOnce` approval TTL (F-M2-002, HORO-792) when a
+/// deployment does not opt into a narrower one via
+/// [`AuthorizationConfig::with_once_approval_ttl`]. Lives entirely in
+/// agent memory (see `eltanin_core::approval`'s module docs on why only
+/// `Once` gets a TTL at all) — two minutes is long enough to cover the
+/// gap between running `eltanin approve --once` and the immediately
+/// following `eltanin run`, short enough that a stale, un-consumed
+/// `Once` grant does not linger.
+const DEFAULT_ONCE_APPROVAL_TTL: Duration = Duration::from_secs(120);
 
 impl AuthorizationConfig {
     /// # Errors
@@ -168,8 +187,18 @@ impl AuthorizationConfig {
             // test harness and deployment that never heard of Trusted
             // Compute Sessions must keep behaving exactly as before
             // without being touched.
+            // Defaults every existing/new construction to `NotRequired`
+            // with no store path — HORO-792's own blast-radius
+            // obligation, mirroring HORO-791's identical one just above:
+            // every MVP 1.0/MVP 2.0-pre-HORO-792 test harness and
+            // deployment that never heard of remembered approvals must
+            // keep behaving exactly as before, untouched, including
+            // never touching the filesystem for this feature at all.
             session_requirement: SessionRequirement::NotRequired,
             max_session_ttl: DEFAULT_MAX_SESSION_TTL,
+            approval_requirement: ApprovalRequirement::NotRequired,
+            approval_store_path: None,
+            once_approval_ttl: DEFAULT_ONCE_APPROVAL_TTL,
         })
     }
 
@@ -191,6 +220,27 @@ impl AuthorizationConfig {
         self
     }
 
+    /// Require a matching remembered approval before `RequestLease` ever
+    /// reaches policy, storing/loading the durable approval set at
+    /// `path`. There is deliberately no way to set
+    /// [`ApprovalRequirement::Required`] without also supplying a store
+    /// path — correct-by-construction, rather than a runtime check for
+    /// "no default value for a security-relevant choice" (this repo's
+    /// own established convention — see [`AuthorizationConfig::new`]'s
+    /// identical `lease_ttl` rationale).
+    #[must_use]
+    pub fn with_approval_store(mut self, path: PathBuf) -> Self {
+        self.approval_requirement = ApprovalRequirement::Required;
+        self.approval_store_path = Some(path);
+        self
+    }
+
+    #[must_use]
+    pub fn with_once_approval_ttl(mut self, ttl: Duration) -> Self {
+        self.once_approval_ttl = ttl;
+        self
+    }
+
     #[must_use]
     pub fn lease_ttl(&self) -> Duration {
         self.lease_ttl
@@ -209,6 +259,21 @@ impl AuthorizationConfig {
     #[must_use]
     pub fn max_session_ttl(&self) -> Duration {
         self.max_session_ttl
+    }
+
+    #[must_use]
+    pub fn approval_requirement(&self) -> ApprovalRequirement {
+        self.approval_requirement
+    }
+
+    #[must_use]
+    pub fn approval_store_path(&self) -> Option<&Path> {
+        self.approval_store_path.as_deref()
+    }
+
+    #[must_use]
+    pub fn once_approval_ttl(&self) -> Duration {
+        self.once_approval_ttl
     }
 }
 
@@ -260,6 +325,22 @@ fn denial_reason_for(reason: &DecisionReason) -> DenialReason {
     }
 }
 
+/// The result of [`AuthorizationHandler::approval_admission`] — the
+/// approval-gate counterpart to `IssueFailure`/`MembershipVerdict`.
+enum ApprovalAdmission {
+    /// A non-`Deny` candidate matched. `once_id` is `Some` when the
+    /// matching candidate was `Once` — the caller must consume it.
+    Admitted { once_id: Option<ApprovalId> },
+    /// A `Deny` candidate matched (deny-overrides).
+    Denied,
+    /// No candidate matched — includes every `NotMatched`/`Indeterminate`
+    /// verdict, fail-closed.
+    Refused,
+    /// The backend capability re-check failed — an internal error, not
+    /// an approval decision.
+    ObserveFailed(BackendError),
+}
+
 /// Why [`AuthorizationHandler::issue_reserving_capacity`] did not
 /// produce a lease.
 enum IssueFailure {
@@ -276,6 +357,7 @@ enum IssueFailure {
 pub struct AuthorizationHandler {
     state: Mutex<LeaseState>,
     sessions: Mutex<SessionState>,
+    approvals: Mutex<ApprovalState>,
     policy: PolicySet,
     backend: Arc<dyn ComputeBackend>,
     clock: Arc<dyn Clock>,
@@ -283,9 +365,26 @@ pub struct AuthorizationHandler {
     lease_ttl: Duration,
     max_outstanding_leases: usize,
     session_requirement: SessionRequirement,
+    approval_requirement: ApprovalRequirement,
+    approval_store_path: Option<PathBuf>,
+    once_approval_ttl: Duration,
 }
 
 impl AuthorizationHandler {
+    /// # Panics
+    ///
+    /// When `config.approval_requirement()` is
+    /// [`ApprovalRequirement::Required`], this eagerly loads the durable
+    /// approval store from `config.approval_store_path()` (always
+    /// `Some` in that state — see [`AuthorizationConfig::with_approval_store`])
+    /// and panics if it cannot be loaded safely (unsafe file/parent
+    /// permissions, corrupt JSON, a failed validation). This is
+    /// deliberate fail-closed startup behavior, not an oversight: an
+    /// agent that cannot trust its own durable approval store must not
+    /// start up silently permissive. When `approval_requirement()` is
+    /// [`ApprovalRequirement::NotRequired`] (the default), this
+    /// constructor never touches the filesystem for approvals at all —
+    /// see the regression test proving this in `tests/`.
     #[must_use]
     pub fn new(
         instance: IssuerInstanceId,
@@ -302,9 +401,22 @@ impl AuthorizationHandler {
         // two").
         let issuer = LeaseIssuer::new(instance.clone(), config.lease_ttl);
         let session_authority = SessionAuthority::new(instance, config.max_session_ttl);
+        let approvals = match config.approval_requirement {
+            ApprovalRequirement::NotRequired => ApprovalState::new(),
+            ApprovalRequirement::Required => {
+                let path = config
+                    .approval_store_path
+                    .as_deref()
+                    .expect("ApprovalRequirement::Required always carries a store path — see AuthorizationConfig::with_approval_store");
+                ApprovalState::load(path).unwrap_or_else(|error| {
+                    panic!("failed to load approval store {}: {error}", path.display())
+                })
+            }
+        };
         Self {
             state: Mutex::new(LeaseState::new(issuer, config.max_outstanding_leases)),
             sessions: Mutex::new(SessionState::new(session_authority)),
+            approvals: Mutex::new(approvals),
             policy,
             backend,
             clock,
@@ -312,6 +424,9 @@ impl AuthorizationHandler {
             lease_ttl: config.lease_ttl,
             max_outstanding_leases: config.max_outstanding_leases,
             session_requirement: config.session_requirement,
+            approval_requirement: config.approval_requirement,
+            approval_store_path: config.approval_store_path.clone(),
+            once_approval_ttl: config.once_approval_ttl,
         }
     }
 
@@ -395,6 +510,45 @@ impl AuthorizationHandler {
         (matched, verdict)
     }
 
+    /// The result of [`AuthorizationHandler::approval_admission`].
+    fn approval_admission(
+        &self,
+        request: &LeaseRequest,
+        observed: &eltanin_core::identity::ExecutionContext,
+    ) -> ApprovalAdmission {
+        let now = self.clock.now();
+        let mut approvals = approval_state::lock(&self.approvals);
+        approvals.reap_once(now);
+
+        let capabilities = match self.backend.observe(&request.resource) {
+            Ok(resource) => resource.capabilities,
+            Err(error) => return ApprovalAdmission::ObserveFailed(error),
+        };
+        let current_policy = self.policy.provenance();
+        let compute_request = ComputeRequest {
+            resource: request.resource.clone(),
+            action: request.action,
+        };
+
+        for approval in approvals.candidates(&request.resource, request.action) {
+            let verdict = recall(
+                approval,
+                observed,
+                &capabilities,
+                &current_policy,
+                &compute_request,
+            );
+            if let RecallVerdict::Matched { id } = verdict {
+                return match approval.disposition() {
+                    ApprovalDisposition::Deny => ApprovalAdmission::Denied,
+                    ApprovalDisposition::Once => ApprovalAdmission::Admitted { once_id: Some(id) },
+                    ApprovalDisposition::Remember => ApprovalAdmission::Admitted { once_id: None },
+                };
+            }
+        }
+        ApprovalAdmission::Refused
+    }
+
     fn handle_request_lease(
         &self,
         request: &LeaseRequest,
@@ -428,6 +582,44 @@ impl AuthorizationHandler {
                     reason: DenialReason::NoTrustedSession,
                 },
             );
+        }
+
+        // Pre-policy approval-admission gate (F-M2-002, HORO-792): runs
+        // *after* the session gate and *before* policy is ever
+        // consulted — same structural placement, same reason. A
+        // complete no-op when `approval_requirement` is `NotRequired`
+        // (the default): no lock is even acquired.
+        if self.approval_requirement == ApprovalRequirement::Required {
+            match self.approval_admission(request, observed) {
+                ApprovalAdmission::Denied => {
+                    return (
+                        AuthorizationOutcome::ApprovalDenied,
+                        AgentResponse::LeaseDenied {
+                            reason: DenialReason::ApprovalDenied,
+                        },
+                    );
+                }
+                ApprovalAdmission::Refused => {
+                    return (
+                        AuthorizationOutcome::ApprovalRequired,
+                        AgentResponse::LeaseDenied {
+                            reason: DenialReason::ApprovalRequired,
+                        },
+                    );
+                }
+                ApprovalAdmission::ObserveFailed(error) => {
+                    return (
+                        AuthorizationOutcome::ApprovalGateObserveFailed { error },
+                        AgentResponse::Error {
+                            code: ErrorCode::Internal,
+                        },
+                    );
+                }
+                ApprovalAdmission::Admitted { once_id: Some(id) } => {
+                    approval_state::lock(&self.approvals).consume_once(&id);
+                }
+                ApprovalAdmission::Admitted { once_id: None } => {}
+            }
         }
 
         let provenance = provenance_for(request, observed.clone());
@@ -823,6 +1015,216 @@ impl AuthorizationHandler {
             },
         )
     }
+
+    /// Record a remembered-authorization intent (F-M2-002, HORO-792).
+    /// Every [`eltanin_core::approval::ApprovalBinding`] dimension is
+    /// derived server-side from the peer's own freshly-observed kernel
+    /// state — mirroring exactly how `handle_create_session` derives a
+    /// session's anchor, never from anything the client sends beyond
+    /// `resource`/`action`/`disposition`.
+    fn handle_approve(
+        &self,
+        request: &ApproveRequest,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let Some(observed) = peer.authorizable() else {
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+
+        let capabilities = match self.backend.observe(&request.resource) {
+            Ok(resource) => resource.capabilities,
+            Err(error) => {
+                return (
+                    AuthorizationOutcome::ApprovalGateObserveFailed { error },
+                    AgentResponse::Error {
+                        code: ErrorCode::Internal,
+                    },
+                )
+            }
+        };
+        let policy = self.policy.provenance();
+
+        let Some(binding) = approval::binding_from_observed(observed, capabilities, policy) else {
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+
+        let approval = Approval::new(
+            binding,
+            request.resource.clone(),
+            request.action,
+            request.disposition,
+        );
+        let id = approval.id().clone();
+        let resource = approval.resource().clone();
+        let action = approval.action();
+        let disposition = approval.disposition();
+
+        match disposition {
+            ApprovalDisposition::Once => {
+                let now = self.clock.now();
+                let Some(expires_at) = now.checked_add(self.once_approval_ttl) else {
+                    return (
+                        AuthorizationOutcome::ApprovalInternalError {
+                            reason: "monotonic clock overflow computing Once expiry".to_string(),
+                        },
+                        AgentResponse::Error {
+                            code: ErrorCode::Internal,
+                        },
+                    );
+                };
+                approval_state::lock(&self.approvals).insert_once(approval, expires_at);
+            }
+            ApprovalDisposition::Remember | ApprovalDisposition::Deny => {
+                let mut guard = approval_state::lock(&self.approvals);
+                guard.insert_durable(approval);
+                if let Some(path) = &self.approval_store_path {
+                    if let Err(save_error) = guard.save(path) {
+                        // Roll back: a durable approval that could not
+                        // actually be persisted must not be reported as
+                        // recorded — a restart would silently lose it.
+                        guard.remove(&id);
+                        drop(guard);
+                        eprintln!(
+                            "eltanin-agent: failed to persist approval store {}: {save_error}",
+                            path.display()
+                        );
+                        return (
+                            AuthorizationOutcome::ApprovalInternalError {
+                                reason: save_error.to_string(),
+                            },
+                            AgentResponse::Error {
+                                code: ErrorCode::Internal,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        (
+            AuthorizationOutcome::ApprovalRecorded {
+                id: id.clone(),
+                resource: resource.clone(),
+                action,
+                disposition,
+            },
+            AgentResponse::ApprovalRecorded {
+                approval: ApprovalView {
+                    id,
+                    resource,
+                    action,
+                    disposition,
+                },
+            },
+        )
+    }
+
+    /// List the calling peer's **own** recorded approvals — never
+    /// another owner's.
+    fn handle_list_approvals(&self, peer: &PeerContext) -> (AuthorizationOutcome, AgentResponse) {
+        let Some(observed) = peer.authorizable() else {
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+        let Evidence::Present { value: uid, .. } = &observed.workload.uid else {
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+
+        let now = self.clock.now();
+        let mut guard = approval_state::lock(&self.approvals);
+        guard.reap_once(now);
+        let views: Vec<ApprovalView> = guard
+            .owned_by(*uid)
+            .into_iter()
+            .map(|approval| ApprovalView {
+                id: approval.id().clone(),
+                resource: approval.resource().clone(),
+                action: approval.action(),
+                disposition: approval.disposition(),
+            })
+            .collect();
+        drop(guard);
+        let ids: Vec<ApprovalId> = views.iter().map(|v| v.id.clone()).collect();
+
+        (
+            AuthorizationOutcome::ApprovalListed { approvals: ids },
+            AgentResponse::ApprovalList { approvals: views },
+        )
+    }
+
+    fn handle_forget_approval(
+        &self,
+        request: &ForgetApprovalRequest,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let refused = (
+            AuthorizationOutcome::ApprovalForgotten { forgotten: false },
+            AgentResponse::ApprovalForgotten {
+                outcome: ForgetOutcome::Refused,
+            },
+        );
+
+        let Some(observed) = peer.authorizable() else {
+            return refused;
+        };
+        let Evidence::Present { value: uid, .. } = &observed.workload.uid else {
+            return refused;
+        };
+
+        let mut guard = approval_state::lock(&self.approvals);
+        let Some(existing) = guard.get(&request.id) else {
+            drop(guard);
+            return refused;
+        };
+        if existing.binding().owner_uid != *uid {
+            drop(guard);
+            return refused;
+        }
+        let was_durable = !matches!(existing.disposition(), ApprovalDisposition::Once);
+        let removed = guard.remove(&request.id);
+        if removed && was_durable {
+            if let Some(path) = &self.approval_store_path {
+                if let Err(save_error) = guard.save(path) {
+                    eprintln!(
+                        "eltanin-agent: failed to persist approval store {} after forget: \
+                         {save_error}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        drop(guard);
+
+        (
+            AuthorizationOutcome::ApprovalForgotten { forgotten: removed },
+            AgentResponse::ApprovalForgotten {
+                outcome: if removed {
+                    ForgetOutcome::Forgotten
+                } else {
+                    ForgetOutcome::Refused
+                },
+            },
+        )
+    }
 }
 
 impl RequestHandler for AuthorizationHandler {
@@ -851,6 +1253,18 @@ impl RequestHandler for AuthorizationHandler {
             ClientRequest::TerminateSession {} => {
                 let (outcome, response) = self.handle_terminate_session(peer);
                 (Operation::TerminateSession, outcome, response)
+            }
+            ClientRequest::Approve(approve_request) => {
+                let (outcome, response) = self.handle_approve(approve_request, peer);
+                (Operation::Approve, outcome, response)
+            }
+            ClientRequest::ListApprovals {} => {
+                let (outcome, response) = self.handle_list_approvals(peer);
+                (Operation::ListApprovals, outcome, response)
+            }
+            ClientRequest::ForgetApproval(forget_request) => {
+                let (outcome, response) = self.handle_forget_approval(forget_request, peer);
+                (Operation::ForgetApproval, outcome, response)
             }
         };
 

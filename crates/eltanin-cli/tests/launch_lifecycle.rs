@@ -313,6 +313,9 @@ fn a_renewal_acquires_before_releasing_the_old_lease() {
             ClientRequest::CreateSession(_) => "create_session",
             ClientRequest::ListSessions {} => "list_sessions",
             ClientRequest::TerminateSession {} => "terminate_session",
+            ClientRequest::Approve(_) => "approve",
+            ClientRequest::ListApprovals {} => "list_approvals",
+            ClientRequest::ForgetApproval(_) => "forget_approval",
         })
         .collect();
     assert_eq!(

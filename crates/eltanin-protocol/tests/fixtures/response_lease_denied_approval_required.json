@@ -4,7 +4,7 @@
     "request_id": 1,
     "body": {
       "result": "lease_denied",
-      "reason": "no_matching_rule"
+      "reason": "approval_required"
     }
   }
 }

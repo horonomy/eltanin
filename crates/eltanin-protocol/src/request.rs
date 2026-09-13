@@ -10,6 +10,7 @@
 
 use std::time::Duration;
 
+use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
 use eltanin_core::identity::ExecutionContext;
 use eltanin_core::lease::LeaseId;
 use eltanin_core::provenance::ProvenanceRecord;
@@ -72,6 +73,38 @@ pub struct CreateSessionRequest {
     pub ttl: Duration,
 }
 
+/// Record a remembered-authorization intent (F-M2-002, HORO-792) for
+/// `resource`/`action`. Like [`LeaseRequest`], this carries no client
+/// identity/context — the agent derives every dimension of the
+/// resulting `eltanin_core::approval::ApprovalBinding` itself from the
+/// peer's own freshly-observed kernel state, never from anything in
+/// this struct. Deliberately carries `resource`/`action` directly
+/// rather than a `--profile` name: a profile is a client-side-only
+/// intent alias (`eltanin-cli::profile`) that has never crossed the
+/// wire, and `eltanin run --profile <p>`/`session start --profile <p>`
+/// already establish the precedent of resolving `--profile` to
+/// `(resource, action)`/`resource` client-side before sending a
+/// request — see ADR 0010 for why this ticket does not add a
+/// wire-level `--profile` concept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApproveRequest {
+    pub resource: ResourceIdentity,
+    pub action: Action,
+    pub disposition: ApprovalDisposition,
+}
+
+/// Ask the agent to forget one previously recorded approval. `id` is a
+/// lookup key, not a capability — same contract as [`ReleaseRequest::lease_id`]:
+/// the agent's handler must additionally confirm the calling peer owns
+/// the named approval before forgetting it, never trusting the id alone
+/// to imply ownership.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForgetApprovalRequest {
+    pub id: ApprovalId,
+}
+
 /// The operation a client is asking the agent to perform.
 ///
 /// Deliberately has **no** `#[serde(other)]` catch-all: an unrecognized
@@ -123,6 +156,16 @@ pub enum ClientRequest {
     /// id. Also a zero-field struct variant, for the same reason as
     /// `ListSessions`.
     TerminateSession {},
+    /// Record a remembered-authorization intent (F-M2-002, HORO-792).
+    /// See [`ApproveRequest`].
+    Approve(ApproveRequest),
+    /// List the calling peer's **own** recorded approvals — never
+    /// another owner's. A zero-field struct variant, matching
+    /// [`ClientRequest::ListSessions`]'s established precedent.
+    ListApprovals {},
+    /// Forget one previously recorded approval. See
+    /// [`ForgetApprovalRequest`].
+    ForgetApproval(ForgetApprovalRequest),
 }
 
 /// One versioned, correlated request body.

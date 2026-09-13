@@ -81,6 +81,13 @@ mod imp {
     /// ever reports one).
     const MAX_ANCESTRY_DEPTH: usize = 32;
 
+    /// Maximum executable size this collector will hash (F-M2-002,
+    /// HORO-792). Above this, [`executable_hash`] reports
+    /// [`Evidence::Missing`] rather than hashing (or blocking)
+    /// indefinitely on an arbitrarily large binary — see its own doc
+    /// comment and ADR 0010.
+    const EXECUTABLE_HASH_SIZE_CAP: u64 = 256 * 1024 * 1024;
+
     /// Parsed fields from `/proc/<pid>/stat` that this collector needs.
     struct StatFields {
         ppid: u32,
@@ -205,16 +212,62 @@ mod imp {
         }
     }
 
-    /// Hashing the executable's full contents on every collection is
-    /// expensive and, for a large binary, would make identity collection
-    /// itself a resource-consumption vector. This collector deliberately
-    /// does not implement it yet and reports that explicitly rather than
-    /// silently returning an empty or placeholder hash — consistent with
-    /// this module's "no default/fallback state" rule (see
-    /// `eltanin_core::identity::Evidence`).
-    fn executable_hash(_pid: u32) -> Evidence<String> {
-        Evidence::Missing {
-            reason: "executable hashing not implemented by this collector".to_string(),
+    /// Bounded executable-content digest (F-M2-002, HORO-792). This
+    /// reverses an earlier documented decision not to hash at all
+    /// ("would make identity collection itself a resource-consumption
+    /// vector") — see ADR 0010 for why a *capped* hash is now judged an
+    /// acceptable cost given the security value it adds
+    /// (`eltanin_core::approval`'s launcher-digest comparison). The size
+    /// cap is exactly what keeps the earlier concern from reopening: a
+    /// pathologically large binary reports `Missing`, it is never
+    /// partially hashed or allowed to block indefinitely.
+    ///
+    /// Hashes via `/proc/<pid>/exe` — the kernel-resolved symlink to the
+    /// actual exec'd inode, immune to a later on-disk path replacement
+    /// (unlike hashing the file at `executable_path` by name, which a
+    /// same-uid attacker could swap after this process already exec'd
+    /// it).
+    fn executable_hash(pid: u32) -> Evidence<String> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+
+        let path = format!("/proc/{pid}/exe");
+        let mut file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(e) => {
+                return Evidence::Missing {
+                    reason: format!("open {path}: {e}"),
+                }
+            }
+        };
+
+        let mut hasher = Sha256::new();
+        let mut buf = [0u8; 8 * 1024];
+        let mut total: u64 = 0;
+        loop {
+            let read = match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    return Evidence::Missing {
+                        reason: format!("read {path}: {e}"),
+                    }
+                }
+            };
+            total += read as u64;
+            if total > EXECUTABLE_HASH_SIZE_CAP {
+                return Evidence::Missing {
+                    reason: format!(
+                        "{path} exceeds hash size cap ({EXECUTABLE_HASH_SIZE_CAP} bytes)"
+                    ),
+                };
+            }
+            hasher.update(&buf[..read]);
+        }
+
+        Evidence::Present {
+            value: format!("sha256:{:x}", hasher.finalize()),
+            source: EvidenceSource::KernelObserved,
         }
     }
 
@@ -381,9 +434,23 @@ mod imp {
             assert!(identity.process_start.is_present());
             assert!(identity.uid.is_present());
             assert!(identity.executable_path.is_present());
-            // Deliberately not implemented yet (see `executable_hash`) —
-            // must stay explicit `Missing`, never silently `Present`.
-            assert!(!identity.executable_hash.is_present());
+            // F-M2-002/HORO-792: now implemented — the test binary's own
+            // `/proc/self/exe` is well under the size cap, so this must
+            // be `Present`, kernel-observed, and stable across repeated
+            // collection.
+            let Evidence::Present {
+                value: hash,
+                source,
+            } = &identity.executable_hash
+            else {
+                panic!(
+                    "expected a present executable hash, got {:?}",
+                    identity.executable_hash
+                );
+            };
+            assert_eq!(*source, EvidenceSource::KernelObserved);
+            let second = collect_workload_identity(std::process::id());
+            assert_eq!(second.executable_hash.value(), Some(hash));
         }
 
         #[test]

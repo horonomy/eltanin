@@ -47,6 +47,9 @@ fn recorded_operation(operation: Operation) -> RecordedOperation {
         Operation::CreateSession => RecordedOperation::CreateSession,
         Operation::ListSessions => RecordedOperation::ListSessions,
         Operation::TerminateSession => RecordedOperation::TerminateSession,
+        Operation::Approve => RecordedOperation::Approve,
+        Operation::ListApprovals => RecordedOperation::ListApprovals,
+        Operation::ForgetApproval => RecordedOperation::ForgetApproval,
     }
 }
 
@@ -66,6 +69,13 @@ fn recorded_request(request: &ClientRequest) -> RecordedRequest {
         },
         ClientRequest::ListSessions {} => RecordedRequest::ListSessions,
         ClientRequest::TerminateSession {} => RecordedRequest::TerminateSession,
+        ClientRequest::Approve(r) => RecordedRequest::Approve {
+            resource: r.resource.clone(),
+            action: r.action,
+            disposition: r.disposition,
+        },
+        ClientRequest::ListApprovals {} => RecordedRequest::ListApprovals,
+        ClientRequest::ForgetApproval(r) => RecordedRequest::ForgetApproval { id: r.id.clone() },
     }
 }
 
@@ -238,6 +248,31 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
             termination_outcome: outcome,
         },
         AuthorizationOutcome::SessionNotFound => RecordedOutcome::SessionNotFound,
+        AuthorizationOutcome::ApprovalRequired => RecordedOutcome::ApprovalRequired,
+        AuthorizationOutcome::ApprovalDenied => RecordedOutcome::ApprovalDenied,
+        AuthorizationOutcome::ApprovalGateObserveFailed { error } => {
+            RecordedOutcome::ApprovalGateObserveFailed { error }
+        }
+        AuthorizationOutcome::ApprovalRecorded {
+            id,
+            resource,
+            action,
+            disposition,
+        } => RecordedOutcome::ApprovalRecorded {
+            id,
+            resource,
+            action,
+            disposition,
+        },
+        AuthorizationOutcome::ApprovalListed { approvals } => {
+            RecordedOutcome::ApprovalListed { approvals }
+        }
+        AuthorizationOutcome::ApprovalForgotten { forgotten } => {
+            RecordedOutcome::ApprovalForgotten { forgotten }
+        }
+        AuthorizationOutcome::ApprovalInternalError { reason } => {
+            RecordedOutcome::ApprovalInternalError { reason }
+        }
     }
 }
 

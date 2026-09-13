@@ -1,15 +1,16 @@
 {
   "version": 3,
   "payload": {
-    "request_id": 1,
+    "request_id": 7,
     "body": {
-      "op": "request_lease",
+      "op": "approve",
       "resource": {
         "vendor": "fake",
         "kind": "gpu",
         "local_id": "gpu-0"
       },
-      "action": "compute"
+      "action": "compute",
+      "disposition": "remember"
     }
   }
 }

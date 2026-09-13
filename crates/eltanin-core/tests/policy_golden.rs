@@ -77,7 +77,7 @@ fn no_matching_rule_decision_golden_json() {
   "policy": {
     "policy_id": "p1",
     "policy_revision": 1,
-    "schema_version": 2
+    "schema_version": 3
   }
 }"#;
     assert_eq!(json, expected);
@@ -119,7 +119,7 @@ fn explicit_allow_decision_golden_json() {
   "policy": {
     "policy_id": "p1",
     "policy_revision": 1,
-    "schema_version": 2
+    "schema_version": 3
   }
 }"#;
     assert_eq!(json, expected);
@@ -176,7 +176,7 @@ fn explicit_deny_overriding_allow_decision_golden_json() {
   "policy": {
     "policy_id": "p1",
     "policy_revision": 1,
-    "schema_version": 2
+    "schema_version": 3
   }
 }"#;
     assert_eq!(json, expected);
@@ -222,7 +222,7 @@ fn indeterminate_evidence_decision_golden_json() {
   "policy": {
     "policy_id": "p1",
     "policy_revision": 1,
-    "schema_version": 2
+    "schema_version": 3
   }
 }"#;
     assert_eq!(json, expected);

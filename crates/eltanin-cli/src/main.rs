@@ -4,6 +4,7 @@
 
 use std::process::ExitCode as ProcessExitCode;
 
+use eltanin_cli::approve::{self, ApproveCliOutcome};
 use eltanin_cli::args::{parse, Invocation};
 use eltanin_cli::failure::LaunchFailure;
 use eltanin_cli::launch::{self, LaunchOutcome};
@@ -27,6 +28,13 @@ fn main() -> ProcessExitCode {
                 ProcessExitCode::SUCCESS
             }
             SessionCliOutcome::Failure(failure) => report(&failure),
+        },
+        Invocation::Approve(invocation) => match approve::run(&invocation) {
+            ApproveCliOutcome::Ok(message) => {
+                println!("eltanin: {message}");
+                ProcessExitCode::SUCCESS
+            }
+            ApproveCliOutcome::Failure(failure) => report(&failure),
         },
     }
 }
