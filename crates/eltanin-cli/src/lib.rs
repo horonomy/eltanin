@@ -24,6 +24,7 @@
 //! ([`supervise`]), and the S0-S11 orchestrator ([`launch`]).
 #![forbid(unsafe_code)]
 
+pub mod approve;
 pub mod args;
 pub mod client;
 pub mod context;

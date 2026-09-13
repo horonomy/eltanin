@@ -110,6 +110,18 @@ impl ApprovalId {
         &self.0
     }
 
+    /// Wrap a raw string as an `ApprovalId` for a lookup — e.g. what
+    /// `eltanin approve forget <id>` parses from argv (the id a prior
+    /// `eltanin approve`/`approve list` printed back). Carries no
+    /// entropy and is not a capability: constructing one this way
+    /// grants nothing by itself, it is only useful if it happens to
+    /// match a stored approval's own [`ApprovalId::compute`]-derived
+    /// value.
+    #[must_use]
+    pub fn from_raw(raw: impl Into<String>) -> Self {
+        Self(raw.into())
+    }
+
     /// Deterministically derive an id from the identity-anchoring
     /// dimensions of `binding` plus `resource`/`action`. Deliberately
     /// **excludes** `binding.capabilities`/`binding.policy`: those are

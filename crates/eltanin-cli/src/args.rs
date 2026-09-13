@@ -8,6 +8,8 @@
 use std::ffi::{OsStr, OsString};
 use std::time::Duration;
 
+use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
+
 use crate::profile::ProfileName;
 
 /// A fully parsed `eltanin run` invocation.
@@ -37,13 +39,31 @@ pub enum SessionInvocation {
     End,
 }
 
-/// Either of the two top-level subcommands this binary understands.
+/// A fully parsed `eltanin approve <record|list|forget>` invocation
+/// (F-M2-002, HORO-792). `eltanin run`/`eltanin session ...` stay
+/// completely unchanged — this is a new, independent top-level
+/// subcommand, mirroring `SessionInvocation`'s own shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApproveInvocation {
+    /// `eltanin approve --profile <name> (--once|--remember|--deny)`.
+    Record {
+        profile: ProfileName,
+        disposition: ApprovalDisposition,
+    },
+    /// `eltanin approve list`.
+    List,
+    /// `eltanin approve forget <id>`.
+    Forget { id: ApprovalId },
+}
+
+/// Any of the three top-level subcommands this binary understands.
 /// `eltanin run`'s own argument grammar (see [`parse_run`]) is
 /// byte-for-byte unchanged by this type's introduction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
     Run(RunInvocation),
     Session(SessionInvocation),
+    Approve(ApproveInvocation),
 }
 
 /// Why argv parsing rejected the invocation — always maps to
@@ -54,8 +74,22 @@ pub enum UsageError {
     NotRunSubcommand { found: Option<OsString> },
     #[error("expected the first argument to be \"session\", got {found:?}")]
     NotSessionSubcommand { found: Option<OsString> },
-    #[error("expected the first argument to be \"run\" or \"session\", got {found:?}")]
+    #[error("expected the first argument to be \"approve\", got {found:?}")]
+    NotApproveSubcommand { found: Option<OsString> },
+    #[error("expected the first argument to be \"run\", \"session\", or \"approve\", got {found:?}")]
     UnknownSubcommand { found: Option<OsString> },
+    #[error(
+        "expected \"approve\" to be followed by \"list\", \"forget\", or --profile, got {found:?}"
+    )]
+    UnknownApproveAction { found: Option<OsString> },
+    #[error("exactly one of --once, --remember, or --deny is required")]
+    DispositionMissing,
+    #[error("--once, --remember, and --deny are mutually exclusive")]
+    DispositionGivenTwice,
+    #[error("\"eltanin approve forget\" requires exactly one <id> argument, got none")]
+    ForgetIdMissing,
+    #[error("\"eltanin approve forget\" takes exactly one argument, got extra: {found:?}")]
+    UnexpectedApproveArgument { found: OsString },
     #[error(
         "expected \"session\" to be followed by \"start\", \"list\", or \"end\", got {found:?}"
     )]
@@ -162,10 +196,93 @@ pub fn parse(argv: impl IntoIterator<Item = OsString>) -> Result<Invocation, Usa
     match argv.first().map(OsString::as_os_str) {
         Some(s) if s == OsStr::new("run") => Ok(Invocation::Run(parse_run(argv)?)),
         Some(s) if s == OsStr::new("session") => Ok(Invocation::Session(parse_session(argv)?)),
+        Some(s) if s == OsStr::new("approve") => Ok(Invocation::Approve(parse_approve(argv)?)),
         other => Err(UsageError::UnknownSubcommand {
             found: other.map(OsStr::to_os_string),
         }),
     }
+}
+
+/// Parse an `eltanin approve ...` invocation. `argv` starts with the
+/// `approve` token itself, mirroring [`parse_session`]'s own
+/// convention.
+///
+/// # Errors
+///
+/// Returns [`UsageError`] on any malformed invocation.
+pub fn parse_approve(
+    argv: impl IntoIterator<Item = OsString>,
+) -> Result<ApproveInvocation, UsageError> {
+    let mut argv = argv.into_iter();
+
+    let first = argv.next();
+    if first.as_deref() != Some(OsStr::new("approve")) {
+        return Err(UsageError::NotApproveSubcommand { found: first });
+    }
+
+    let mut argv = argv.peekable();
+    match argv.peek().and_then(|a| a.to_str()) {
+        Some("list") => {
+            argv.next();
+            reject_extra_arguments(argv, "list")?;
+            Ok(ApproveInvocation::List)
+        }
+        Some("forget") => {
+            argv.next();
+            let id = argv.next().ok_or(UsageError::ForgetIdMissing)?;
+            if let Some(extra) = argv.next() {
+                return Err(UsageError::UnexpectedApproveArgument { found: extra });
+            }
+            let id = id.to_str().ok_or(UsageError::ForgetIdMissing)?;
+            Ok(ApproveInvocation::Forget {
+                id: ApprovalId::from_raw(id.to_string()),
+            })
+        }
+        _ => parse_approve_record(argv),
+    }
+}
+
+fn parse_approve_record(
+    argv: impl Iterator<Item = OsString>,
+) -> Result<ApproveInvocation, UsageError> {
+    let mut argv = argv;
+    let mut profile: Option<ProfileName> = None;
+    let mut disposition: Option<ApprovalDisposition> = None;
+
+    while let Some(arg) = argv.next() {
+        if arg == OsStr::new("--profile") {
+            if profile.is_some() {
+                return Err(UsageError::ProfileGivenTwice);
+            }
+            let value = argv.next().ok_or(UsageError::ProfileMissingValue)?;
+            profile = Some(ProfileName::parse(&value)?);
+            continue;
+        }
+        let this_disposition = if arg == OsStr::new("--once") {
+            Some(ApprovalDisposition::Once)
+        } else if arg == OsStr::new("--remember") {
+            Some(ApprovalDisposition::Remember)
+        } else if arg == OsStr::new("--deny") {
+            Some(ApprovalDisposition::Deny)
+        } else {
+            None
+        };
+        if let Some(this_disposition) = this_disposition {
+            if disposition.is_some() {
+                return Err(UsageError::DispositionGivenTwice);
+            }
+            disposition = Some(this_disposition);
+            continue;
+        }
+        return Err(UsageError::UnrecognizedArgument { found: arg });
+    }
+
+    let profile = profile.ok_or(UsageError::ProfileMissing)?;
+    let disposition = disposition.ok_or(UsageError::DispositionMissing)?;
+    Ok(ApproveInvocation::Record {
+        profile,
+        disposition,
+    })
 }
 
 /// Parse an `eltanin session <start|list|end> ...` invocation. `argv`
