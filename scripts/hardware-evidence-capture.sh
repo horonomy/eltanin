@@ -34,6 +34,7 @@ capture "kernel-cmdline.txt" cat /proc/cmdline
 capture "cgroup-mount.txt" mount | grep -i cgroup
 capture "cgroup-fstype.txt" stat -fc '%T %n' /sys/fs/cgroup/
 capture "bpftool-feature-probe.txt" bpftool feature probe
+capture "virt-detect.txt" systemd-detect-virt
 capture "lspci-nvidia.txt" bash -c "lspci -nn | grep -i nvidia"
 capture "nvidia-smi-query.txt" nvidia-smi --query-gpu=name,driver_version,pci.bus_id,uuid,memory.total,compute_cap --format=csv
 capture "nvidia-smi-full.txt" nvidia-smi
@@ -51,8 +52,38 @@ elif [[ -r /proc/config.gz ]]; then
   capture "kernel-config-relevant.txt" bash -c "zcat /proc/config.gz | grep -E 'CONFIG_CGROUP_BPF|CONFIG_BPF_SYSCALL'"
 fi
 
+# --- Evidence-class stamp -------------------------------------------------
+#
+# Every bundle this script writes carries a machine-readable classification
+# of what the bundle can and cannot be used to prove, so a Stage-1 VM/
+# container preflight bundle can never later be mistaken for, or
+# misrepresented as, Stage-2 final bare-metal E3 certification evidence
+# (HORO-790's AC: "VM-only, simulator-only, container-only or
+# GPU-passthrough-only evidence does not satisfy E3"). This mirrors the
+# classification hardware-preflight-check.sh already computes.
+VIRT_TYPE="undetermined"
+if command -v systemd-detect-virt >/dev/null 2>&1; then
+  VIRT_TYPE="$(systemd-detect-virt 2>/dev/null || true)"
+  [[ -z "$VIRT_TYPE" ]] && VIRT_TYPE="none"
+fi
+if [[ "$VIRT_TYPE" == "none" ]]; then
+  EVIDENCE_CLASS="E3_PASS_ELIGIBLE"
+else
+  EVIDENCE_CLASS="E3_PREFLIGHT_ONLY"
+fi
+cat >"$OUT_DIR/evidence-class.json" <<EOF
+{
+  "evidence_class": "$EVIDENCE_CLASS",
+  "virt_type": "$VIRT_TYPE",
+  "captured_at": "$(date -u +%FT%TZ)",
+  "hostname": "$(hostname)",
+  "note": "E3_PASS_ELIGIBLE means this host was mechanically detected as non-virtualized (systemd-detect-virt: none) at capture time -- it is a precondition for, not proof of, a final HORO-790 E3_PASS verdict. E3_PREFLIGHT_ONLY means this bundle must never be cited as HORO-790 E3 bare-metal certification evidence, regardless of what other checks in it pass."
+}
+EOF
+
 echo
 echo "Evidence directory populated: $OUT_DIR"
+echo "evidence-class.json: $EVIDENCE_CLASS (virt_type=$VIRT_TYPE)"
 echo "Next: copy/redirect each hardware-gated test run's own stdout/stderr"
 echo "(e.g. 'cargo test ... -- --ignored --nocapture > $OUT_DIR/<test-name>.log 2>&1')"
 echo "into this same directory so it holds the complete bundle for one run,"

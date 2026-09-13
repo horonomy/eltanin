@@ -104,7 +104,12 @@ runbook — GPU/kernel/driver requirements, exact commands, and
 automated pre-flight/evidence-capture scripts — is prepared in
 [`docs/development/hardware-validation-runbook.md`](../../development/hardware-validation-runbook.md);
 that document is preparation only and does not itself contain any
-hardware evidence.
+hardware evidence. That runbook's "Two-stage strategy" section splits
+this into Stage-1 preflight (free, VM/container-eligible, always
+labeled `E3_PREFLIGHT_ONLY`) and Stage-2 bare-metal certification (the
+only part that requires paid/scarce physical time) — Stage-1 preflight
+work does not require bare-metal and is not blocked on hardware
+provisioning.
 
 - **Platform**: bare-metal Linux (not a VM — cgroup v2 device-BPF
   enforcement and NVML GPU access are the things under test, and both
