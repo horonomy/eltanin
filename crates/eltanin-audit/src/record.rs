@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use eltanin_backend::contract::BackendError;
 use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
+use eltanin_core::delegation::ExceededBound;
 use eltanin_core::envelope::DOMAIN_SCHEMA_VERSION;
 use eltanin_core::identity::{Evidence, ExecutionContext};
 use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime, RevocationOutcome};
@@ -260,6 +261,20 @@ pub enum RecordedSessionAdmissionError {
     ExpiryOverflow,
 }
 
+/// The delegation-specific provenance of one `GrantedByDelegation`
+/// outcome — deliberately minimal (not the full `DelegationGrant`,
+/// which is not `Deserialize`/audit-safe by design, see
+/// `eltanin_core::delegation`'s module docs): just enough for
+/// `crate::explain` to reconstruct the delegation chain from a sequence
+/// of audit records, never enough to reconstruct a usable grant from the
+/// log alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedDelegation {
+    pub parent_lease: LeaseId,
+    pub depth: u8,
+    pub holder_pid: u32,
+}
+
 /// Full internal fidelity of what happened — the record-schema
 /// counterpart of `eltanin_agent::authz::event::AuthorizationOutcome`,
 /// with every non-`Deserialize`-safe field replaced by its `Recorded*`
@@ -335,6 +350,30 @@ pub enum RecordedOutcome {
     ApprovalInternalError {
         reason: String,
     },
+    /// A `RequestLease` was admitted via the delegation gate (F-M2-003,
+    /// HORO-793) — the approval gate had refused it, and a matching
+    /// `DelegationGrant` admitted it instead. Never the plain `Granted`
+    /// variant: keeping this separate means an audit query can tell a
+    /// delegated grant from an ordinary one without inspecting anything
+    /// else in the record.
+    GrantedByDelegation {
+        lease_id: LeaseId,
+        expires_at: MonotonicTime,
+        delegation: RecordedDelegation,
+    },
+    /// The delegation gate itself found no admitting grant — reported
+    /// only for the rich audit trail; the client-facing wire response is
+    /// identical to an ordinary `ApprovalRequired` (see
+    /// `eltanin_agent::authz`'s module docs on this).
+    DelegationRefused {
+        exceeded: BTreeSet<ExceededBound>,
+    },
+    /// The delegation gate could not resolve at least one dimension from
+    /// available evidence — fails closed to the same client-facing
+    /// `ApprovalRequired` as `DelegationRefused`.
+    DelegationIndeterminate {
+        reason: String,
+    },
 }
 
 /// One audit record: what was asked, who asked (as observed), what
@@ -371,7 +410,11 @@ impl AuditRecord {
     #[must_use]
     pub fn lease_id(&self) -> Option<&LeaseId> {
         match (&self.outcome, &self.requested) {
-            (RecordedOutcome::Granted { lease_id, .. }, _)
+            (
+                RecordedOutcome::Granted { lease_id, .. }
+                | RecordedOutcome::GrantedByDelegation { lease_id, .. },
+                _,
+            )
             | (_, RecordedRequest::ReleaseLease { lease_id }) => Some(lease_id),
             _ => None,
         }

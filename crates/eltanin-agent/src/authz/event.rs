@@ -18,6 +18,7 @@
 //! [`crate::authz`] to get it.
 
 use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
+use eltanin_core::delegation::ExceededBound;
 use eltanin_core::lease::{LeaseError, LeaseId, LeaseValidity, MonotonicTime, RevocationOutcome};
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::PolicyDecision;
@@ -137,6 +138,28 @@ pub enum AuthorizationOutcome {
     /// computing a `Once` expiry, or a durable-store persist failure —
     /// see `crate::authz::AuthorizationHandler::handle_approve`).
     ApprovalInternalError {
+        reason: String,
+    },
+    /// The delegation gate (F-M2-003, HORO-793) admitted a `RequestLease`
+    /// the approval gate had refused. Reported *after* a real lease was
+    /// issued/enforced — never a claim of authority the backend has not
+    /// actually granted.
+    GrantedByDelegation {
+        lease_id: LeaseId,
+        expires_at: MonotonicTime,
+        parent_lease: LeaseId,
+        depth: u8,
+        holder_pid: u32,
+    },
+    /// The delegation gate found no admitting grant for this
+    /// `RequestLease`. Client-facing wire response is identical to
+    /// `ApprovalRequired` — see `crate::authz`'s module docs.
+    DelegationRefused {
+        exceeded: std::collections::BTreeSet<ExceededBound>,
+    },
+    /// The delegation gate could not resolve at least one dimension from
+    /// available evidence.
+    DelegationIndeterminate {
         reason: String,
     },
 }
