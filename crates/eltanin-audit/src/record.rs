@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 
 use eltanin_backend::contract::BackendError;
+use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
 use eltanin_core::envelope::DOMAIN_SCHEMA_VERSION;
 use eltanin_core::identity::{Evidence, ExecutionContext};
 use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime, RevocationOutcome};
@@ -99,6 +100,9 @@ pub enum RecordedOperation {
     CreateSession,
     ListSessions,
     TerminateSession,
+    Approve,
+    ListApprovals,
+    ForgetApproval,
 }
 
 /// The client-asserted request parameters — a distinct trust class from
@@ -122,6 +126,15 @@ pub enum RecordedRequest {
     },
     ListSessions,
     TerminateSession,
+    Approve {
+        resource: ResourceIdentity,
+        action: Action,
+        disposition: ApprovalDisposition,
+    },
+    ListApprovals,
+    ForgetApproval {
+        id: ApprovalId,
+    },
 }
 
 /// Mirror of `eltanin_core::peer::PeerCredential` — plain data, no
@@ -302,6 +315,26 @@ pub enum RecordedOutcome {
         termination_outcome: SessionTerminationOutcome,
     },
     SessionNotFound,
+    ApprovalRequired,
+    ApprovalDenied,
+    ApprovalGateObserveFailed {
+        error: BackendError,
+    },
+    ApprovalRecorded {
+        id: ApprovalId,
+        resource: ResourceIdentity,
+        action: Action,
+        disposition: ApprovalDisposition,
+    },
+    ApprovalListed {
+        approvals: Vec<ApprovalId>,
+    },
+    ApprovalForgotten {
+        forgotten: bool,
+    },
+    ApprovalInternalError {
+        reason: String,
+    },
 }
 
 /// One audit record: what was asked, who asked (as observed), what
