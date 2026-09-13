@@ -192,6 +192,41 @@ impl WorkloadIdentity {
         IdentityComparison::Indeterminate
     }
 
+    /// Compare `self` against one entry in a (freshly re-observed)
+    /// requester's ancestry chain, for whether that ancestor **is**
+    /// `self` — i.e. `self` sits somewhere in the requester's process
+    /// tree. Same three-state semantics as [`Self::compare_process`]:
+    /// [`IdentityComparison::Same`] only when `pid` matches **and** both
+    /// start tokens are [`Evidence::Present`], equal, and neither is
+    /// [`EvidenceSource::SelfAsserted`] (HORO-793 — used by
+    /// [`crate::delegation::delegated_admission`]'s ancestry-linkage
+    /// check, which corroborates an already-agent-minted grant and must
+    /// never itself be a source of ALLOW; see that module's docs).
+    #[must_use]
+    pub fn compare_ancestor(&self, ancestor: &ProcessAncestor) -> IdentityComparison {
+        match (&self.process_start, &ancestor.start) {
+            (
+                Evidence::Present {
+                    value: a,
+                    source: source_a,
+                },
+                Evidence::Present {
+                    value: b,
+                    source: source_b,
+                },
+            ) if *source_a != EvidenceSource::SelfAsserted
+                && *source_b != EvidenceSource::SelfAsserted =>
+            {
+                if self.pid == ancestor.pid && a == b {
+                    IdentityComparison::Same
+                } else {
+                    IdentityComparison::Different
+                }
+            }
+            _ => IdentityComparison::Indeterminate,
+        }
+    }
+
     fn compare_evidence<T: PartialEq>(
         a: &Evidence<T>,
         b: &Evidence<T>,
