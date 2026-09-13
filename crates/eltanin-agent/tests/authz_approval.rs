@@ -16,9 +16,13 @@ use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::handler::RequestHandler;
 use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::resource::{Action, Capability};
-use eltanin_protocol::request::{ApproveRequest, ClientRequest, ForgetApprovalRequest, LeaseRequest};
+use eltanin_protocol::request::{
+    ApproveRequest, ClientRequest, ForgetApprovalRequest, LeaseRequest,
+};
 use eltanin_protocol::response::{AgentResponse, DenialReason};
-use support::authz::{allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer};
+use support::authz::{
+    allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock, TestPeer,
+};
 use support::temp_approval_store_path;
 
 fn handler_not_required(
@@ -77,7 +81,10 @@ fn approve_request(disposition: eltanin_core::approval::ApprovalDisposition) -> 
 #[test]
 fn default_config_has_approval_not_required_and_no_store_path() {
     let config = AuthorizationConfig::new(Duration::from_secs(60)).unwrap();
-    assert_eq!(config.approval_requirement(), ApprovalRequirement::NotRequired);
+    assert_eq!(
+        config.approval_requirement(),
+        ApprovalRequirement::NotRequired
+    );
     assert_eq!(config.approval_store_path(), None);
 }
 

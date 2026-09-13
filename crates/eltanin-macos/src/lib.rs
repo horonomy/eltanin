@@ -196,7 +196,7 @@ mod imp {
         };
 
         let mut hasher = Sha256::new();
-        let mut buf = [0u8; 64 * 1024];
+        let mut buf = [0u8; 8 * 1024];
         let mut total: u64 = 0;
         loop {
             let read = match file.read(&mut buf) {

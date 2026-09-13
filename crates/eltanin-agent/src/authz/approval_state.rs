@@ -19,7 +19,9 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use eltanin_core::approval::{Approval, ApprovalDisposition, ApprovalError, ApprovalId, ApprovalSet};
+use eltanin_core::approval::{
+    Approval, ApprovalDisposition, ApprovalError, ApprovalId, ApprovalSet,
+};
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::MonotonicTime;
 use eltanin_core::resource::{Action, ResourceIdentity};
@@ -115,10 +117,11 @@ impl ApprovalState {
         ensure_directory_is_safe(parent)?;
 
         let document = self.durable.to_document();
-        let json = serde_json::to_string_pretty(&Versioned::current(document))
-            .map_err(|e| ApprovalStoreError::Json {
+        let json = serde_json::to_string_pretty(&Versioned::current(document)).map_err(|e| {
+            ApprovalStoreError::Json {
                 reason: e.to_string(),
-            })?;
+            }
+        })?;
         fs::write(path, json).map_err(|e| ApprovalStoreError::Io {
             reason: format!("write {}: {e}", path.display()),
         })?;
@@ -142,7 +145,8 @@ impl ApprovalState {
     /// Never persisted.
     pub(crate) fn insert_once(&mut self, approval: Approval, expires_at: MonotonicTime) {
         debug_assert!(matches!(approval.disposition(), ApprovalDisposition::Once));
-        self.once.insert(approval.id().clone(), (approval, expires_at));
+        self.once
+            .insert(approval.id().clone(), (approval, expires_at));
     }
 
     /// Drop every `Once` approval whose TTL has elapsed. Called at the
@@ -248,7 +252,10 @@ fn ensure_file_metadata_is_safe(
     if meta.uid() != own_euid {
         return Err(ApprovalStoreError::Unsafe {
             path: path.to_path_buf(),
-            reason: format!("owned by uid {}, not this process's uid {own_euid}", meta.uid()),
+            reason: format!(
+                "owned by uid {}, not this process's uid {own_euid}",
+                meta.uid()
+            ),
         });
     }
     Ok(())

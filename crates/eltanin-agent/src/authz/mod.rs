@@ -531,7 +531,13 @@ impl AuthorizationHandler {
         };
 
         for approval in approvals.candidates(&request.resource, request.action) {
-            let verdict = recall(approval, observed, &capabilities, &current_policy, &compute_request);
+            let verdict = recall(
+                approval,
+                observed,
+                &capabilities,
+                &current_policy,
+                &compute_request,
+            );
             if let RecallVerdict::Matched { id } = verdict {
                 return match approval.disposition() {
                     ApprovalDisposition::Deny => ApprovalAdmission::Denied,

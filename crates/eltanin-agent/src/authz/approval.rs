@@ -49,31 +49,25 @@ pub(crate) fn binding_from_observed(
     policy: PolicyProvenance,
 ) -> Option<ApprovalBinding> {
     let owner_uid = match &observed.workload.uid {
-        Evidence::Present {
-            value,
-            source,
-        } if *source != EvidenceSource::SelfAsserted => *value,
+        Evidence::Present { value, source } if *source != EvidenceSource::SelfAsserted => *value,
         _ => return None,
     };
     let launcher_path = match &observed.workload.executable_path {
-        Evidence::Present {
-            value,
-            source,
-        } if *source != EvidenceSource::SelfAsserted => value.clone(),
+        Evidence::Present { value, source } if *source != EvidenceSource::SelfAsserted => {
+            value.clone()
+        }
         _ => return None,
     };
     let launcher_digest = match &observed.workload.executable_hash {
-        Evidence::Present {
-            value,
-            source,
-        } if *source != EvidenceSource::SelfAsserted => Some(ExecutableDigest::new(value.clone())),
+        Evidence::Present { value, source } if *source != EvidenceSource::SelfAsserted => {
+            Some(ExecutableDigest::new(value.clone()))
+        }
         _ => None,
     };
     let cgroup_path = match &observed.cgroup_path {
-        Evidence::Present {
-            value,
-            source,
-        } if *source != EvidenceSource::SelfAsserted => Some(value.clone()),
+        Evidence::Present { value, source } if *source != EvidenceSource::SelfAsserted => {
+            Some(value.clone())
+        }
         _ => None,
     };
 

@@ -76,7 +76,9 @@ pub enum UsageError {
     NotSessionSubcommand { found: Option<OsString> },
     #[error("expected the first argument to be \"approve\", got {found:?}")]
     NotApproveSubcommand { found: Option<OsString> },
-    #[error("expected the first argument to be \"run\", \"session\", or \"approve\", got {found:?}")]
+    #[error(
+        "expected the first argument to be \"run\", \"session\", or \"approve\", got {found:?}"
+    )]
     UnknownSubcommand { found: Option<OsString> },
     #[error(
         "expected \"approve\" to be followed by \"list\", \"forget\", or --profile, got {found:?}"

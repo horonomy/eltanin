@@ -142,7 +142,11 @@ impl ApprovalId {
         hasher.update(b"\0");
         hasher.update(launcher_path.as_bytes());
         hasher.update(b"\0");
-        hasher.update(launcher_digest.map_or("", ExecutableDigest::as_str).as_bytes());
+        hasher.update(
+            launcher_digest
+                .map_or("", ExecutableDigest::as_str)
+                .as_bytes(),
+        );
         hasher.update(b"\0");
         hasher.update(cgroup_path.unwrap_or("").as_bytes());
         hasher.update(b"\0");
@@ -152,7 +156,7 @@ impl ApprovalId {
         hasher.update(b"\0");
         hasher.update(resource.local_id.as_bytes());
         hasher.update(b"\0");
-        hasher.update([matches!(action, Action::Compute) as u8]);
+        hasher.update([u8::from(matches!(action, Action::Compute))]);
         Self(format!("{:x}", hasher.finalize()))
     }
 }
@@ -268,15 +272,21 @@ pub enum ChangedDimension {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "verdict")]
 pub enum RecallVerdict {
-    Matched { id: ApprovalId },
-    NotMatched { changed: BTreeSet<ChangedDimension> },
+    Matched {
+        id: ApprovalId,
+    },
+    NotMatched {
+        changed: BTreeSet<ChangedDimension>,
+    },
     /// The evidence needed to decide at least one dimension could not be
     /// confirmed (missing/unsupported/self-asserted where the binding
     /// expected a real value). Callers must treat this identically to
     /// [`RecallVerdict::NotMatched`] — never as `Matched` — fail-closed,
     /// same discipline as
     /// [`crate::session::MembershipVerdict::Indeterminate`].
-    Indeterminate { reason: String },
+    Indeterminate {
+        reason: String,
+    },
 }
 
 /// Determine whether `observed`/`observed_capabilities`/`current_policy`
@@ -702,7 +712,13 @@ mod tests {
     #[test]
     fn recall_matches_unchanged_context() {
         let approval = approval();
-        let verdict = recall(&approval, &context(), &capabilities(), &policy(), &request());
+        let verdict = recall(
+            &approval,
+            &context(),
+            &capabilities(),
+            &policy(),
+            &request(),
+        );
         assert_eq!(
             verdict,
             RecallVerdict::Matched {
@@ -792,7 +808,13 @@ mod tests {
         let approval = approval();
         let mut other_policy = policy();
         other_policy.policy_revision = 2;
-        let verdict = recall(&approval, &context(), &capabilities(), &other_policy, &request());
+        let verdict = recall(
+            &approval,
+            &context(),
+            &capabilities(),
+            &other_policy,
+            &request(),
+        );
         assert_eq!(
             verdict,
             RecallVerdict::NotMatched {
@@ -822,7 +844,12 @@ mod tests {
     fn recall_skips_digest_dimension_when_binding_has_none() {
         let mut binding = binding();
         binding.launcher_digest = None;
-        let approval = Approval::new(binding, resource(), Action::Compute, ApprovalDisposition::Remember);
+        let approval = Approval::new(
+            binding,
+            resource(),
+            Action::Compute,
+            ApprovalDisposition::Remember,
+        );
         let mut ctx = context();
         ctx.workload.executable_hash = present("sha256:whatever-different".to_string());
         let verdict = recall(&approval, &ctx, &capabilities(), &policy(), &request());
@@ -837,7 +864,9 @@ mod tests {
             entries: vec![ApprovalEntry {
                 owner_uid: entry_binding.owner_uid,
                 launcher_path: entry_binding.launcher_path,
-                launcher_digest: entry_binding.launcher_digest.map(|d| d.as_str().to_string()),
+                launcher_digest: entry_binding
+                    .launcher_digest
+                    .map(|d| d.as_str().to_string()),
                 cgroup_path: entry_binding.cgroup_path,
                 capabilities: entry_binding.capabilities,
                 policy_id: entry_binding.policy.policy_id.as_str().to_string(),

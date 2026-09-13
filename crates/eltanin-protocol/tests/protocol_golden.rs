@@ -303,7 +303,10 @@ fn response_approval_recorded_matches_fixture() {
             },
         },
     });
-    assert_golden(&value, include_str!("fixtures/response_approval_recorded.json"));
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_approval_recorded.json"),
+    );
 }
 
 #[test]
