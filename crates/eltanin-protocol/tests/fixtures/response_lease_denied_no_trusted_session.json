@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "payload": {
+    "request_id": 1,
+    "body": {
+      "result": "lease_denied",
+      "reason": "no_trusted_session"
+    }
+  }
+}

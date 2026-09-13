@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "payload": {
+    "request_id": 5,
+    "body": {
+      "op": "list_sessions"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "payload": {
+    "request_id": 4,
+    "body": {
+      "op": "create_session",
+      "resources": [
+        {
+          "vendor": "fake",
+          "kind": "gpu",
+          "local_id": "gpu-0"
+        }
+      ],
+      "ttl": {
+        "secs": 1800,
+        "nanos": 0
+      }
+    }
+  }
+}

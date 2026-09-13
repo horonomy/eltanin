@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "payload": {
+    "request_id": 6,
+    "body": {
+      "op": "terminate_session"
+    }
+  }
+}
