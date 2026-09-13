@@ -399,6 +399,22 @@ enum DelegationAdmission {
     },
     Refused {
         exceeded: BTreeSet<eltanin_core::delegation::ExceededBound>,
+        /// Bug fix (F-M2-004, HORO-794): `exceeded` above is a union
+        /// across every stored grant, unfiltered by
+        /// [`delegation_state::DelegationState::candidates`] — with more
+        /// than one grant in the store, `Resource`/`Action` in that
+        /// union can come from a grant totally unrelated to this
+        /// request (a lookup miss on an unfiltered candidate list, not a
+        /// scope-expansion attempt). `linked_exceeded` is the same union
+        /// restricted to grants whose own `exceeded` set contains
+        /// neither `ExceededBound::AncestryLinkage` nor
+        /// `ExceededBound::HolderLiveness` — i.e. grants a fresh
+        /// ancestry/liveness check actually confirmed belong to this
+        /// requester. This is what the risk-gate glue consumes for
+        /// `RiskSignal::DelegationScopeExpanded`; the existing
+        /// `exceeded` union's meaning and consumers are unchanged.
+        #[allow(dead_code)] // consumed by the risk-gate glue, next commit
+        linked_exceeded: BTreeSet<eltanin_core::delegation::ExceededBound>,
     },
     Indeterminate {
         reason: String,
@@ -671,6 +687,7 @@ impl AuthorizationHandler {
         };
 
         let mut union_exceeded = BTreeSet::new();
+        let mut linked_exceeded = BTreeSet::new();
         let mut indeterminate_reason: Option<String> = None;
         for grant in delegations.candidates() {
             let observed_holder = session::collect_workload_identity(grant.holder().pid);
@@ -696,6 +713,16 @@ impl AuthorizationHandler {
                     };
                 }
                 eltanin_core::delegation::DelegationVerdict::NotAdmitted { exceeded } => {
+                    // Bug fix (HORO-794): only a grant that passed
+                    // ancestry linkage and holder liveness is actually
+                    // about this requester — see `linked_exceeded`'s own
+                    // doc comment on `DelegationAdmission::Refused`.
+                    if !exceeded.contains(&eltanin_core::delegation::ExceededBound::AncestryLinkage)
+                        && !exceeded
+                            .contains(&eltanin_core::delegation::ExceededBound::HolderLiveness)
+                    {
+                        linked_exceeded.extend(exceeded.iter().copied());
+                    }
                     union_exceeded.extend(exceeded);
                 }
                 eltanin_core::delegation::DelegationVerdict::Indeterminate { reason } => {
@@ -709,6 +736,7 @@ impl AuthorizationHandler {
         }
         DelegationAdmission::Refused {
             exceeded: union_exceeded,
+            linked_exceeded,
         }
     }
 
@@ -774,7 +802,10 @@ impl AuthorizationHandler {
                         depth,
                         holder_pid,
                     })),
-                    DelegationAdmission::Refused { exceeded } => Err((
+                    DelegationAdmission::Refused {
+                        exceeded,
+                        linked_exceeded: _,
+                    } => Err((
                         AuthorizationOutcome::DelegationRefused { exceeded },
                         AgentResponse::LeaseDenied {
                             reason: DenialReason::ApprovalRequired,
