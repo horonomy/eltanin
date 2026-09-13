@@ -67,8 +67,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::approval::RecallVerdict;
-use crate::delegation::DelegationVerdict;
+use crate::approval::{ChangedDimension, RecallVerdict};
+use crate::delegation::{DelegationVerdict, ExceededBound};
+use crate::identity::{Evidence, ExecutionContext};
 use crate::session::MembershipVerdict;
 
 /// One named trust-change signal a refusal can be classified under.
@@ -259,3 +260,160 @@ pub struct GateVerdicts<'a> {
     pub delegation: Option<&'a DelegationVerdict>,
 }
 
+/// The outcome of classifying an already-produced refusal. All three
+/// variants are still refusals — there is deliberately no
+/// "admit"/"proceed" variant at all, so this layer can never loosen a
+/// gate by construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "verdict")]
+pub enum StepUpVerdict {
+    /// Every fired signal is [`SignalDisposition::Informational`] (or no
+    /// signal fired at all) — the caller's pre-existing plain refusal
+    /// stands unchanged; `signals` is recorded for audit only.
+    NoStepUp { signals: BTreeSet<RiskSignal> },
+    /// At least one fired signal is configured [`SignalDisposition::StepUp`]
+    /// and none is [`SignalDisposition::Deny`] — the caller should
+    /// report a step-up-specific denial naming `signals`.
+    StepUpRequired { signals: BTreeSet<RiskSignal> },
+    /// At least one fired signal is configured [`SignalDisposition::Deny`]
+    /// — deny-overrides, order-independent, mirroring
+    /// [`crate::policy::PolicySet::evaluate`]'s own precedence
+    /// discipline.
+    RiskDenied { signals: BTreeSet<RiskSignal> },
+}
+
+/// Classify an already-produced refusal (`verdicts`) into a
+/// [`StepUpVerdict`], per `policy`. `observed` is the same
+/// [`ExecutionContext`] the refusing gate(s) already evaluated against
+/// — used here only for [`RiskSignal::UntrustedExecutionPath`]'s
+/// string-prefix comparison and [`RiskSignal::PrivilegeEscalationToRoot`]'s
+/// observed-uid check, never re-collected.
+///
+/// `assess` is **not** a fourth independent security check: unlike
+/// `membership`/`recall`/`delegated_admission`, it reads no fresh
+/// evidence and confers no authority — it only classifies verdicts
+/// those three already produced. See the module docs for the full
+/// argument.
+///
+/// Precedence, deny-overrides, order-independent (mirrors
+/// [`crate::policy::PolicySet::evaluate`]'s own precedence discipline):
+/// 1. any fired signal maps to [`SignalDisposition::Deny`] →
+///    [`StepUpVerdict::RiskDenied`].
+/// 2. else any fired signal maps to [`SignalDisposition::StepUp`] →
+///    [`StepUpVerdict::StepUpRequired`].
+/// 3. else → [`StepUpVerdict::NoStepUp`].
+#[must_use]
+pub fn assess(
+    verdicts: &GateVerdicts<'_>,
+    observed: &ExecutionContext,
+    policy: &StepUpPolicy,
+) -> StepUpVerdict {
+    let mut signals = BTreeSet::new();
+
+    let no_candidates = verdicts.recall.is_empty();
+    let recall_changed = |dimension: ChangedDimension| {
+        verdicts.recall.iter().any(|verdict| {
+            matches!(verdict, RecallVerdict::NotMatched { changed } if changed.contains(&dimension))
+        })
+    };
+
+    if no_candidates || recall_changed(ChangedDimension::LauncherPath) {
+        signals.insert(RiskSignal::UnknownLauncher);
+    }
+
+    if let Evidence::Present { value, .. } = &observed.workload.executable_path {
+        if policy
+            .untrusted_path_prefixes
+            .iter()
+            .any(|prefix| value.starts_with(prefix.as_str()))
+        {
+            signals.insert(RiskSignal::UntrustedExecutionPath);
+        }
+    }
+
+    if recall_changed(ChangedDimension::LauncherDigest) {
+        signals.insert(RiskSignal::LauncherIdentityChanged);
+    }
+
+    let delegation_exceeds = |bound: ExceededBound| {
+        matches!(
+            verdicts.delegation,
+            Some(DelegationVerdict::NotAdmitted { exceeded }) if exceeded.contains(&bound)
+        )
+    };
+
+    let privilege_transition =
+        recall_changed(ChangedDimension::OwnerUid) || delegation_exceeds(ExceededBound::OwnerUid);
+    if privilege_transition {
+        signals.insert(RiskSignal::PrivilegeTransition);
+    }
+
+    let observed_uid_is_root =
+        matches!(&observed.workload.uid, Evidence::Present { value, .. } if *value == 0);
+    if privilege_transition && observed_uid_is_root {
+        signals.insert(RiskSignal::PrivilegeEscalationToRoot);
+    }
+
+    if matches!(
+        verdicts.membership,
+        MembershipVerdict::NotMember | MembershipVerdict::Indeterminate { .. }
+    ) {
+        signals.insert(RiskSignal::DetachedExecution);
+    }
+
+    if let Some(DelegationVerdict::NotAdmitted { exceeded }) = verdicts.delegation {
+        let scope_expanded = exceeded.iter().any(|bound| {
+            matches!(
+                bound,
+                ExceededBound::Resource
+                    | ExceededBound::Action
+                    | ExceededBound::Depth
+                    | ExceededBound::Duration
+            )
+        });
+        if scope_expanded {
+            signals.insert(RiskSignal::DelegationScopeExpanded);
+        }
+    }
+
+    if recall_changed(ChangedDimension::ResourceCapabilityState)
+        || recall_changed(ChangedDimension::PolicyRevision)
+    {
+        signals.insert(RiskSignal::SecurityPostureChanged);
+    }
+
+    if recall_changed(ChangedDimension::CgroupPath)
+        || delegation_exceeds(ExceededBound::CgroupPath)
+        || delegation_exceeds(ExceededBound::SessionKey)
+    {
+        signals.insert(RiskSignal::ContextBoundaryChanged);
+    }
+
+    if delegation_exceeds(ExceededBound::TrustTransition) {
+        signals.insert(RiskSignal::TrustTransition);
+    }
+
+    let any_indeterminate = matches!(verdicts.membership, MembershipVerdict::Indeterminate { .. })
+        || verdicts
+            .recall
+            .iter()
+            .any(|verdict| matches!(verdict, RecallVerdict::Indeterminate { .. }))
+        || matches!(verdicts.delegation, Some(DelegationVerdict::Indeterminate { .. }));
+    if any_indeterminate {
+        signals.insert(RiskSignal::EvidenceIndeterminate);
+    }
+
+    if signals
+        .iter()
+        .any(|signal| policy.disposition(*signal) == SignalDisposition::Deny)
+    {
+        return StepUpVerdict::RiskDenied { signals };
+    }
+    if signals
+        .iter()
+        .any(|signal| policy.disposition(*signal) == SignalDisposition::StepUp)
+    {
+        return StepUpVerdict::StepUpRequired { signals };
+    }
+    StepUpVerdict::NoStepUp { signals }
+}
