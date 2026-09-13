@@ -32,5 +32,6 @@ pub mod failure;
 pub mod launch;
 pub mod profile;
 pub mod sequence;
+pub mod session;
 pub mod signals;
 pub mod supervise;

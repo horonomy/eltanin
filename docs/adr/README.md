@@ -15,6 +15,7 @@ links back.
 | [0006](0006-cross-accelerator-capability-and-memory-model.md) | Cross-accelerator capability support states and memory model | Accepted |
 | [0007](0007-apple-silicon-metal-backend.md) | Apple Silicon Metal backend — crate boundary, binding choice, capability/memory mapping | Accepted |
 | [0008](0008-macos-platform-adapter-and-local-peer-identity.md) | macOS platform adapter — crate boundary, peer-credential binding, and honest limits | Accepted |
+| [0009](0009-trusted-compute-session.md) | Trusted Compute Session — POSIX-session-anchored, agent-owned admission gate | Accepted |
 
 See [`docs/product/NORTH_STAR.md`](../product/NORTH_STAR.md) for the
 locked invariants these decisions implement, and

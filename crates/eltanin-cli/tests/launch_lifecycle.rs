@@ -56,7 +56,7 @@ fn temp_dir(tag: &str) -> PathBuf {
 fn profile_dir_with(resource: &ResourceIdentity, action: Action) -> PathBuf {
     let dir = temp_dir("profiles");
     let document = serde_json::json!({
-        "version": 1,
+        "version": eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
         "payload": { "resource": resource, "action": action },
     });
     std::fs::write(dir.join("test.json"), document.to_string()).unwrap();
@@ -310,6 +310,9 @@ fn a_renewal_acquires_before_releasing_the_old_lease() {
             ClientRequest::RequestLease(_) => "request",
             ClientRequest::ReleaseLease(_) => "release",
             ClientRequest::AgentStatus {} => "status",
+            ClientRequest::CreateSession(_) => "create_session",
+            ClientRequest::ListSessions {} => "list_sessions",
+            ClientRequest::TerminateSession {} => "terminate_session",
         })
         .collect();
     assert_eq!(

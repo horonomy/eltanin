@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "payload": {
+    "request_id": 4,
+    "body": {
+      "result": "session_established",
+      "session": {
+        "session_id": {
+          "issuer": "issuer-a",
+          "sequence": 0
+        },
+        "remaining": {
+          "secs": 1800,
+          "nanos": 0
+        },
+        "resources": [
+          {
+            "vendor": "fake",
+            "kind": "gpu",
+            "local_id": "gpu-0"
+          }
+        ]
+      }
+    }
+  }
+}

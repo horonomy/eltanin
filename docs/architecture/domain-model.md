@@ -739,6 +739,68 @@ device-level protection claim. The E3 (Linux/NVIDIA, F-M1-007) evidence
 class remains the sole, mandatory basis for any device-level protection
 claim this project makes.
 
+## Trusted Compute Session (F-M2-001, HORO-791) — `eltanin_core::session`, `eltanin-agent::authz::session`/`session_state`
+
+MVP 2.0's first Feature. A new, agent-owned authorization-security
+context layered on top of the Compute Lease model above — see
+[ADR 0009](../adr/0009-trusted-compute-session.md) for the full design
+record and `docs/product/SECURITY_MODEL.md`'s dedicated section for the
+threat-model trade-off.
+
+`eltanin_core::session` types: `SessionId`/`SessionKey` (correlation and
+opaque platform-collected values, no entropy, not capabilities);
+`LocalSessionAnchor` (a `SessionKey` plus the `WorkloadIdentity` of the
+session's leader process at establishment); `SessionScope` (a
+structurally non-empty `BTreeSet<ResourceIdentity>`); `IntentProof`/
+`SessionAssurance` (one variant each today — `LocalPeerPresence`/
+`LocalKernelSession` — extensible seams for TPM and cgroup-scoped
+membership respectively, neither implemented here); `TrustedSession`
+(`Serialize` only, mirroring `ComputeLease`'s no-`Deserialize`
+discipline exactly); `SessionAuthority` (issues/terminates/validates,
+mirroring `LeaseIssuer`'s shape).
+
+`membership(session, peer_key, observed_leader)` is the one
+security-critical entry point: a single combined check of evidence
+freshness, session-key equality, and leader-liveness
+(`WorkloadIdentity::compare_process`) — never split into a lookup step
+plus a separate liveness check (see the module's own docs for why
+that split would reopen the exact bug this function exists to close).
+
+Platform adapters: `eltanin_linux::collect_session_key` reads
+`/proc/<pid>/stat` field 6 (session id), reusing the existing
+`parse_stat` helper; `eltanin_macos::collect_session_key` uses
+`nix::unistd::getsid` (measured unrestricted by session/ownership on
+this campaign's Apple Silicon host — see ADR 0009). Both populate
+`ExecutionContext.session_origin` with the canonical string form,
+tagged `KernelObserved` — still deliberately unmatchable by
+`eltanin_core::policy::Condition` (a per-boot integer is not a value a
+static policy document can usefully pin).
+
+`eltanin-agent::authz::session`/`session_state` (both under `authz/`,
+covered by that module's existing architecture-guard exemption):
+`SessionState` mirrors `state::LeaseState`'s shape — two indices
+(`SessionKey -> SessionId`, `SessionId -> BTreeSet<LeaseId>`) plus lazy
+reaping on every session-touching operation, never a background sweep
+thread. `AuthorizationConfig::session_requirement`
+(`SessionRequirement::{Required, NotRequired}`, defaulting to
+`NotRequired`) is agent deployment config, not a new `Condition` —
+`PolicySet::evaluate` is untouched. When `Required`, `handle_request_lease`
+gates on session membership *before* policy is consulted, denying with
+the new `DenialReason::NoTrustedSession` — reported pre-policy, exactly
+like the existing non-`authorizable()`-peer gate.
+
+`eltanin-protocol` additions: `ClientRequest::CreateSession`/
+`ListSessions {}`/`TerminateSession {}`; `AgentResponse::SessionEstablished`/
+`SessionList`/`SessionTerminated`; `SessionView` (the client-facing,
+non-replayable projection of `TrustedSession`, mirroring `LeaseView`).
+`DOMAIN_SCHEMA_VERSION` bumps from 1 to 2 for these additive, internally
+tagged enum variants (see `envelope.rs`'s own bump criterion).
+
+`eltanin-cli` additions: `eltanin session start --profile <name>
+[--profile <name>...] --ttl <duration>`, `eltanin session list`,
+`eltanin session end` — new top-level subcommands, dispatched
+alongside (never modifying) `eltanin run`'s existing argument grammar.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`

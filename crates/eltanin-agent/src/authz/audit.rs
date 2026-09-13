@@ -27,20 +27,26 @@ use eltanin_audit::record::{
     AuditClock, RecordedDecisionReason, RecordedLeaseError, RecordedLeaseValidity,
     RecordedOperation, RecordedOutcome, RecordedPeer, RecordedPeerConsistency,
     RecordedPeerCredential, RecordedPolicyDecision, RecordedPolicyProvenance, RecordedRequest,
+    RecordedSessionAdmissionError,
 };
 use eltanin_audit::sink::{AuditEntry, AuditFileSink, AuditSinkError};
 use eltanin_core::lease::{IssuerInstanceId, LeaseError, LeaseValidity};
 use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_core::policy::{DecisionReason, PolicyDecision, PolicyProvenance};
+use eltanin_core::session::{EmptyScope, SessionError};
 use eltanin_protocol::request::ClientRequest;
 
 use super::event::{AuthorizationEvent, AuthorizationOutcome, EventSink, Operation};
+use super::session::SessionAdmissionError;
 
 fn recorded_operation(operation: Operation) -> RecordedOperation {
     match operation {
         Operation::RequestLease => RecordedOperation::RequestLease,
         Operation::ReleaseLease => RecordedOperation::ReleaseLease,
         Operation::AgentStatus => RecordedOperation::AgentStatus,
+        Operation::CreateSession => RecordedOperation::CreateSession,
+        Operation::ListSessions => RecordedOperation::ListSessions,
+        Operation::TerminateSession => RecordedOperation::TerminateSession,
     }
 }
 
@@ -54,6 +60,27 @@ fn recorded_request(request: &ClientRequest) -> RecordedRequest {
             lease_id: r.lease_id.clone(),
         },
         ClientRequest::AgentStatus {} => RecordedRequest::AgentStatus,
+        ClientRequest::CreateSession(r) => RecordedRequest::CreateSession {
+            resources: r.resources.clone(),
+            ttl: r.ttl,
+        },
+        ClientRequest::ListSessions {} => RecordedRequest::ListSessions,
+        ClientRequest::TerminateSession {} => RecordedRequest::TerminateSession,
+    }
+}
+
+fn recorded_session_admission_error(
+    error: &SessionAdmissionError,
+) -> RecordedSessionAdmissionError {
+    match error {
+        SessionAdmissionError::EmptyScope(EmptyScope) => RecordedSessionAdmissionError::EmptyScope,
+        SessionAdmissionError::Authority(inner) => match inner.clone() {
+            SessionError::NonPositiveTtl => RecordedSessionAdmissionError::NonPositiveTtl,
+            SessionError::TtlExceedsMaximum { requested, maximum } => {
+                RecordedSessionAdmissionError::TtlExceedsMaximum { requested, maximum }
+            }
+            SessionError::ExpiryOverflow => RecordedSessionAdmissionError::ExpiryOverflow,
+        },
     }
 }
 
@@ -191,6 +218,26 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
         },
         AuthorizationOutcome::ReleaseUnknownLease => RecordedOutcome::ReleaseUnknownLease,
         AuthorizationOutcome::StatusReported => RecordedOutcome::StatusReported,
+        AuthorizationOutcome::SessionRequired => RecordedOutcome::SessionRequired,
+        AuthorizationOutcome::SessionEstablished {
+            session_id,
+            expires_at,
+        } => RecordedOutcome::SessionEstablished {
+            session_id,
+            expires_at,
+        },
+        AuthorizationOutcome::SessionEstablishFailed { error } => {
+            RecordedOutcome::SessionEstablishFailed {
+                error: recorded_session_admission_error(&error),
+            }
+        }
+        AuthorizationOutcome::SessionListed { sessions } => {
+            RecordedOutcome::SessionListed { sessions }
+        }
+        AuthorizationOutcome::SessionTerminated { outcome } => RecordedOutcome::SessionTerminated {
+            termination_outcome: outcome,
+        },
+        AuthorizationOutcome::SessionNotFound => RecordedOutcome::SessionNotFound,
     }
 }
 

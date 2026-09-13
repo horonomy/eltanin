@@ -21,10 +21,13 @@ use eltanin_core::lease::{LeaseError, LeaseId, LeaseValidity, MonotonicTime, Rev
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::PolicyDecision;
 use eltanin_core::resource::EnforcementResult;
+use eltanin_core::session::{SessionId, SessionTerminationOutcome};
 
 use eltanin_backend::contract::BackendError;
 use eltanin_protocol::request::ClientRequest;
 use eltanin_protocol::response::AgentResponse;
+
+use super::session::SessionAdmissionError;
 
 /// Which wire operation this event reports on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +35,9 @@ pub enum Operation {
     RequestLease,
     ReleaseLease,
     AgentStatus,
+    CreateSession,
+    ListSessions,
+    TerminateSession,
 }
 
 /// What actually happened internally, at full fidelity — the richer
@@ -67,6 +73,32 @@ pub enum AuthorizationOutcome {
     },
     ReleaseUnknownLease,
     StatusReported,
+    /// The pre-policy session-admission gate refused a `RequestLease`
+    /// because [`crate::authz::AuthorizationConfig`]'s
+    /// `session_requirement` is `Required` and the peer verified as no
+    /// session's member. Reported *before* policy is ever consulted —
+    /// see `crate::authz`'s module docs on why this must never be
+    /// conflated with a `PolicyDenied` outcome.
+    SessionRequired,
+    SessionEstablished {
+        session_id: SessionId,
+        expires_at: MonotonicTime,
+    },
+    SessionEstablishFailed {
+        error: SessionAdmissionError,
+    },
+    /// The verified sessions returned to a `ListSessions` call — at most
+    /// one, today.
+    SessionListed {
+        sessions: Vec<SessionId>,
+    },
+    SessionTerminated {
+        outcome: SessionTerminationOutcome,
+    },
+    /// `TerminateSession` (or a lookup this crate performed on its
+    /// behalf) found no session the calling peer verifies as a member
+    /// of.
+    SessionNotFound,
 }
 
 /// One authorization event: what was asked, who asked (as observed —

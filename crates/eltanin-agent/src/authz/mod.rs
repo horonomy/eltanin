@@ -73,6 +73,7 @@ use std::time::Duration;
 
 use eltanin_backend::contract::ComputeBackend;
 use eltanin_core::envelope::Versioned;
+use eltanin_core::identity::{Evidence, EvidenceSource};
 use eltanin_core::lease::{
     IssuerInstanceId, LeaseError, LeaseIssuer, LeaseValidity, MonotonicTime,
 };
@@ -80,9 +81,16 @@ use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
 use eltanin_core::provenance::ProvenanceRecord;
 use eltanin_core::resource::EnforcementResult;
-use eltanin_protocol::request::{provenance_for, ClientRequest, LeaseRequest, ReleaseRequest};
+use eltanin_core::session::{
+    membership, IntentProof, LocalSessionAnchor, MembershipVerdict, SessionAssurance,
+    SessionAuthority, SessionId, SessionScope,
+};
+use eltanin_protocol::request::{
+    provenance_for, ClientRequest, CreateSessionRequest, LeaseRequest, ReleaseRequest,
+};
 use eltanin_protocol::response::{
     AgentResponse, AgentStatusView, DenialReason, ErrorCode, LeaseView, ReleaseOutcome,
+    SessionView, TerminationOutcome,
 };
 
 use crate::handler::RequestHandler;
@@ -90,9 +98,13 @@ use crate::runtime::AgentClock;
 
 pub mod audit;
 pub mod event;
+pub mod session;
+mod session_state;
 mod state;
 
 use event::{AuthorizationEvent, AuthorizationOutcome, EventSink, Operation};
+use session::{SessionAdmissionError, SessionRequirement};
+use session_state::SessionState;
 use state::LeaseState;
 
 /// A source of [`MonotonicTime`] readings. Exists so tests can advance
@@ -126,9 +138,18 @@ pub enum ConfigError {
 pub struct AuthorizationConfig {
     lease_ttl: Duration,
     max_outstanding_leases: usize,
+    session_requirement: SessionRequirement,
+    max_session_ttl: Duration,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
+
+/// Default maximum Trusted Compute Session TTL when a deployment does
+/// not opt into a narrower one via [`AuthorizationConfig::with_max_session_ttl`].
+/// A heavy developer session is meant to last "hours," per the ticket's
+/// own user outcome statement — eight hours is a generous single
+/// working day, not an attempt to guess an exact number.
+const DEFAULT_MAX_SESSION_TTL: Duration = Duration::from_hours(8);
 
 impl AuthorizationConfig {
     /// # Errors
@@ -142,12 +163,31 @@ impl AuthorizationConfig {
         Ok(Self {
             lease_ttl,
             max_outstanding_leases: DEFAULT_MAX_OUTSTANDING_LEASES,
+            // Defaults every existing/new construction to `NotRequired`
+            // — HORO-791's own blast-radius obligation: every MVP 1.0
+            // test harness and deployment that never heard of Trusted
+            // Compute Sessions must keep behaving exactly as before
+            // without being touched.
+            session_requirement: SessionRequirement::NotRequired,
+            max_session_ttl: DEFAULT_MAX_SESSION_TTL,
         })
     }
 
     #[must_use]
     pub fn with_max_outstanding_leases(mut self, max: usize) -> Self {
         self.max_outstanding_leases = max;
+        self
+    }
+
+    #[must_use]
+    pub fn with_session_requirement(mut self, requirement: SessionRequirement) -> Self {
+        self.session_requirement = requirement;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_session_ttl(mut self, max: Duration) -> Self {
+        self.max_session_ttl = max;
         self
     }
 
@@ -159,6 +199,16 @@ impl AuthorizationConfig {
     #[must_use]
     pub fn max_outstanding_leases(&self) -> usize {
         self.max_outstanding_leases
+    }
+
+    #[must_use]
+    pub fn session_requirement(&self) -> SessionRequirement {
+        self.session_requirement
+    }
+
+    #[must_use]
+    pub fn max_session_ttl(&self) -> Duration {
+        self.max_session_ttl
     }
 }
 
@@ -225,12 +275,14 @@ enum IssueFailure {
 /// propagated on poison — see `state::lock`'s own doc comment.
 pub struct AuthorizationHandler {
     state: Mutex<LeaseState>,
+    sessions: Mutex<SessionState>,
     policy: PolicySet,
     backend: Arc<dyn ComputeBackend>,
     clock: Arc<dyn Clock>,
     sink: Arc<dyn EventSink>,
     lease_ttl: Duration,
     max_outstanding_leases: usize,
+    session_requirement: SessionRequirement,
 }
 
 impl AuthorizationHandler {
@@ -248,15 +300,18 @@ impl AuthorizationHandler {
         // unmodified, so there is no second, independently-settable ttl
         // anywhere in this handler (module docs: "one TTL value, not
         // two").
-        let issuer = LeaseIssuer::new(instance, config.lease_ttl);
+        let issuer = LeaseIssuer::new(instance.clone(), config.lease_ttl);
+        let session_authority = SessionAuthority::new(instance, config.max_session_ttl);
         Self {
             state: Mutex::new(LeaseState::new(issuer, config.max_outstanding_leases)),
+            sessions: Mutex::new(SessionState::new(session_authority)),
             policy,
             backend,
             clock,
             sink,
             lease_ttl: config.lease_ttl,
             max_outstanding_leases: config.max_outstanding_leases,
+            session_requirement: config.session_requirement,
         }
     }
 
@@ -307,6 +362,39 @@ impl AuthorizationHandler {
         )
     }
 
+    /// Freshly determine whether `peer` verifies as a member of any
+    /// currently stored session, reaping stale sessions first (the
+    /// lazy-reaping touch point for every session-touching operation).
+    /// Returns the matched session's id (only when the verdict is
+    /// exactly [`MembershipVerdict::Member`]) alongside the full
+    /// verdict, so a caller needing only the pass/fail gate and a
+    /// caller needing to associate a freshly granted lease with a
+    /// session can both use this one evaluation.
+    fn membership_for_peer(&self, peer: &PeerContext) -> (Option<SessionId>, MembershipVerdict) {
+        let now = self.clock.now();
+        let mut sessions = session_state::lock(&self.sessions);
+        sessions.reap(now, session::collect_workload_identity);
+
+        let pid = peer.observed().workload.pid;
+        let peer_key = session::collect_session_key(pid);
+        let Some(candidate) = (match &peer_key {
+            Evidence::Present { value, .. } => sessions.find_by_key(*value),
+            Evidence::Missing { .. } | Evidence::Unsupported => None,
+        }) else {
+            return (
+                None,
+                MembershipVerdict::Indeterminate {
+                    reason: "no session found for this peer's session key".to_string(),
+                },
+            );
+        };
+
+        let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
+        let verdict = membership(candidate, &peer_key, &leader);
+        let matched = matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
+        (matched, verdict)
+    }
+
     fn handle_request_lease(
         &self,
         request: &LeaseRequest,
@@ -320,6 +408,28 @@ impl AuthorizationHandler {
                 },
             );
         };
+
+        // Pre-policy session-admission gate (F-M2-001, HORO-791): runs
+        // *before* policy is ever consulted, so a session-membership
+        // denial is never reported as a policy decision — same
+        // structural placement as the `peer.authorizable()` gate just
+        // above. `matched_session` is threaded through to the grant
+        // path below regardless of `session_requirement`, so a lease
+        // issued while a session happens to be active gets associated
+        // with it (for session-termination revocation) even when that
+        // session was not required for admission.
+        let (matched_session, verdict) = self.membership_for_peer(peer);
+        if self.session_requirement == SessionRequirement::Required
+            && !matches!(verdict, MembershipVerdict::Member)
+        {
+            return (
+                AuthorizationOutcome::SessionRequired,
+                AgentResponse::LeaseDenied {
+                    reason: DenialReason::NoTrustedSession,
+                },
+            );
+        }
+
         let provenance = provenance_for(request, observed.clone());
 
         let lease = match self.issue_reserving_capacity(provenance) {
@@ -349,6 +459,20 @@ impl AuthorizationHandler {
             }
         };
 
+        self.enforce_and_finalize(lease, matched_session.as_ref())
+    }
+
+    /// The grant-path tail of `handle_request_lease`, split out only to
+    /// stay under this crate's line-count lint — no behavioral seam.
+    /// `matched_session`, when present, is the session this lease
+    /// should be associated with for later termination-triggered
+    /// revocation (see `handle_request_lease`'s own doc comment on why
+    /// this happens regardless of `session_requirement`).
+    fn enforce_and_finalize(
+        &self,
+        lease: eltanin_core::lease::ComputeLease,
+        matched_session: Option<&SessionId>,
+    ) -> (AuthorizationOutcome, AgentResponse) {
         match self.backend.enforce(&lease.origin().request) {
             Ok(EnforcementResult::Allowed) => {
                 let expires_at = lease.expires_at();
@@ -370,6 +494,10 @@ impl AuthorizationHandler {
                 // `insert` itself releases the reservation this lease
                 // was issued under, in the same lock acquisition.
                 state::lock(&self.state).insert(lease);
+                if let Some(session_id) = matched_session {
+                    session_state::lock(&self.sessions)
+                        .associate_lease(session_id, lease_id.clone());
+                }
                 (
                     AuthorizationOutcome::Granted {
                         lease_id: lease_id.clone(),
@@ -485,6 +613,216 @@ impl AuthorizationHandler {
             },
         )
     }
+
+    /// Revoke one lease at the lease-state/backend layer, reusing
+    /// exactly `handle_release_lease`'s own
+    /// `any_other_live_lease_for_same_resource` rule — called when a
+    /// Trusted Compute Session is terminated (explicitly or reaped) and
+    /// every lease issued under it must be torn down with it.
+    fn revoke_lease_for_session_teardown(&self, id: &eltanin_core::lease::LeaseId) {
+        let mut guard = state::lock(&self.state);
+        if guard.get(id).is_none() {
+            return;
+        }
+        let resource = guard
+            .get(id)
+            .map(|lease| lease.origin().request.resource.clone());
+        let Some(resource) = resource else {
+            return;
+        };
+        let revoke_backend = !guard.any_other_live_lease_for_same_resource(id);
+        guard.issuer_mut().revoke(id);
+        guard.remove(id);
+        if revoke_backend {
+            let _ = self.backend.revoke(&resource);
+        }
+        drop(guard);
+    }
+
+    fn handle_create_session(
+        &self,
+        request: &CreateSessionRequest,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let Some(observed) = peer.authorizable() else {
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+
+        // Intent proof (F-M2-001, HORO-791): the requester is the
+        // authorizable local peer of this very request — no additional
+        // hardware-backed step. See `eltanin_core::session::IntentProof`'s
+        // docs for why this is the whole of MVP 2.0's intent model.
+        let leader_pid = observed.workload.pid;
+        let peer_key = session::collect_session_key(leader_pid);
+        let key = match &peer_key {
+            Evidence::Present {
+                value,
+                source: EvidenceSource::SelfAsserted,
+            } => {
+                let _ = value;
+                None
+            }
+            Evidence::Present { value, .. } => Some(*value),
+            Evidence::Missing { .. } | Evidence::Unsupported => None,
+        };
+        let Some(key) = key else {
+            // No usable (kernel-observed, non-self-asserted) session-key
+            // evidence for the requesting peer at all — there is no
+            // session to anchor. Reported identically to the
+            // `peer.authorizable()` gate above: evidence about the
+            // requester could not be confirmed, not a policy or session
+            // decision.
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+        let Evidence::Present {
+            value: owner_uid, ..
+        } = &observed.workload.uid
+        else {
+            return (
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            );
+        };
+
+        let scope = match SessionScope::new(request.resources.iter().cloned()) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return (
+                    AuthorizationOutcome::SessionEstablishFailed {
+                        error: SessionAdmissionError::EmptyScope(error),
+                    },
+                    AgentResponse::Error {
+                        code: ErrorCode::Internal,
+                    },
+                )
+            }
+        };
+
+        let anchor = LocalSessionAnchor {
+            key,
+            leader: observed.workload.clone(),
+        };
+        let now = self.clock.now();
+        let mut sessions = session_state::lock(&self.sessions);
+        sessions.reap(now, session::collect_workload_identity);
+        let established = sessions.authority_mut().establish(
+            *owner_uid,
+            anchor,
+            scope,
+            IntentProof::LocalPeerPresence,
+            SessionAssurance::LocalKernelSession,
+            now,
+            request.ttl,
+        );
+        match established {
+            Ok(established) => {
+                let session_id = established.id().clone();
+                let expires_at = established.expires_at();
+                let remaining = expires_at.saturating_duration_since(now);
+                let resources = established.scope().resources().iter().cloned().collect();
+                sessions.insert(established);
+                drop(sessions);
+                (
+                    AuthorizationOutcome::SessionEstablished {
+                        session_id: session_id.clone(),
+                        expires_at,
+                    },
+                    AgentResponse::SessionEstablished {
+                        session: SessionView {
+                            session_id,
+                            remaining,
+                            resources,
+                        },
+                    },
+                )
+            }
+            Err(error) => (
+                AuthorizationOutcome::SessionEstablishFailed {
+                    error: SessionAdmissionError::Authority(error),
+                },
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            ),
+        }
+    }
+
+    fn handle_list_sessions(&self, peer: &PeerContext) -> (AuthorizationOutcome, AgentResponse) {
+        let (matched_session, _verdict) = self.membership_for_peer(peer);
+        let sessions_guard = session_state::lock(&self.sessions);
+        let now = self.clock.now();
+        let views: Vec<SessionView> = matched_session
+            .as_ref()
+            .and_then(|id| sessions_guard.get(id))
+            .map(|session| {
+                vec![SessionView {
+                    session_id: session.id().clone(),
+                    remaining: session.expires_at().saturating_duration_since(now),
+                    resources: session.scope().resources().iter().cloned().collect(),
+                }]
+            })
+            .unwrap_or_default();
+        let ids: Vec<SessionId> = views.iter().map(|v| v.session_id.clone()).collect();
+        drop(sessions_guard);
+        (
+            AuthorizationOutcome::SessionListed { sessions: ids },
+            AgentResponse::SessionList { sessions: views },
+        )
+    }
+
+    fn handle_terminate_session(
+        &self,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let (matched_session, _verdict) = self.membership_for_peer(peer);
+        let Some(session_id) = matched_session else {
+            return (
+                AuthorizationOutcome::SessionNotFound,
+                AgentResponse::SessionTerminated {
+                    outcome: TerminationOutcome::Refused,
+                },
+            );
+        };
+
+        let mut sessions = session_state::lock(&self.sessions);
+        let removed = sessions.remove(&session_id);
+        let outcome = sessions.authority_mut().terminate(&session_id);
+        drop(sessions);
+
+        if let Some((_, lease_ids)) = removed {
+            for lease_id in lease_ids {
+                self.revoke_lease_for_session_teardown(&lease_id);
+            }
+        }
+
+        let wire_outcome = if matches!(
+            outcome,
+            eltanin_core::session::SessionTerminationOutcome::Terminated
+        ) {
+            TerminationOutcome::Terminated
+        } else {
+            TerminationOutcome::Refused
+        };
+
+        (
+            AuthorizationOutcome::SessionTerminated { outcome },
+            AgentResponse::SessionTerminated {
+                outcome: wire_outcome,
+            },
+        )
+    }
 }
 
 impl RequestHandler for AuthorizationHandler {
@@ -501,6 +839,18 @@ impl RequestHandler for AuthorizationHandler {
             ClientRequest::ReleaseLease(release_request) => {
                 let (outcome, response) = self.handle_release_lease(release_request, peer);
                 (Operation::ReleaseLease, outcome, response)
+            }
+            ClientRequest::CreateSession(create_request) => {
+                let (outcome, response) = self.handle_create_session(create_request, peer);
+                (Operation::CreateSession, outcome, response)
+            }
+            ClientRequest::ListSessions {} => {
+                let (outcome, response) = self.handle_list_sessions(peer);
+                (Operation::ListSessions, outcome, response)
+            }
+            ClientRequest::TerminateSession {} => {
+                let (outcome, response) = self.handle_terminate_session(peer);
+                (Operation::TerminateSession, outcome, response)
             }
         };
 

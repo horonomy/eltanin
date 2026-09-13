@@ -8,7 +8,17 @@ use serde::{Deserialize, Serialize};
 
 /// Current domain schema version. Bump when a wrapped type's wire shape
 /// changes in a way that isn't backward compatible.
-pub const DOMAIN_SCHEMA_VERSION: u16 = 1;
+///
+/// Bumped to `2` for HORO-791/F-M2-001: `eltanin-protocol`'s
+/// `ClientRequest`/`AgentResponse` are internally tagged
+/// (`#[serde(tag = "op"/"result", deny_unknown_fields)]`) with no
+/// `#[serde(other)]` catch-all, so a v1 agent decoding a v2 client's
+/// `create_session` request (or vice versa) does not silently drop the
+/// new variant — it fails `into_current` outright on the version
+/// mismatch. That is exactly this constant's own documented criterion
+/// ("a wrapped type's wire shape changes in a way that isn't backward
+/// compatible"), not a judgment call.
+pub const DOMAIN_SCHEMA_VERSION: u16 = 2;
 
 /// Wraps a domain payload with an explicit schema version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

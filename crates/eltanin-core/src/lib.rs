@@ -13,3 +13,4 @@ pub mod peer;
 pub mod policy;
 pub mod provenance;
 pub mod resource;
+pub mod session;

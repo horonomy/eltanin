@@ -79,11 +79,13 @@ impl RequestHandler for StatusOnlyHandler {
                     protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
                 },
             },
-            ClientRequest::RequestLease(_) | ClientRequest::ReleaseLease(_) => {
-                AgentResponse::Error {
-                    code: ErrorCode::Internal,
-                }
-            }
+            ClientRequest::RequestLease(_)
+            | ClientRequest::ReleaseLease(_)
+            | ClientRequest::CreateSession(_)
+            | ClientRequest::ListSessions {}
+            | ClientRequest::TerminateSession {} => AgentResponse::Error {
+                code: ErrorCode::Internal,
+            },
         }
     }
 }

@@ -1,9 +1,9 @@
 {
   "version": 2,
   "payload": {
-    "request_id": 3,
+    "request_id": 5,
     "body": {
-      "op": "agent_status"
+      "op": "list_sessions"
     }
   }
 }

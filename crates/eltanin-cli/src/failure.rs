@@ -117,12 +117,16 @@ pub fn classify_response(response: &AgentResponse) -> Option<LaunchFailure> {
         AgentResponse::LeaseGranted { .. } => None,
         AgentResponse::LeaseDenied { reason } => Some(LaunchFailure::Denied(*reason)),
         AgentResponse::Error { code } => Some(LaunchFailure::AgentError(*code)),
-        // eltanin run never sends ReleaseLease/AgentStatus as its
-        // initial request, so LeaseReleased/Status are unreachable here;
-        // classify them as an agent error rather than panicking, since
-        // "unreachable" is a claim about this crate's own call sites,
-        // not a wire-level guarantee.
-        AgentResponse::LeaseReleased { .. } | AgentResponse::Status { .. } => {
+        // eltanin run never sends ReleaseLease/AgentStatus/session
+        // operations as its initial request, so these responses are
+        // unreachable here; classify them as an agent error rather than
+        // panicking, since "unreachable" is a claim about this crate's
+        // own call sites, not a wire-level guarantee.
+        AgentResponse::LeaseReleased { .. }
+        | AgentResponse::Status { .. }
+        | AgentResponse::SessionEstablished { .. }
+        | AgentResponse::SessionList { .. }
+        | AgentResponse::SessionTerminated { .. } => {
             Some(LaunchFailure::AgentError(ErrorCode::Internal))
         }
     }
@@ -164,6 +168,10 @@ fn describe_denial_reason(reason: DenialReason) -> &'static str {
         DenialReason::ExplicitDeny => "a policy rule explicitly denies this request",
         DenialReason::IndeterminateEvidence => {
             "required evidence could not be observed with sufficient confidence"
+        }
+        DenialReason::NoTrustedSession => {
+            "no Trusted Compute Session is active for this terminal — run `eltanin session \
+             start --profile <name> --ttl <duration>` first"
         }
     }
 }

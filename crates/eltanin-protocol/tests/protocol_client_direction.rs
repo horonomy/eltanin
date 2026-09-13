@@ -117,7 +117,7 @@ fn decode_response_reports_a_version_mismatch_precisely_even_with_a_malformed_pa
         err,
         ProtocolError::Version(eltanin_core::envelope::UnsupportedVersion {
             found: 99,
-            expected: 1
+            expected: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION
         })
     );
 }
@@ -125,6 +125,6 @@ fn decode_response_reports_a_version_mismatch_precisely_even_with_a_malformed_pa
 #[test]
 fn decode_response_fails_closed_as_malformed_on_an_unrecognized_shape() {
     let body =
-        br#"{"version":1,"payload":{"request_id":1,"body":{"result":"not_a_real_variant"}}}"#;
+        br#"{"version":2,"payload":{"request_id":1,"body":{"result":"not_a_real_variant"}}}"#;
     assert_eq!(decode_response(body).unwrap_err(), ProtocolError::Malformed);
 }

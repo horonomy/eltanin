@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "payload": {
+    "request_id": 6,
+    "body": {
+      "result": "session_terminated",
+      "outcome": "terminated"
+    }
+  }
+}

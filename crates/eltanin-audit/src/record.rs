@@ -28,6 +28,7 @@ use eltanin_core::identity::{Evidence, ExecutionContext};
 use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime, RevocationOutcome};
 use eltanin_core::policy::{Effect, PolicyId, RuleId};
 use eltanin_core::resource::{Action, EnforcementResult, ResourceIdentity};
+use eltanin_core::session::{SessionId, SessionTerminationOutcome};
 use eltanin_protocol::response::AgentResponse;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -95,6 +96,9 @@ pub enum RecordedOperation {
     RequestLease,
     ReleaseLease,
     AgentStatus,
+    CreateSession,
+    ListSessions,
+    TerminateSession,
 }
 
 /// The client-asserted request parameters — a distinct trust class from
@@ -112,6 +116,12 @@ pub enum RecordedRequest {
         lease_id: LeaseId,
     },
     AgentStatus,
+    CreateSession {
+        resources: Vec<ResourceIdentity>,
+        ttl: Duration,
+    },
+    ListSessions,
+    TerminateSession,
 }
 
 /// Mirror of `eltanin_core::peer::PeerCredential` — plain data, no
@@ -220,6 +230,23 @@ pub enum RecordedLeaseValidity {
     Expired { expired_at: MonotonicTime },
 }
 
+/// Mirror of `eltanin_agent::authz::session::SessionAdmissionError`
+/// (which itself wraps `eltanin_core::session::SessionError` and
+/// `eltanin_core::session::EmptyScope`, neither of which has serde
+/// derives) — flattened to one enum rather than nested, since both
+/// sources together are only four cases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "error")]
+pub enum RecordedSessionAdmissionError {
+    EmptyScope,
+    NonPositiveTtl,
+    TtlExceedsMaximum {
+        requested: Duration,
+        maximum: Duration,
+    },
+    ExpiryOverflow,
+}
+
 /// Full internal fidelity of what happened — the record-schema
 /// counterpart of `eltanin_agent::authz::event::AuthorizationOutcome`,
 /// with every non-`Deserialize`-safe field replaced by its `Recorded*`
@@ -256,6 +283,25 @@ pub enum RecordedOutcome {
     },
     ReleaseUnknownLease,
     StatusReported,
+    SessionRequired,
+    SessionEstablished {
+        session_id: SessionId,
+        expires_at: MonotonicTime,
+    },
+    SessionEstablishFailed {
+        error: RecordedSessionAdmissionError,
+    },
+    SessionListed {
+        sessions: Vec<SessionId>,
+    },
+    SessionTerminated {
+        // Named `termination_outcome`, not `outcome` — this enum's own
+        // internal tag key is literally `"outcome"`
+        // (`#[serde(tag = "outcome")]` above), and serde rejects a
+        // variant field name colliding with the tag.
+        termination_outcome: SessionTerminationOutcome,
+    },
+    SessionNotFound,
 }
 
 /// One audit record: what was asked, who asked (as observed), what

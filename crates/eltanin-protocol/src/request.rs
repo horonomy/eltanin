@@ -8,6 +8,8 @@
 //! [`eltanin_core::identity::ExecutionContext`], so nothing decoded from
 //! the wire can ever become one.
 
+use std::time::Duration;
+
 use eltanin_core::identity::ExecutionContext;
 use eltanin_core::lease::LeaseId;
 use eltanin_core::provenance::ProvenanceRecord;
@@ -54,6 +56,22 @@ pub struct ReleaseRequest {
     pub lease_id: LeaseId,
 }
 
+/// Establish a new Trusted Compute Session (F-M2-001, HORO-791), scoped
+/// to `resources`, for at most `ttl`. There is deliberately no
+/// client-supplied session id or session-key field anywhere in this
+/// struct — the agent derives the session's kernel anchor itself, from
+/// the connecting peer's own observed process state, never from
+/// anything the client presents. `resources` narrows *which* resources
+/// a later `RequestLease` may even be asked about while the session is
+/// live; it grants nothing by itself — policy still evaluates every
+/// lease request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateSessionRequest {
+    pub resources: Vec<ResourceIdentity>,
+    pub ttl: Duration,
+}
+
 /// The operation a client is asking the agent to perform.
 ///
 /// Deliberately has **no** `#[serde(other)]` catch-all: an unrecognized
@@ -90,6 +108,21 @@ pub enum ClientRequest {
     RequestLease(LeaseRequest),
     ReleaseLease(ReleaseRequest),
     AgentStatus {},
+    /// Establish a Trusted Compute Session (F-M2-001, HORO-791). See
+    /// [`CreateSessionRequest`].
+    CreateSession(CreateSessionRequest),
+    /// List the Trusted Compute Sessions the calling peer is a verified
+    /// member of — at most one, today. A zero-field **struct** variant,
+    /// matching [`ClientRequest::AgentStatus`]'s established precedent
+    /// (see that variant's own doc comment for why a unit variant would
+    /// not give `#[serde(deny_unknown_fields)]` a real field set to
+    /// check).
+    ListSessions {},
+    /// Terminate the **caller's own** Trusted Compute Session — see
+    /// this crate's docs for why this deliberately carries no session
+    /// id. Also a zero-field struct variant, for the same reason as
+    /// `ListSessions`.
+    TerminateSession {},
 }
 
 /// One versioned, correlated request body.

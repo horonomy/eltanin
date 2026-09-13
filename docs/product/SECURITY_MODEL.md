@@ -237,6 +237,62 @@ through `AuditEventSink::from_writer` — filesystem-based fault injection
 (deleting/replacing the log file under an open file descriptor) proved
 unreliable across platforms and was rejected as the test mechanism.
 
+## Trusted Compute Session (F-M2-001, HORO-791) — MVP 2.0
+
+A Trusted Compute Session (`eltanin_core::session::TrustedSession`) lets
+a heavy developer prove intent once and then run multiple ordinary
+protected workloads without a per-request prompt. It is layered **on
+top of** the lease model above, never a replacement for it: a session
+narrows *who may even ask* for a `ComputeLease`; it grants nothing by
+itself, and `PolicySet::evaluate` still runs, unmodified, on every
+`RequestLease`, session or no session.
+
+**Headline trade-off, stated explicitly, not implied**: adopting the
+caller's existing POSIX (terminal) session as the trust anchor means
+intent is proven once per terminal and thereafter inherited by
+everything spawned in that terminal, with no further act of intent — a
+`postinstall` script run in the same shell after `eltanin session start`
+is a session member exactly as much as the command the user actually
+meant to authorize. This is within this document's L2/L3 threat-level
+boundary (see "Threat levels" above), stated here so it is never
+discovered as a surprise later. See
+[ADR 0009](../adr/0009-trusted-compute-session.md) for the full design
+record, the rejected alternatives, and the macOS `getsid` measurement.
+
+**What a Trusted Compute Session does NOT prove**: it gates lease
+*issuance*, never device-level access itself —
+**`UNVERIFIED_ON_BARE_METAL`**. Device-level enforcement remains
+F-M1-007/E3, still blocked on unavailable hardware (see
+`docs/development/campaign-state.md`'s dependency blockers).
+
+**Membership is kernel-unforgeable, not merely checked**: no syscall on
+Linux or macOS lets an unprivileged process *join* an existing POSIX
+session it did not create — only leave one. `eltanin_core::session::membership`
+is the one function that decides admission, in a single combined check:
+freshly collected evidence (not missing, not self-asserted) for the
+requesting peer's session key, an exact key match against the session's
+anchor, and `WorkloadIdentity::compare_process` reporting the anchor's
+original leader process is still the *same* process (not a PID reused
+by an unrelated later process). No client-supplied session id is ever
+accepted anywhere in this design.
+
+**No long-lived plaintext bearer secret is the trust root**:
+`TrustedSession` is `Serialize` but never `Deserialize` (same discipline
+as `ComputeLease`); `TerminateSession` carries no session id at all
+(avoiding an enumeration oracle); `ListSessions` returns only sessions
+the calling peer independently re-verifies membership of, never an
+arbitrary lookup by id.
+
+**Cgroup-scoped session membership is a declared, unbuilt seam** —
+**`BLOCKED_ON_E3`**. It needs a privileged, non-delegated cgroup subtree
+unavailable without bare-metal access. `eltanin_core::session::SessionAssurance`
+gets a second variant (`CgroupScope`) only when E3 lands; nothing in
+this release implements or assumes cgroup scoping.
+
+**macOS support**: implemented, not deferred — see ADR 0009's measured
+finding that `getsid` is unrestricted by session or ownership on this
+campaign's Apple Silicon host, for any caller.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of

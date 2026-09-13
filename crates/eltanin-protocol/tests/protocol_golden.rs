@@ -10,12 +10,14 @@ use std::time::Duration;
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::{IssuerInstanceId, LeaseId};
 use eltanin_core::resource::{Action, ResourceIdentity, ResourceKind, ResourceVendor};
+use eltanin_core::session::SessionId;
 use eltanin_protocol::request::{
-    ClientRequest, LeaseRequest, ReleaseRequest, Request, RequestBody, RequestId,
+    ClientRequest, CreateSessionRequest, LeaseRequest, ReleaseRequest, Request, RequestBody,
+    RequestId,
 };
 use eltanin_protocol::response::{
     AgentResponse, AgentStatusView, DenialReason, ErrorCode, LeaseView, ReleaseOutcome, Response,
-    ResponseBody,
+    ResponseBody, SessionView, TerminationOutcome,
 };
 
 fn resource() -> ResourceIdentity {
@@ -130,7 +132,7 @@ fn response_status_matches_fixture() {
         request_id: Some(RequestId(3)),
         body: AgentResponse::Status {
             status: AgentStatusView {
-                protocol_version: 1,
+                protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
             },
         },
     });
@@ -144,12 +146,110 @@ fn response_error_unsupported_version_matches_fixture() {
         body: AgentResponse::Error {
             code: ErrorCode::UnsupportedVersion {
                 found: 99,
-                expected: 1,
+                expected: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
             },
         },
     });
     assert_golden(
         &value,
         include_str!("fixtures/response_error_unsupported_version.json"),
+    );
+}
+
+fn session_id() -> SessionId {
+    SessionId {
+        issuer: IssuerInstanceId::new("issuer-a"),
+        sequence: 0,
+    }
+}
+
+#[test]
+fn create_session_matches_fixture() {
+    let value: Request = Versioned::current(RequestBody {
+        request_id: RequestId(4),
+        body: ClientRequest::CreateSession(CreateSessionRequest {
+            resources: vec![resource()],
+            ttl: Duration::from_mins(30),
+        }),
+    });
+    assert_golden(&value, include_str!("fixtures/create_session.json"));
+}
+
+#[test]
+fn list_sessions_matches_fixture() {
+    let value: Request = Versioned::current(RequestBody {
+        request_id: RequestId(5),
+        body: ClientRequest::ListSessions {},
+    });
+    assert_golden(&value, include_str!("fixtures/list_sessions.json"));
+}
+
+#[test]
+fn terminate_session_matches_fixture() {
+    let value: Request = Versioned::current(RequestBody {
+        request_id: RequestId(6),
+        body: ClientRequest::TerminateSession {},
+    });
+    assert_golden(&value, include_str!("fixtures/terminate_session.json"));
+}
+
+#[test]
+fn response_session_established_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(4)),
+        body: AgentResponse::SessionEstablished {
+            session: SessionView {
+                session_id: session_id(),
+                remaining: Duration::from_mins(30),
+                resources: vec![resource()],
+            },
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_session_established.json"),
+    );
+}
+
+#[test]
+fn response_session_list_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(5)),
+        body: AgentResponse::SessionList {
+            sessions: vec![SessionView {
+                session_id: session_id(),
+                remaining: Duration::from_mins(20),
+                resources: vec![resource()],
+            }],
+        },
+    });
+    assert_golden(&value, include_str!("fixtures/response_session_list.json"));
+}
+
+#[test]
+fn response_session_terminated_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(6)),
+        body: AgentResponse::SessionTerminated {
+            outcome: TerminationOutcome::Terminated,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_session_terminated.json"),
+    );
+}
+
+#[test]
+fn response_lease_denied_no_trusted_session_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(1)),
+        body: AgentResponse::LeaseDenied {
+            reason: DenialReason::NoTrustedSession,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_lease_denied_no_trusted_session.json"),
     );
 }
