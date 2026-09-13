@@ -101,6 +101,8 @@ use crate::runtime::AgentClock;
 pub mod approval;
 mod approval_state;
 pub mod audit;
+mod delegation;
+mod delegation_state;
 pub mod event;
 pub mod session;
 mod session_state;
@@ -108,6 +110,7 @@ mod state;
 
 use approval::ApprovalRequirement;
 use approval_state::ApprovalState;
+use delegation_state::DelegationState;
 use event::{AuthorizationEvent, AuthorizationOutcome, EventSink, Operation};
 use session::{SessionAdmissionError, SessionRequirement};
 use session_state::SessionState;
@@ -149,6 +152,11 @@ pub struct AuthorizationConfig {
     approval_requirement: ApprovalRequirement,
     approval_store_path: Option<PathBuf>,
     once_approval_ttl: Duration,
+    /// `Some` only via [`Self::with_delegation`], which sets this
+    /// alongside `approval_requirement`/`approval_store_path` in one
+    /// call — see that method's doc for why delegation cannot be enabled
+    /// without approvals also being required.
+    delegation: Option<eltanin_core::delegation::DelegationBounds>,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
@@ -199,6 +207,11 @@ impl AuthorizationConfig {
             approval_requirement: ApprovalRequirement::NotRequired,
             approval_store_path: None,
             once_approval_ttl: DEFAULT_ONCE_APPROVAL_TTL,
+            // HORO-793's own blast-radius obligation, mirroring
+            // HORO-791/HORO-792's identical ones just above: every
+            // pre-HORO-793 test harness and deployment that never heard
+            // of delegation must keep behaving exactly as before.
+            delegation: None,
         })
     }
 
@@ -241,6 +254,33 @@ impl AuthorizationConfig {
         self
     }
 
+    /// Enable bounded compute delegation (F-M2-003, HORO-793): a
+    /// descendant of an already-admitted requester may be silently
+    /// admitted under a matching [`eltanin_core::delegation::DelegationGrant`]
+    /// when the ordinary approval gate would otherwise refuse it.
+    ///
+    /// There is deliberately no way to set `delegation` without also
+    /// requiring approvals — this call sets `approval_requirement` to
+    /// [`ApprovalRequirement::Required`] and `approval_store_path` to
+    /// `path` in the same step, mirroring
+    /// [`Self::with_approval_store`]'s identical
+    /// "no default value for a security-relevant choice, made
+    /// correct-by-construction" convention. Delegation is consulted only
+    /// on the approval gate's own refusal path (see `crate::authz`'s
+    /// module docs) — it would be meaningless, and misleadingly
+    /// configurable, without approvals also being required.
+    #[must_use]
+    pub fn with_delegation(
+        mut self,
+        approval_store: PathBuf,
+        bounds: eltanin_core::delegation::DelegationBounds,
+    ) -> Self {
+        self.approval_requirement = ApprovalRequirement::Required;
+        self.approval_store_path = Some(approval_store);
+        self.delegation = Some(bounds);
+        self
+    }
+
     #[must_use]
     pub fn lease_ttl(&self) -> Duration {
         self.lease_ttl
@@ -269,6 +309,11 @@ impl AuthorizationConfig {
     #[must_use]
     pub fn approval_store_path(&self) -> Option<&Path> {
         self.approval_store_path.as_deref()
+    }
+
+    #[must_use]
+    pub fn delegation(&self) -> Option<&eltanin_core::delegation::DelegationBounds> {
+        self.delegation.as_ref()
     }
 
     #[must_use]
@@ -358,6 +403,7 @@ pub struct AuthorizationHandler {
     state: Mutex<LeaseState>,
     sessions: Mutex<SessionState>,
     approvals: Mutex<ApprovalState>,
+    delegations: Mutex<DelegationState>,
     policy: PolicySet,
     backend: Arc<dyn ComputeBackend>,
     clock: Arc<dyn Clock>,
@@ -368,6 +414,7 @@ pub struct AuthorizationHandler {
     approval_requirement: ApprovalRequirement,
     approval_store_path: Option<PathBuf>,
     once_approval_ttl: Duration,
+    delegation: Option<eltanin_core::delegation::DelegationBounds>,
 }
 
 impl AuthorizationHandler {
@@ -417,6 +464,7 @@ impl AuthorizationHandler {
             state: Mutex::new(LeaseState::new(issuer, config.max_outstanding_leases)),
             sessions: Mutex::new(SessionState::new(session_authority)),
             approvals: Mutex::new(approvals),
+            delegations: Mutex::new(DelegationState::new()),
             policy,
             backend,
             clock,
@@ -427,6 +475,7 @@ impl AuthorizationHandler {
             approval_requirement: config.approval_requirement,
             approval_store_path: config.approval_store_path.clone(),
             once_approval_ttl: config.once_approval_ttl,
+            delegation: config.delegation.clone(),
         }
     }
 
