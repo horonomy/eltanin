@@ -64,7 +64,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::identity::WorkloadIdentity;
+use crate::identity::{
+    Evidence, EvidenceSource, ExecutionContext, IdentityComparison, WorkloadIdentity,
+};
 use crate::lease::{ComputeLease, LeaseId, MonotonicTime};
 use crate::resource::{Action, ComputeRequest, ResourceIdentity};
 use crate::session::SessionKey;
@@ -319,5 +321,279 @@ impl DelegationBounds {
     #[must_use]
     pub fn require_same_cgroup(&self) -> bool {
         self.require_same_cgroup
+    }
+}
+
+/// Which dimension(s) [`delegated_admission`] found exceeded. A rich,
+/// accumulating set — following this crate's established pattern (see
+/// [`crate::approval::ChangedDimension`]) — rather than a single reason,
+/// so an audit trail can see every bound a request failed, not just the
+/// first one checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExceededBound {
+    Resource,
+    Action,
+    Duration,
+    Depth,
+    AncestryLinkage,
+    TrustTransition,
+    HolderLiveness,
+    OwnerUid,
+    SessionKey,
+    CgroupPath,
+}
+
+/// The result of [`delegated_admission`]. A rich enum, not a `bool` —
+/// same established pattern as [`crate::session::MembershipVerdict`]/
+/// [`crate::approval::RecallVerdict`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "verdict")]
+pub enum DelegationVerdict {
+    Admitted {
+        depth: u8,
+        not_after: MonotonicTime,
+        parent_lease: LeaseId,
+    },
+    NotAdmitted {
+        exceeded: BTreeSet<ExceededBound>,
+    },
+    /// The evidence needed to decide at least one dimension could not be
+    /// confirmed (missing/unsupported/self-asserted where admission
+    /// needed a real value). Callers must treat this identically to
+    /// `NotAdmitted` — never as `Admitted` — fail-closed, same
+    /// discipline as [`crate::session::MembershipVerdict::Indeterminate`]/
+    /// [`crate::approval::RecallVerdict::Indeterminate`].
+    Indeterminate {
+        reason: String,
+    },
+}
+
+fn indeterminate(reason: impl Into<String>) -> DelegationVerdict {
+    DelegationVerdict::Indeterminate {
+        reason: reason.into(),
+    }
+}
+
+/// Determine whether `requester` — freshly observed at call time — may
+/// admit under `grant`, per `bounds`. `requester_session_key` is the
+/// freshly re-collected [`Evidence<SessionKey>`] for the same requesting
+/// peer `requester` describes (kept as a separate parameter rather than
+/// folded into `ExecutionContext`, since session-key collection is
+/// `authz::session`'s concern, not `identity`'s — the same shape
+/// [`crate::session::membership`] already uses for its own `peer_key`
+/// parameter). `observed_holder` is freshly re-observed for
+/// `grant.holder().pid`, at call time, by the caller — never trusted
+/// from `grant` itself, which only records what the holder looked like
+/// at mint time.
+///
+/// The **one** combined signature, same discipline as
+/// [`crate::session::membership`]/[`crate::approval::recall`]: evidence
+/// freshness, holder liveness, ancestry linkage, and every scope/depth/
+/// duration bound are checked together, never as a lookup step followed
+/// by a separate check.
+///
+/// Checks run in this order (load-bearing, not incidental — see each
+/// step's own comment); comparable dimensions accumulate into
+/// `NotAdmitted`'s `exceeded` set, but any unusable/missing/self-asserted
+/// evidence needed to decide a dimension makes the whole call return
+/// [`DelegationVerdict::Indeterminate`] immediately — fail-closed, never
+/// silently treated as "that dimension didn't match."
+///
+/// `#[allow(clippy::too_many_lines)]`: the ticket's own contract (and
+/// this crate's established `recall`/`membership` precedent) requires
+/// this to stay the **one** combined function — splitting it into
+/// smaller helpers would reintroduce exactly the "lookup step, then
+/// separate check" structure this design forbids.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn delegated_admission(
+    grant: &DelegationGrant,
+    bounds: &DelegationBounds,
+    requester: &ExecutionContext,
+    requester_session_key: &Evidence<SessionKey>,
+    observed_holder: &WorkloadIdentity,
+    request: &ComputeRequest,
+    now: MonotonicTime,
+) -> DelegationVerdict {
+    let mut exceeded = BTreeSet::new();
+
+    // 1. Holder liveness — corroboration only, can only reject.
+    match grant.holder.compare_process(observed_holder) {
+        IdentityComparison::Same => {}
+        IdentityComparison::Different => {
+            exceeded.insert(ExceededBound::HolderLiveness);
+        }
+        IdentityComparison::Indeterminate => {
+            return indeterminate("grant holder liveness could not be confirmed");
+        }
+    }
+
+    // 2. Ancestry linkage — scan the requester's freshly observed
+    // ancestry (index 0 = immediate parent, increasing index walks
+    // upward — see the module docs' "Ancestry ordering" section) for the
+    // grant holder. Continue scanning past an individual unresolvable
+    // entry rather than failing on the first one — an unreadable start
+    // token partway up the chain (the documented eltanin-linux collector
+    // gap, HORO-832) must not prevent a `Same` found further up from
+    // being honored. Only report `Indeterminate` if the scan never finds
+    // `Same` and encountered at least one entry it could not resolve;
+    // if it never finds `Same` and every entry was cleanly `Different`,
+    // that is a confirmed `AncestryLinkage` failure, not an
+    // indeterminate one. This is corroboration only — it can never grant.
+    let mut holder_index: Option<usize> = None;
+    let mut saw_unresolved = false;
+    for (index, ancestor) in requester.workload.ancestry.iter().enumerate() {
+        match grant.holder.compare_ancestor(ancestor) {
+            IdentityComparison::Same => {
+                holder_index = Some(index);
+                break;
+            }
+            IdentityComparison::Different => {}
+            IdentityComparison::Indeterminate => {
+                saw_unresolved = true;
+            }
+        }
+    }
+    let holder_index = if let Some(index) = holder_index {
+        index
+    } else {
+        if saw_unresolved {
+            return indeterminate(
+                "requester ancestry contained unresolvable evidence and no confirmed link to the grant holder",
+            );
+        }
+        exceeded.insert(ExceededBound::AncestryLinkage);
+        // No confirmed span to scan for trust-transition markers below —
+        // treat the whole (unlinked) ancestry as the span, so a marker
+        // anywhere in it still surfaces, though `AncestryLinkage` alone
+        // already fails this admission.
+        requester.workload.ancestry.len()
+    };
+
+    // 3. Owner uid — fail closed on missing/unsupported/self-asserted.
+    match &requester.workload.uid {
+        Evidence::Present {
+            value,
+            source: EvidenceSource::SelfAsserted,
+        } => {
+            let _ = value;
+            return indeterminate("requester uid evidence was self-asserted");
+        }
+        Evidence::Present { value, .. } => {
+            if *value != grant.owner_uid {
+                exceeded.insert(ExceededBound::OwnerUid);
+            }
+        }
+        Evidence::Missing { .. } | Evidence::Unsupported => {
+            return indeterminate("requester uid evidence is unavailable");
+        }
+    }
+
+    // 4. Trust-transition scan over ancestry[0..holder_index] only —
+    // strictly between the requester and the holder, exclusive of the
+    // holder itself. Evidence unusable *within* this span fails closed;
+    // evidence at or above `holder_index` is never inspected at all.
+    for ancestor in &requester.workload.ancestry[..holder_index] {
+        match &ancestor.executable_path {
+            Evidence::Present {
+                value,
+                source: EvidenceSource::SelfAsserted,
+            } => {
+                let _ = value;
+                return indeterminate(
+                    "an ancestor's executable path evidence was self-asserted within the trust-transition span",
+                );
+            }
+            Evidence::Present { value, .. } => {
+                if bounds.transition_markers.contains(value) {
+                    exceeded.insert(ExceededBound::TrustTransition);
+                }
+            }
+            Evidence::Missing { .. } | Evidence::Unsupported => {
+                return indeterminate(
+                    "an ancestor's executable path evidence is unavailable within the trust-transition span",
+                );
+            }
+        }
+    }
+
+    // 5. Session key, only when required.
+    if bounds.require_same_session {
+        match requester_session_key {
+            Evidence::Present {
+                value,
+                source: EvidenceSource::SelfAsserted,
+            } => {
+                let _ = value;
+                return indeterminate("requester session-key evidence was self-asserted");
+            }
+            Evidence::Present { value, .. } => {
+                if grant.session_key != Some(*value) {
+                    exceeded.insert(ExceededBound::SessionKey);
+                }
+            }
+            Evidence::Missing { .. } | Evidence::Unsupported => {
+                return indeterminate("requester session-key evidence is unavailable");
+            }
+        }
+    }
+
+    // 6. Cgroup path, only when required. `Unsupported` (expected on
+    // macOS) fails closed to `Indeterminate` — never silently satisfied.
+    if bounds.require_same_cgroup {
+        match &requester.cgroup_path {
+            Evidence::Present {
+                value,
+                source: EvidenceSource::SelfAsserted,
+            } => {
+                let _ = value;
+                return indeterminate("requester cgroup-path evidence was self-asserted");
+            }
+            Evidence::Present { value, .. } => {
+                if grant.cgroup_path.as_deref() != Some(value.as_str()) {
+                    exceeded.insert(ExceededBound::CgroupPath);
+                }
+            }
+            Evidence::Missing { .. } | Evidence::Unsupported => {
+                return indeterminate("requester cgroup-path evidence is unavailable");
+            }
+        }
+    }
+
+    // 7. Resource/action scope.
+    if !grant.scope.resources.contains(&request.resource) {
+        exceeded.insert(ExceededBound::Resource);
+    }
+    if !grant.scope.actions.contains(&request.action) {
+        exceeded.insert(ExceededBound::Action);
+    }
+
+    // 8. Depth.
+    if grant.depth.saturating_add(1) > bounds.max_depth {
+        exceeded.insert(ExceededBound::Depth);
+    }
+
+    // 9. Duration — a near-expired parent is reported here, as `Duration`,
+    // never left to surface later as a misattributed `ExpiryOverflow`
+    // when the caller's own clock composes `narrow_expiry`'s result
+    // against `now` again after this call returns.
+    if grant.not_after.saturating_duration_since(now) < bounds.min_remaining {
+        exceeded.insert(ExceededBound::Duration);
+    }
+
+    if !exceeded.is_empty() {
+        return DelegationVerdict::NotAdmitted { exceeded };
+    }
+
+    let capped_not_after = match now.checked_add(bounds.max_child_ttl) {
+        Some(ttl_bound) => grant.not_after.min(ttl_bound),
+        None => grant.not_after,
+    };
+
+    DelegationVerdict::Admitted {
+        depth: grant.depth.saturating_add(1),
+        not_after: capped_not_after,
+        parent_lease: grant.lease_id.clone(),
     }
 }
