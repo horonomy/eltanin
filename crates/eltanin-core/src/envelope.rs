@@ -18,7 +18,19 @@ use serde::{Deserialize, Serialize};
 /// mismatch. That is exactly this constant's own documented criterion
 /// ("a wrapped type's wire shape changes in a way that isn't backward
 /// compatible"), not a judgment call.
-pub const DOMAIN_SCHEMA_VERSION: u16 = 2;
+///
+/// Bumped to `3` for HORO-792/F-M2-002, by the same criterion: `approve`/
+/// `list_approvals`/`forget_approval` are new `ClientRequest`/
+/// `AgentResponse` variants under the same internally-tagged,
+/// `deny_unknown_fields`, no-`#[serde(other)]` enums. A side effect
+/// this bump is deliberately allowed to have: every `Approval` stored
+/// under the previous schema version embeds `schema_version:
+/// DOMAIN_SCHEMA_VERSION` in its recorded `PolicyProvenance` (security
+/// posture), so this bump alone makes every pre-existing durable
+/// approval fail `recall`'s security-posture dimension and require
+/// re-approval — a deliberate consequence of the schema version being
+/// part of what "security posture" means, not a bug to work around.
+pub const DOMAIN_SCHEMA_VERSION: u16 = 3;
 
 /// Wraps a domain payload with an explicit schema version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
