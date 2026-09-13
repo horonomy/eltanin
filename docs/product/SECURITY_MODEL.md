@@ -353,6 +353,82 @@ access) and **`BLOCKED_ON_E3`** (the cgroup dimension is observed and
 compared only, never enforced at the device/cgroup layer) apply here
 identically to how they already apply to Trusted Compute Session.
 
+## Bounded Compute Delegation (F-M2-003, HORO-793) — MVP 2.0
+
+A `DelegationGrant` (`eltanin_core::delegation::DelegationGrant`) lets
+an already-admitted requester's descendant process — a sub-agent, a
+build tool, a locally-invoked model — obtain a narrowly scoped compute
+lease without independently prompting for approval, while remaining
+bounded by the parent's own scope, depth, and duration. It is a
+**third** pre-policy admission gate, consulted only when the
+Remembered Authorization Intent gate (above) has already refused a
+request: delegation can only turn that refusal into a bounded
+admission, never turn an admission or an explicit deny into a refusal,
+and `PolicySet::evaluate` still runs, unmodified, on every
+`RequestLease`, delegated or not.
+
+**Headline trade-off, stated explicitly, not implied**: bounded
+delegation constrains the chain of processes that *ask*. It does not
+observe, confine, or even see the ones that don't. See
+[ADR 0011](../adr/0011-bounded-compute-delegation.md) for the full
+disclosure — including that a descendant that never calls `eltanin
+run` is invisible to this model entirely, that a uid transition inside
+the requester→holder ancestry span is unverified, that
+cross-project delegation is forbiddable only via cgroup on Linux (never
+on macOS, where it fails closed rather than being silently satisfied),
+and that trust-transition detection is path-only (an interpreter's
+script identity stays invisible, exactly as ADR 0010 already disclosed
+for its own executable-digest mechanism).
+
+**Kernel-observed process ancestry can only reject, never grant** —
+this is the load-bearing invariant the whole mechanism rests on, and
+the direct continuation of this document's and ADR 0005's rule that
+"parent process alone cannot imply ALLOW" (HORO-787). A delegation
+grant is always an explicit, agent-minted artifact 1:1 with a real,
+already-issued `ComputeLease`; `delegated_admission` uses ancestry only
+to corroborate that a requester genuinely descends from the grant's
+holder, or to reject when it does not — never as a path to admission by
+itself.
+
+**`delegated_admission` is the one function that decides admission**,
+in a single combined check mirroring `recall`/`membership`'s own
+discipline: holder liveness, ancestry linkage, owner uid,
+trust-transition span, session/cgroup binding (when required),
+resource/action scope, depth, and duration are all re-observed fresh
+and checked together, never as a lookup followed by a separate check.
+
+**A child cannot expand resource/action/duration beyond delegator
+allowance, by construction**: `DelegationScope` is derived entirely
+from the parent lease's own request inside `DelegationGrant::mint`,
+with no independent constructor; a delegated lease's expiry is capped
+via `ComputeLease::narrow_expiry` to `min(parent's own expiry, now +
+configured max child TTL)` before it is ever finalized.
+
+**Revoking parent/session authority invalidates future delegated
+lease issue** two ways: structurally (a child's lease can never
+outlive its parent's), and by explicit cascade (revoking a lease —
+whether by an explicit release or session termination — recursively
+removes its delegation grant and every descendant grant chained under
+it, and revokes every lease issued under them).
+
+**`DelegationGrant` is ephemeral, in-memory only** — unlike `Approval`,
+it has no `Deserialize` at all and is never persisted to disk. It is
+bound to a live process and a live lease; neither survives an agent
+restart, so there is no on-disk shape for this type whatsoever.
+
+**No new wire variant**: a delegation refusal is client-facing
+identical to `ApprovalRequired` — the rich detail (which bound was
+exceeded, or why evidence was indeterminate) lives in the audit trail
+only (`RecordedOutcome::{GrantedByDelegation, DelegationRefused,
+DelegationIndeterminate}`), never on the wire.
+
+**`UNVERIFIED_ON_BARE_METAL`** (gates lease issuance, never device
+access) applies here identically to how it applies to the two gates
+above. **`BLOCKED_ON_E3`** applies to cgroup-scoped *containment* of a
+descendant specifically (as opposed to mere admission-refusal, which is
+implemented) — actual confinement would need the same privileged,
+non-delegated cgroup subtree as F-M1-007.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of
