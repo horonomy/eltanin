@@ -245,3 +245,51 @@ eltanin session end
   run` under a deployment that requires an active session) reuses the
   existing `ExitCode::Denied` (77) with a stderr message directing the
   user to run `eltanin session start`.
+
+## `eltanin approve` — remembered authorization intent (F-M2-002, HORO-792)
+
+A separate, independent top-level subcommand — `eltanin run`/`eltanin
+session ...`'s own grammars above are completely unchanged. See
+`docs/adr/0010-remembered-authorization-intent.md` and
+`docs/product/SECURITY_MODEL.md`'s Remembered Authorization Intent
+section for the security model this establishes, including the
+headline disclosure of what it does **not** protect against.
+
+```
+eltanin approve --profile <name> (--once|--remember|--deny)
+eltanin approve list
+eltanin approve forget <id>
+```
+
+- `--profile` reuses this document's own `Profiles` section's
+  resolution wholesale — resolves to `(resource, action)` before
+  contacting the agent. There is no wire-level `--profile` concept;
+  the agent only ever sees the resolved pair.
+- Exactly one of `--once`, `--remember`, `--deny` is required:
+  - `--once` grants a single subsequent `RequestLease` for this
+    launcher/context, then is consumed — never persisted to disk.
+  - `--remember` durably approves this launcher/context; a restarted
+    instance of the exact same workload obtains a fresh lease without
+    re-prompting.
+  - `--deny` durably denies this launcher/context; always wins over a
+    `--remember` for the same launcher, regardless of insertion order.
+- `list` prints the calling peer's **own** recorded approvals only —
+  never another owner's. Takes no arguments.
+- `forget <id>` removes one approval by the id a prior `approve`/
+  `approve list` printed. Refuses (reported identically to an unknown
+  id) if the id does not exist or is not owned by the caller — this
+  avoids an id-based enumeration oracle, the same reasoning
+  `eltanin session end` already applies to session ids.
+- No new exit codes. An `ApprovalRequired` denial (from a later
+  `eltanin run` under a deployment that requires a matching approval)
+  reuses the existing `ExitCode::Denied` (77) with a stderr message
+  naming the exact `eltanin approve` command to run next. An
+  `ApprovalDenied` denial (a matching `Deny` approval) reuses the same
+  exit code with a message directing the user to `eltanin approve
+  forget <id>` or their policy administrator.
+- **Known limitation, disclosed, not hidden**: because the connecting
+  peer for `eltanin run` is always `eltanin` itself (see this
+  document's "MVP 1.0 limitation" section above), a remembered approval
+  cannot distinguish which workload is actually run through a given
+  launcher — an interpreter (`python`, `node`, `bash`) approved once
+  admits every script later run through it. See ADR 0010's AC4 section.

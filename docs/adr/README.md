@@ -16,6 +16,7 @@ links back.
 | [0007](0007-apple-silicon-metal-backend.md) | Apple Silicon Metal backend — crate boundary, binding choice, capability/memory mapping | Accepted |
 | [0008](0008-macos-platform-adapter-and-local-peer-identity.md) | macOS platform adapter — crate boundary, peer-credential binding, and honest limits | Accepted |
 | [0009](0009-trusted-compute-session.md) | Trusted Compute Session — POSIX-session-anchored, agent-owned admission gate | Accepted |
+| [0010](0010-remembered-authorization-intent.md) | Remembered Authorization Intent — a second, independent pre-policy admission gate | Accepted |
 
 See [`docs/product/NORTH_STAR.md`](../product/NORTH_STAR.md) for the
 locked invariants these decisions implement, and

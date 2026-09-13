@@ -293,6 +293,66 @@ this release implements or assumes cgroup scoping.
 finding that `getsid` is unrestricted by session or ownership on this
 campaign's Apple Silicon host, for any caller.
 
+## Remembered Authorization Intent (F-M2-002, HORO-792) — MVP 2.0
+
+An `Approval` (`eltanin_core::approval::Approval`) lets a user approve a
+stable workload/launcher once and have Eltanin silently issue a fresh,
+short-lived lease on every later restart, without re-prompting — only
+when the current context still matches. It is a **second, independent**
+pre-policy admission gate, layered on top of the lease model exactly
+like a Trusted Compute Session is: an approval narrows *who may even
+ask* for a `ComputeLease`; it grants nothing by itself, and
+`PolicySet::evaluate` still runs, unmodified, on every `RequestLease`,
+approval or no approval.
+
+**Headline trade-off, stated explicitly, not implied**: a remembered
+authorization records that this user approved this resource/action
+through this launcher. It cannot distinguish which workload is launched
+through it, and a compromised-but-unchanged binary re-fires its old
+approval silently. See
+[ADR 0010](../adr/0010-remembered-authorization-intent.md) for the full
+disclosure — including that this offers no protection against an
+already-approved binary compromised in place, no boundary against the
+same user's other processes, and a materially weaker (`BestEffort`, not
+`KernelObserved`) executable digest on macOS than on Linux.
+
+**AC4 ("interpreter/container cases are context-scoped") is PARTIALLY
+met.** The container/cgroup dimension is real and enforced by
+comparison at recall time. The interpreter dimension (binding
+authorization to *which script* an interpreter runs) is structurally
+impossible today: `eltanin run`'s S4→S6 stage adjacency leaves no point
+to attach workload identity before the lease decision, the protocol
+carries no client-declared identity field, and
+`crates/eltanin-audit/tests/redaction.rs` mechanically forbids reading
+`/proc/<pid>/cmdline`. **Do not globally trust an interpreter
+(Python/Node/bash/Docker) merely because the executable is trusted** —
+this remains true after this ticket exactly as it was before it; a
+future workload-attestation ADR-0005 amendment is the prerequisite for
+closing this gap, tracked as a follow-up, not attempted here.
+
+**`recall` is the one function that decides admission**, in a single
+combined check mirroring `membership`'s own discipline: every material
+dimension (owner uid, launcher path, launcher digest, cgroup path,
+resource capability state, security posture) is re-observed fresh and
+compared together, never as a lookup followed by a separate check.
+Candidate lookup is keyed on `(resource, action)` only.
+
+**`Deny` always overrides `Remember`/`Once`** for the same
+`(resource, action)`, mirroring `PolicySet`'s own deny-overrides
+convention.
+
+**`Approval` is reconstructible from disk, unlike `ComputeLease`/
+`TrustedSession`** — a deliberate, disclosed exception (see ADR 0010):
+a durable approval must survive a restart to be useful at all, and the
+on-disk bytes are only ever evidence to re-validate via `recall`, never
+bare authority — a forged or tampered entry only buys the right to
+*reach* policy evaluation, which can still independently deny.
+
+**`UNVERIFIED_ON_BARE_METAL`** (gates lease issuance, never device
+access) and **`BLOCKED_ON_E3`** (the cgroup dimension is observed and
+compared only, never enforced at the device/cgroup layer) apply here
+identically to how they already apply to Trusted Compute Session.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of
