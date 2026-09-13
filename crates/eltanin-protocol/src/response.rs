@@ -16,6 +16,8 @@
 use std::time::Duration;
 
 use eltanin_core::lease::LeaseId;
+use eltanin_core::resource::ResourceIdentity;
+use eltanin_core::session::SessionId;
 use serde::{Deserialize, Serialize};
 
 use crate::request::RequestId;
@@ -39,12 +41,22 @@ pub struct LeaseView {
 /// detail behind a denial belong to the audit trail (F-M1-009), not to
 /// an unprivileged client — telling a caller exactly which rule fired
 /// and why would hand it a map of the policy it's trying to get past.
+///
+/// `NoTrustedSession` (F-M2-001, HORO-791) is a **pre-policy** denial:
+/// the agent's session-admission gate refused the request *before*
+/// `PolicySet::evaluate` was ever consulted, exactly like the existing
+/// `IndeterminateEvidence` case a non-`authorizable()` peer already
+/// produces (see `crates/eltanin-agent/src/authz/mod.rs`'s module
+/// docs). It must never be conflated with `ExplicitDeny`/
+/// `NoMatchingRule`/`IndeterminateEvidence` — those all mean "policy was
+/// consulted and did not allow it," which is not what happened here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DenialReason {
     NoMatchingRule,
     ExplicitDeny,
     IndeterminateEvidence,
+    NoTrustedSession,
 }
 
 /// A deliberately coarser, client-facing projection of
@@ -58,6 +70,31 @@ pub enum DenialReason {
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseOutcome {
     Released,
+    Refused,
+}
+
+/// A client-facing, non-replayable view of one established Trusted
+/// Compute Session (F-M2-001, HORO-791). Deliberately **not**
+/// `eltanin_core::session::TrustedSession` itself, which is `Serialize`
+/// only and carries a `MonotonicTime` pair meaningless outside the
+/// issuing agent instance — same idiom as [`LeaseView`] projecting
+/// `ComputeLease`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionView {
+    pub session_id: SessionId,
+    pub remaining: Duration,
+    pub resources: Vec<ResourceIdentity>,
+}
+
+/// A deliberately coarser, client-facing projection of
+/// [`eltanin_core::session::SessionTerminationOutcome`] — every
+/// non-`Terminated` case collapses to `Refused`, for the same
+/// enumeration-resistance reason [`ReleaseOutcome`] already collapses
+/// [`eltanin_core::lease::RevocationOutcome`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminationOutcome {
+    Terminated,
     Refused,
 }
 
@@ -89,11 +126,33 @@ pub enum ErrorCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "result")]
 pub enum AgentResponse {
-    LeaseGranted { lease: LeaseView },
-    LeaseDenied { reason: DenialReason },
-    LeaseReleased { outcome: ReleaseOutcome },
-    Status { status: AgentStatusView },
-    Error { code: ErrorCode },
+    LeaseGranted {
+        lease: LeaseView,
+    },
+    LeaseDenied {
+        reason: DenialReason,
+    },
+    LeaseReleased {
+        outcome: ReleaseOutcome,
+    },
+    Status {
+        status: AgentStatusView,
+    },
+    Error {
+        code: ErrorCode,
+    },
+    /// A Trusted Compute Session was established (F-M2-001, HORO-791).
+    SessionEstablished {
+        session: SessionView,
+    },
+    /// The calling peer's currently-verified Trusted Compute Sessions —
+    /// at most one, today.
+    SessionList {
+        sessions: Vec<SessionView>,
+    },
+    SessionTerminated {
+        outcome: TerminationOutcome,
+    },
 }
 
 /// One versioned, best-effort-correlated response body.
