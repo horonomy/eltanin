@@ -82,7 +82,7 @@ use eltanin_core::lease::{
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
 use eltanin_core::provenance::ProvenanceRecord;
-use eltanin_core::resource::{ComputeRequest, EnforcementResult};
+use eltanin_core::resource::{Capability, ComputeRequest, EnforcementResult};
 use eltanin_core::session::{
     membership, IntentProof, LocalSessionAnchor, MembershipVerdict, SessionAssurance,
     SessionAuthority, SessionId, SessionScope,
@@ -1061,6 +1061,57 @@ impl AuthorizationHandler {
         }
     }
 
+    /// Revocation-capability gate (F-M2-005, HORO-795): a no-op returning
+    /// `None` whenever `revocation_requirement` is `NotRequired` (the
+    /// default) — no backend call is made in that case, so the default
+    /// configuration path stays byte-identical to pre-HORO-795. When
+    /// `Required`, re-observes the resource (mirroring
+    /// `approval_admission`'s identical `ComputeBackend::observe`
+    /// re-check) and refuses the grant if it does not support
+    /// `Capability::DeviceRevoke` — reusing the existing
+    /// `AuthorizationOutcome::EnforcementRefused` variant/`Error{Internal}`
+    /// wire mapping already established for "internal/capability-level
+    /// refusal, not a policy decision," rather than introducing a new
+    /// wire `DenialReason` variant. An `observe` failure itself reuses
+    /// the existing `AuthorizationOutcome::BackendFailed` variant
+    /// (a real backend call failed, not a gate decision) rather than a
+    /// new one — deliberately, so this ticket's audit-event surface
+    /// stays within `crate::authz`'s own three in-scope files and never
+    /// has to touch `eltanin-audit`'s `RecordedOutcome` mirror.
+    #[allow(clippy::result_large_err)]
+    fn revocation_capability_gate(
+        &self,
+        request: &LeaseRequest,
+    ) -> Option<(AuthorizationOutcome, AgentResponse)> {
+        if self.revocation_requirement != RevocationRequirement::Required {
+            return None;
+        }
+        match self.backend.observe(&request.resource) {
+            Ok(resource) => {
+                if resource.capabilities.supports(Capability::DeviceRevoke) {
+                    None
+                } else {
+                    Some((
+                        AuthorizationOutcome::EnforcementRefused {
+                            result: EnforcementResult::Unsupported {
+                                capability: Capability::DeviceRevoke,
+                            },
+                        },
+                        AgentResponse::Error {
+                            code: ErrorCode::Internal,
+                        },
+                    ))
+                }
+            }
+            Err(error) => Some((
+                AuthorizationOutcome::BackendFailed { error },
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            )),
+        }
+    }
+
     fn handle_request_lease(
         &self,
         request: &LeaseRequest,
@@ -1113,6 +1164,14 @@ impl AuthorizationHandler {
                 Ok(delegated) => delegated,
                 Err(response) => return response,
             };
+
+        // Revocation-capability gate (F-M2-005, HORO-795): checked
+        // before capacity is ever reserved, so a request refused here
+        // never wastes/holds a capacity slot for a lease that would
+        // just be revoked immediately after.
+        if let Some(response) = self.revocation_capability_gate(request) {
+            return response;
+        }
 
         let provenance = provenance_for(request, observed.clone());
 
