@@ -141,6 +141,22 @@ pub enum ConfigError {
     NonPositiveLeaseTtl,
 }
 
+/// Agent deployment configuration (F-M2-005, HORO-795): whether
+/// `RequestLease` requires the resource to support
+/// [`Capability::DeviceRevoke`] before a lease is ever granted for it.
+/// Mirrors [`session::SessionRequirement`]/[`approval::ApprovalRequirement`]'s
+/// exact shape and the same blast-radius discipline: `NotRequired` is
+/// the default, and every pre-HORO-795 deployment/test harness that
+/// never heard of this gate must keep behaving exactly as before —
+/// today, only `enforce() == Allowed` gates whether a lease is granted;
+/// `Capability::DeviceRevoke` is never consulted at grant time at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RevocationRequirement {
+    Required,
+    #[default]
+    NotRequired,
+}
+
 /// Configuration for one [`AuthorizationHandler`]. `lease_ttl` has no
 /// default — mirroring [`crate::config::AgentConfig`]'s `socket_mode`,
 /// there is no safe default for a security-relevant duration; the
@@ -166,6 +182,10 @@ pub struct AuthorizationConfig {
     /// refusal path's behavior is then byte-identical to before this
     /// ticket (HORO-794).
     step_up: Option<eltanin_core::risk::StepUpPolicy>,
+    /// F-M2-005, HORO-795. Defaults to [`RevocationRequirement::NotRequired`]
+    /// — see [`RevocationRequirement`]'s own doc for the blast-radius
+    /// rationale.
+    revocation_requirement: RevocationRequirement,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
@@ -227,6 +247,12 @@ impl AuthorizationConfig {
             // of risk-based step-up must keep behaving exactly as
             // before — the risk layer is never consulted at all.
             step_up: None,
+            // HORO-795's own blast-radius obligation, mirroring every
+            // ticket above: every pre-HORO-795 test harness and
+            // deployment that never heard of revocation-capability
+            // gating must keep behaving exactly as before — a resource
+            // lacking Capability::DeviceRevoke remains leasable.
+            revocation_requirement: RevocationRequirement::NotRequired,
         })
     }
 
@@ -318,6 +344,21 @@ impl AuthorizationConfig {
         self.approval_store_path = Some(approval_store);
         self.step_up = Some(policy);
         self
+    }
+
+    /// Require the resource to support [`Capability::DeviceRevoke`]
+    /// before `RequestLease` grants a lease for it (F-M2-005, HORO-795).
+    /// See [`RevocationRequirement`]'s own doc for the default and its
+    /// blast-radius rationale.
+    #[must_use]
+    pub fn with_revocation_requirement(mut self, requirement: RevocationRequirement) -> Self {
+        self.revocation_requirement = requirement;
+        self
+    }
+
+    #[must_use]
+    pub fn revocation_requirement(&self) -> RevocationRequirement {
+        self.revocation_requirement
     }
 
     #[must_use]
@@ -510,6 +551,7 @@ pub struct AuthorizationHandler {
     once_approval_ttl: Duration,
     delegation: Option<eltanin_core::delegation::DelegationBounds>,
     step_up: Option<eltanin_core::risk::StepUpPolicy>,
+    revocation_requirement: RevocationRequirement,
 }
 
 impl AuthorizationHandler {
@@ -572,6 +614,7 @@ impl AuthorizationHandler {
             once_approval_ttl: config.once_approval_ttl,
             delegation: config.delegation.clone(),
             step_up: config.step_up.clone(),
+            revocation_requirement: config.revocation_requirement,
         }
     }
 
