@@ -1309,8 +1309,22 @@ impl AuthorizationHandler {
         // lease's enforcement. Holding the lock here serializes this
         // decide-and-execute sequence against every insert, which also
         // requires this same lock (see state::LeaseState::insert).
+        // Bug fix (HORO-795): a real `Err` here used to be `.ok()`'d into
+        // `None`, indistinguishable from the legitimate `None` produced
+        // by `revoke_backend` being `false` above (another live lease on
+        // the same resource, so no teardown was ever attempted). Mapping
+        // it to the existing `EnforcementResult::Error` variant instead
+        // makes the plumbing honest: this proves nothing about whether a
+        // real backend can actually invalidate an already-open device
+        // handle, only that a real failure to try is now recorded rather
+        // than silently discarded.
         let backend_result = if revoke_backend {
-            self.backend.revoke(&resource).ok()
+            match self.backend.revoke(&resource) {
+                Ok(result) => Some(result),
+                Err(error) => Some(EnforcementResult::Error {
+                    message: error.to_string(),
+                }),
+            }
         } else {
             None
         };
