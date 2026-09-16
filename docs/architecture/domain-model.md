@@ -1058,6 +1058,84 @@ states plainly that re-approving will not admit the request.
 detection has no `RiskSignal` variant and no collector anywhere in this
 workspace — declared unbuilt in ADR 0012, not silently narrowed scope.
 
+## Compute Lease Lifecycle Hardening (F-M2-005, HORO-795) — `eltanin-agent::authz`
+
+MVP 2.0's fifth Feature. Not new mechanism for renewal or restart
+recovery — both were already correct (see
+[ADR 0013](../adr/0013-compute-lease-lifecycle-hardening.md) for the
+full disclosure) — this ticket closes two real fail-open bugs, fixes
+one honesty gap, and adds one opt-in grant-time gate, all inside
+`crates/eltanin-agent/src/authz/{mod.rs, state.rs, session_state.rs}`.
+
+**Bug fix — lazy session reap now cascades to `backend.revoke()`.**
+`SessionState::reap` is now `#[must_use]`; both lazy-reaping call sites
+(`membership_for_peer`, `handle_create_session`) consume its returned
+lease ids through a new `AuthorizationHandler::cascade_revoke_leases`
+helper, reusing the same `revoke_lease_for_session_teardown` mechanism
+`handle_terminate_session`'s explicit-termination cascade already used
+(that method now also calls the shared helper, removing a third copy
+of the same loop). Before this fix, only explicit `TerminateSession`
+cascaded correctly — a session dying by expiry or anchor-leader death
+left its leases' backend enforcement live indefinitely.
+
+**Bug fix — a new lazy expired-lease sweep.**
+`LeaseState::sweep_expired(now) -> Vec<(LeaseId, ResourceIdentity)>`
+(new, `#[must_use]`) removes every lease past `expires_at` (as `prune`
+already did) and additionally decides, once per distinct resource named
+by a just-expired lease, whether any other still-live lease remains for
+it — reusing `any_other_live_lease_for_same_resource`'s exact rule,
+evaluated against what remains after the whole expired batch is
+removed so a resource named by several simultaneously-expiring leases
+is handed back exactly once. `AuthorizationHandler::sweep_expired_leases`
+takes the state lock, calls this, drops the lock, then calls
+`backend.revoke()` for each resource — mirroring `SessionState::reap`'s
+"decide under the lock, act after releasing it" shape. Called at the
+top of both `handle_request_lease` and `handle_release_lease`, before
+either function's own existing `prune` call — a separate step, never
+threaded through `issue_reserving_capacity`'s signature.
+
+**Honesty fix — a real backend revoke error is recorded.**
+`handle_release_lease`'s `backend_result` previously mapped
+`Err(BackendError)` to `.ok()` → `None`, indistinguishable from the
+legitimate `None` produced when another live lease on the same
+resource means no teardown was attempted. Now `Err(error) =>
+Some(EnforcementResult::Error { message: error.to_string() })` — the
+existing `EnforcementResult::Error` variant, no new type. The existing
+`Some(Unsupported)` case (a resource structurally lacking
+`Capability::DeviceRevoke`) was already correct and untouched.
+
+**New opt-in gate — `RevocationRequirement`.** Mirrors
+`SessionRequirement`/`ApprovalRequirement`'s exact shape:
+`{Required, NotRequired}`, defaulting to `NotRequired` via
+`AuthorizationConfig::with_revocation_requirement`. When `Required`, a
+new `AuthorizationHandler::revocation_capability_gate` — called once
+per `RequestLease`, before capacity is reserved — re-observes the
+resource and refuses the grant if it lacks `Capability::DeviceRevoke`,
+reusing the existing `AuthorizationOutcome::EnforcementRefused{result:
+Unsupported{DeviceRevoke}}` / `AgentResponse::Error{Internal}` wire
+mapping. An `observe` failure reuses the existing
+`AuthorizationOutcome::BackendFailed` variant rather than adding a new
+one, keeping this ticket's audit-event surface inside `authz`'s own
+three files and out of `eltanin-audit`'s separate-crate `RecordedOutcome`
+mirror. **No `DOMAIN_SCHEMA_VERSION` bump** — stays at 5.
+
+**Doc-comment correction, not a behavior change**: `session_state.rs`'s
+module doc previously overclaimed that `membership` alone would reject
+an expired-but-not-yet-reaped session; `membership` takes no `now`
+parameter and never checks `expires_at`. The actual invariant —
+`membership_for_peer` calls `reap` immediately before the session
+lookup, under the same lock — is now stated explicitly.
+
+**Named limitations, disclosed, not hidden** (see ADR 0013 for the full
+list): "best-effort revoke" is now honestly *plumbed* but remains
+entirely unproven against real hardware
+(`BLOCKED_ON_E3`/`UNVERIFIED_ON_BARE_METAL`); policy-change-triggered
+renewal refusal works only via restart → `ForeignIssuer`, not live
+policy-revision tracking; renewal stays audit-invisible as a distinct
+event, reconstructible only by correlation; lease expiry itself still
+emits no dedicated audit event, named as an explicit HORO-796 forward
+obligation.
+
 ## Not yet implemented
 
 F-M1-001/003/004/005 (`eltanin-core`), all of F-M1-006 (`eltanin-protocol`
