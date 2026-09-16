@@ -24,6 +24,18 @@
 //! lease. Do not read the absence of a background sweep thread as a
 //! leak — this comment is here because that is an easy thing for a
 //! future reader to misread.
+//!
+//! **Correction (HORO-795):** the claim above — "`membership` would
+//! independently reject it" — is true for anchor-liveness (a dead
+//! anchor leader) but was previously overstated for time-based expiry:
+//! [`eltanin_core::session::membership`] takes no `now` parameter and
+//! never checks `expires_at` on its own. The actual safety property is
+//! that [`crate::authz::AuthorizationHandler::membership_for_peer`]
+//! calls [`Self::reap`] immediately before the session lookup, *under
+//! the same lock* — that ordering is load-bearing, not incidental. An
+//! expired session is never itself admitted because it is reaped away
+//! before `membership` ever sees it, not because `membership` would
+//! have rejected it on expiry grounds if it had.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, PoisonError};
@@ -112,7 +124,13 @@ impl SessionState {
     /// its associated lease ids, for the caller to revoke at the
     /// backend/lease-state layer — this module owns no
     /// `ComputeBackend`/`LeaseState` reference itself, staying a pure
-    /// session store.
+    /// session store. `#[must_use]` (HORO-795 bug fix): both call sites
+    /// in `authz/mod.rs` used to discard this return value entirely, so
+    /// a session that died by EXPIRY or ANCHOR-LEADER DEATH (as opposed
+    /// to an explicit `TerminateSession`, whose own cascade already
+    /// consumed this correctly) never had its leases revoked at the
+    /// backend layer at all.
+    #[must_use]
     pub(crate) fn reap(
         &mut self,
         now: MonotonicTime,

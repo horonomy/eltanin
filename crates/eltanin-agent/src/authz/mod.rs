@@ -645,27 +645,58 @@ impl AuthorizationHandler {
     ) {
         let now = self.clock.now();
         let mut sessions = session_state::lock(&self.sessions);
-        sessions.reap(now, session::collect_workload_identity);
+        let reaped = sessions.reap(now, session::collect_workload_identity);
 
         let pid = peer.observed().workload.pid;
         let peer_key = session::collect_session_key(pid);
-        let Some(candidate) = (match &peer_key {
+        let matched_and_verdict = match &peer_key {
             Evidence::Present { value, .. } => sessions.find_by_key(*value),
             Evidence::Missing { .. } | Evidence::Unsupported => None,
-        }) else {
-            return (
+        }
+        .map(|candidate| {
+            let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
+            let verdict = membership(candidate, &peer_key, &leader);
+            let matched =
+                matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
+            (matched, verdict)
+        });
+        drop(sessions);
+
+        // Bug fix (HORO-795): a session reaped just above — by EXPIRY or
+        // ANCHOR-LEADER DEATH, as opposed to an explicit
+        // `TerminateSession` (whose own cascade already handled this
+        // correctly) — must cascade-revoke its leases at the
+        // backend/lease-state layer the same way, or a killed
+        // `eltanin run` process's device-level access outlives its own
+        // now-dead session indefinitely. See `SessionState::reap`'s doc
+        // comment.
+        for (_, lease_ids) in reaped {
+            self.cascade_revoke_leases(lease_ids);
+        }
+
+        match matched_and_verdict {
+            Some((matched, verdict)) => (matched, verdict, peer_key),
+            None => (
                 None,
                 MembershipVerdict::Indeterminate {
                     reason: "no session found for this peer's session key".to_string(),
                 },
                 peer_key,
-            );
-        };
+            ),
+        }
+    }
 
-        let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
-        let verdict = membership(candidate, &peer_key, &leader);
-        let matched = matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
-        (matched, verdict, peer_key)
+    /// Cascade-revoke every lease id in `lease_ids` at the lease-state/
+    /// backend layer, reusing exactly the mechanism
+    /// `handle_terminate_session`'s explicit-termination cascade already
+    /// established: [`Self::revoke_lease_for_session_teardown`] for each
+    /// id. Shared by every lazy-reaping call site (Bug fix, HORO-795) so
+    /// a session dying by EXPIRY or ANCHOR-LEADER DEATH is cascaded
+    /// identically to one dying by explicit `TerminateSession`.
+    fn cascade_revoke_leases(&self, lease_ids: BTreeSet<LeaseId>) {
+        for lease_id in lease_ids {
+            self.revoke_lease_for_session_teardown(&lease_id);
+        }
     }
 
     /// The result of [`AuthorizationHandler::approval_admission`].
@@ -1305,20 +1336,18 @@ impl AuthorizationHandler {
         }
     }
 
-    fn handle_create_session(
-        &self,
-        request: &CreateSessionRequest,
-        peer: &PeerContext,
-    ) -> (AuthorizationOutcome, AgentResponse) {
-        let Some(observed) = peer.authorizable() else {
-            return (
-                AuthorizationOutcome::PeerNotAuthorizable,
-                AgentResponse::Error {
-                    code: ErrorCode::Internal,
-                },
-            );
-        };
-
+    /// Derive the anchor key / owner uid / scope `handle_create_session`
+    /// needs to call `establish`, or the exact early-refusal `(outcome,
+    /// response)` pair it should return immediately. Split out only to
+    /// stay under this crate's line-count lint — no behavioral seam.
+    #[allow(clippy::result_large_err)]
+    fn session_establish_inputs(
+        observed: &eltanin_core::identity::ExecutionContext,
+        resources: &[eltanin_core::resource::ResourceIdentity],
+    ) -> Result<
+        (eltanin_core::session::SessionKey, u32, SessionScope),
+        (AuthorizationOutcome, AgentResponse),
+    > {
         // Intent proof (F-M2-001, HORO-791): the requester is the
         // authorizable local peer of this very request — no additional
         // hardware-backed step. See `eltanin_core::session::IntentProof`'s
@@ -1343,17 +1372,48 @@ impl AuthorizationHandler {
             // `peer.authorizable()` gate above: evidence about the
             // requester could not be confirmed, not a policy or session
             // decision.
-            return (
+            return Err((
                 AuthorizationOutcome::PeerNotAuthorizable,
                 AgentResponse::Error {
                     code: ErrorCode::Internal,
                 },
-            );
+            ));
         };
         let Evidence::Present {
             value: owner_uid, ..
         } = &observed.workload.uid
         else {
+            return Err((
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            ));
+        };
+
+        let scope = match SessionScope::new(resources.iter().cloned()) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return Err((
+                    AuthorizationOutcome::SessionEstablishFailed {
+                        error: SessionAdmissionError::EmptyScope(error),
+                    },
+                    AgentResponse::Error {
+                        code: ErrorCode::Internal,
+                    },
+                ))
+            }
+        };
+
+        Ok((key, *owner_uid, scope))
+    }
+
+    fn handle_create_session(
+        &self,
+        request: &CreateSessionRequest,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let Some(observed) = peer.authorizable() else {
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
                 AgentResponse::Error {
@@ -1362,19 +1422,11 @@ impl AuthorizationHandler {
             );
         };
 
-        let scope = match SessionScope::new(request.resources.iter().cloned()) {
-            Ok(scope) => scope,
-            Err(error) => {
-                return (
-                    AuthorizationOutcome::SessionEstablishFailed {
-                        error: SessionAdmissionError::EmptyScope(error),
-                    },
-                    AgentResponse::Error {
-                        code: ErrorCode::Internal,
-                    },
-                )
-            }
-        };
+        let (key, owner_uid, scope) =
+            match Self::session_establish_inputs(observed, &request.resources) {
+                Ok(inputs) => inputs,
+                Err(response) => return response,
+            };
 
         let anchor = LocalSessionAnchor {
             key,
@@ -1382,9 +1434,9 @@ impl AuthorizationHandler {
         };
         let now = self.clock.now();
         let mut sessions = session_state::lock(&self.sessions);
-        sessions.reap(now, session::collect_workload_identity);
+        let reaped = sessions.reap(now, session::collect_workload_identity);
         let established = sessions.authority_mut().establish(
-            *owner_uid,
+            owner_uid,
             anchor,
             scope,
             IntentProof::LocalPeerPresence,
@@ -1392,14 +1444,13 @@ impl AuthorizationHandler {
             now,
             request.ttl,
         );
-        match established {
+        let result = match established {
             Ok(established) => {
                 let session_id = established.id().clone();
                 let expires_at = established.expires_at();
                 let remaining = expires_at.saturating_duration_since(now);
                 let resources = established.scope().resources().iter().cloned().collect();
                 sessions.insert(established);
-                drop(sessions);
                 (
                     AuthorizationOutcome::SessionEstablished {
                         session_id: session_id.clone(),
@@ -1422,7 +1473,17 @@ impl AuthorizationHandler {
                     code: ErrorCode::Internal,
                 },
             ),
+        };
+        drop(sessions);
+
+        // Bug fix (HORO-795): see `membership_for_peer`'s identical
+        // cascade — this lazy-reaping call site discarded `reap`'s
+        // return value entirely before this fix.
+        for (_, lease_ids) in reaped {
+            self.cascade_revoke_leases(lease_ids);
         }
+
+        result
     }
 
     fn handle_list_sessions(&self, peer: &PeerContext) -> (AuthorizationOutcome, AgentResponse) {
@@ -1468,9 +1529,7 @@ impl AuthorizationHandler {
         drop(sessions);
 
         if let Some((_, lease_ids)) = removed {
-            for lease_id in lease_ids {
-                self.revoke_lease_for_session_teardown(&lease_id);
-            }
+            self.cascade_revoke_leases(lease_ids);
         }
 
         let wire_outcome = if matches!(
