@@ -31,7 +31,7 @@
 //! [`eltanin_core::session::membership`] takes no `now` parameter and
 //! never checks `expires_at` on its own. The actual safety property is
 //! that [`crate::authz::AuthorizationHandler::membership_for_peer`]
-//! calls [`Self::reap`] immediately before the session lookup, *under
+//! calls [`SessionState::reap`] immediately before the session lookup, *under
 //! the same lock* — that ordering is load-bearing, not incidental. An
 //! expired session is never itself admitted because it is reaped away
 //! before `membership` ever sees it, not because `membership` would
