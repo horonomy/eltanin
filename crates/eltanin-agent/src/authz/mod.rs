@@ -611,6 +611,38 @@ impl AuthorizationHandler {
         }
     }
 
+    /// Bug fix (HORO-795): tear down backend enforcement for any lease
+    /// that has expired since it was granted. `LeaseState::prune` (called
+    /// by `issue_reserving_capacity` and `handle_release_lease` below)
+    /// removes an expired lease's *lease-state* record but owns no
+    /// [`ComputeBackend`] reference and cannot itself call
+    /// `backend.revoke()` — without this sweep, a workload whose
+    /// controlling `eltanin run` process was killed (so `ReleaseLease` is
+    /// never called) keeps live backend-side enforcement indefinitely
+    /// after its lease has silently expired and been pruned. Called at
+    /// the top of both `handle_request_lease` and `handle_release_lease`
+    /// — a separate step, run *before* either of those functions' own
+    /// existing `prune` call, never threaded through
+    /// `issue_reserving_capacity`'s signature (a different function with
+    /// a different job).
+    ///
+    /// Mirrors [`Self::membership_for_peer`]'s reap-then-cascade shape,
+    /// and `LeaseState::sweep_expired`'s own "compute what to do under
+    /// the lock, drop the lock, then act" discipline: the state lock is
+    /// released before any `backend.revoke()` call, exactly like every
+    /// other backend call this handler makes outside `handle_release_lease`'s
+    /// own deliberate exception (see that method's doc comment on why it
+    /// alone holds the lock across its `backend.revoke()` call).
+    fn sweep_expired_leases(&self) {
+        let now = self.clock.now();
+        let mut guard = state::lock(&self.state);
+        let work = guard.sweep_expired(now);
+        drop(guard);
+        for (_, resource) in work {
+            let _ = self.backend.revoke(&resource);
+        }
+    }
+
     fn handle_status() -> (AuthorizationOutcome, AgentResponse) {
         (
             AuthorizationOutcome::StatusReported,
@@ -991,6 +1023,13 @@ impl AuthorizationHandler {
         request: &LeaseRequest,
         peer: &PeerContext,
     ) -> (AuthorizationOutcome, AgentResponse) {
+        // Bug fix (HORO-795): sweep any lease that has expired since it
+        // was granted, tearing down its backend enforcement — see
+        // `sweep_expired_leases`'s own doc comment. Runs before every
+        // other check below, same as `LeaseState::prune`'s existing
+        // touch-point discipline.
+        self.sweep_expired_leases();
+
         let Some(observed) = peer.authorizable() else {
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
@@ -1211,6 +1250,10 @@ impl AuthorizationHandler {
         request: &ReleaseRequest,
         peer: &PeerContext,
     ) -> (AuthorizationOutcome, AgentResponse) {
+        // Bug fix (HORO-795): see `sweep_expired_leases`'s own doc
+        // comment and `handle_request_lease`'s identical call above.
+        self.sweep_expired_leases();
+
         let Some(observed) = peer.authorizable() else {
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
