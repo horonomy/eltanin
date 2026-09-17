@@ -92,8 +92,8 @@ use eltanin_protocol::request::{
     LeaseRequest, ReleaseRequest,
 };
 use eltanin_protocol::response::{
-    AgentResponse, AgentStatusView, ApprovalView, DenialReason, ErrorCode, ForgetOutcome,
-    LeaseView, ReleaseOutcome, SessionView, TerminationOutcome,
+    AgentResponse, AgentStatusView, ApprovalView, DenialReason, EnforcementMode, ErrorCode,
+    ForgetOutcome, LeaseView, ReleaseOutcome, SessionView, ShadowVerdict, TerminationOutcome,
 };
 
 use crate::handler::RequestHandler;
@@ -186,6 +186,12 @@ pub struct AuthorizationConfig {
     /// — see [`RevocationRequirement`]'s own doc for the blast-radius
     /// rationale.
     revocation_requirement: RevocationRequirement,
+    /// F-M2-006, HORO-796 subtask 3. Defaults to
+    /// [`EnforcementMode::Enforce`] via its own `#[default]` — every
+    /// pre-HORO-796-subtask-3 deployment/test harness that never heard
+    /// of shadow mode must keep behaving exactly as before, same
+    /// blast-radius discipline as every requirement above.
+    enforcement_mode: EnforcementMode,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
@@ -253,6 +259,12 @@ impl AuthorizationConfig {
             // gating must keep behaving exactly as before — a resource
             // lacking Capability::DeviceRevoke remains leasable.
             revocation_requirement: RevocationRequirement::NotRequired,
+            // HORO-796 subtask 3's own blast-radius obligation, mirroring
+            // every ticket above: every pre-subtask-3 test harness and
+            // deployment that never heard of shadow mode must keep
+            // behaving exactly as before — every granted `RequestLease`
+            // actually reaches the backend and is inserted.
+            enforcement_mode: EnforcementMode::default(),
         })
     }
 
@@ -359,6 +371,20 @@ impl AuthorizationConfig {
     #[must_use]
     pub fn revocation_requirement(&self) -> RevocationRequirement {
         self.revocation_requirement
+    }
+
+    /// Set the agent's enforcement posture (F-M2-006, HORO-796 subtask
+    /// 3). See [`EnforcementMode`]'s own doc and `crate::authz`'s module
+    /// docs for the full shadow-mode contract.
+    #[must_use]
+    pub fn with_enforcement_mode(mut self, mode: EnforcementMode) -> Self {
+        self.enforcement_mode = mode;
+        self
+    }
+
+    #[must_use]
+    pub fn enforcement_mode(&self) -> EnforcementMode {
+        self.enforcement_mode
     }
 
     #[must_use]
@@ -521,6 +547,25 @@ struct DelegatedGrantContext {
     holder_pid: u32,
 }
 
+/// Everything [`AuthorizationHandler::enforce_and_finalize`] (real
+/// enforcement) or [`AuthorizationHandler::shadow_would_grant`] (shadow
+/// mode) needs to act on an already-computed grant verdict — the bundle
+/// [`AuthorizationHandler::request_lease_verdict`] produces on its `Ok`
+/// path. `lease` has already been minted by
+/// [`AuthorizationHandler::issue_reserving_capacity`] (a real capacity
+/// reservation is held for it) and had its expiry narrowed for a
+/// delegated grant, if any — a real [`eltanin_core::lease::ComputeLease`],
+/// never a preview, which is exactly why shadow mode can still report a
+/// real, correlatable `lease_id` even though it never keeps the lease
+/// (F-M2-006, HORO-796 subtask 3).
+struct PreparedGrant {
+    lease: eltanin_core::lease::ComputeLease,
+    matched_session: Option<SessionId>,
+    observed: eltanin_core::identity::ExecutionContext,
+    peer_session_key: Evidence<eltanin_core::session::SessionKey>,
+    delegated: Option<DelegatedGrantContext>,
+}
+
 /// Why [`AuthorizationHandler::issue_reserving_capacity`] did not
 /// produce a lease.
 enum IssueFailure {
@@ -552,6 +597,7 @@ pub struct AuthorizationHandler {
     delegation: Option<eltanin_core::delegation::DelegationBounds>,
     step_up: Option<eltanin_core::risk::StepUpPolicy>,
     revocation_requirement: RevocationRequirement,
+    enforcement_mode: EnforcementMode,
 }
 
 impl AuthorizationHandler {
@@ -615,6 +661,7 @@ impl AuthorizationHandler {
             delegation: config.delegation.clone(),
             step_up: config.step_up.clone(),
             revocation_requirement: config.revocation_requirement,
+            enforcement_mode: config.enforcement_mode,
         }
     }
 
@@ -669,6 +716,14 @@ impl AuthorizationHandler {
     /// `issue_reserving_capacity`'s signature (a different function with
     /// a different job).
     ///
+    /// No `enforcement_mode` branch needed here (F-M2-006, HORO-796
+    /// subtask 3): a lease minted under [`EnforcementMode::Shadow`] is
+    /// always reversed (revoked, never inserted) before this method's
+    /// caller returns — see [`Self::shadow_would_grant`] — so
+    /// `LeaseState` structurally never holds a shadow-minted lease for
+    /// this sweep to find. This sweep needs no awareness of shadow mode
+    /// at all.
+    ///
     /// Mirrors [`Self::membership_for_peer`]'s reap-then-cascade shape,
     /// and `LeaseState::sweep_expired`'s own "compute what to do under
     /// the lock, drop the lock, then act" discipline: the state lock is
@@ -714,12 +769,13 @@ impl AuthorizationHandler {
         }
     }
 
-    fn handle_status() -> (AuthorizationOutcome, AgentResponse) {
+    fn handle_status(&self) -> (AuthorizationOutcome, AgentResponse) {
         (
             AuthorizationOutcome::StatusReported,
             AgentResponse::Status {
                 status: AgentStatusView {
                     protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
+                    enforcement_mode: self.enforcement_mode,
                 },
             },
         )
@@ -1140,11 +1196,34 @@ impl AuthorizationHandler {
         }
     }
 
-    fn handle_request_lease(
+    /// Compute what a `RequestLease` should do, without acting on it —
+    /// everything through lease issuance and delegated-expiry narrowing
+    /// (F-M2-006, HORO-796 subtask 3). Extracted from
+    /// `handle_request_lease` so both the real-enforcement path
+    /// ([`Self::enforce_and_finalize`]) and the shadow-mode path
+    /// ([`Self::shadow_would_grant`]/[`Self::shadow_project_refusal`])
+    /// reach `PolicySet::evaluate` and every gate through this exact
+    /// same call chain — the ticket's own explicit warning is that
+    /// shadow mode "must use the same decision engine... not become a
+    /// separate fake path," and this is the structural guarantee of
+    /// that: there is only ever one function that decides.
+    ///
+    /// A mechanical extraction, not a behavior change: every `Err` arm
+    /// below produces the exact `(AuthorizationOutcome, AgentResponse,
+    /// Option<SessionId>)` triple `handle_request_lease` itself used to
+    /// return directly for that same condition.
+    // `(AuthorizationOutcome, AgentResponse, Option<SessionId>)` is the
+    // exact triple `handle_request_lease` already returned from every
+    // refusal branch before this extraction; boxing it here would just
+    // move the allocation, not remove it, mirroring
+    // `approval_and_delegation_gate`'s identical existing suppression
+    // just above.
+    #[allow(clippy::result_large_err, clippy::type_complexity)]
+    fn request_lease_verdict(
         &self,
         request: &LeaseRequest,
         peer: &PeerContext,
-    ) -> (AuthorizationOutcome, AgentResponse, Option<SessionId>) {
+    ) -> Result<PreparedGrant, (AuthorizationOutcome, AgentResponse, Option<SessionId>)> {
         // Bug fix (HORO-795): sweep any lease that has expired since it
         // was granted, tearing down its backend enforcement — see
         // `sweep_expired_leases`'s own doc comment. Runs before every
@@ -1156,13 +1235,13 @@ impl AuthorizationHandler {
             // Genuinely runs before session resolution below — `None`
             // is the honest value here (HORO-796 subtask 2), not a
             // placeholder.
-            return (
+            return Err((
                 AuthorizationOutcome::PeerNotAuthorizable,
                 AgentResponse::LeaseDenied {
                     reason: DenialReason::IndeterminateEvidence,
                 },
                 None,
-            );
+            ));
         };
 
         // Pre-policy session-admission gate (F-M2-001, HORO-791): runs
@@ -1181,13 +1260,13 @@ impl AuthorizationHandler {
         if self.session_requirement == SessionRequirement::Required
             && !matches!(verdict, MembershipVerdict::Member)
         {
-            return (
+            return Err((
                 AuthorizationOutcome::SessionRequired,
                 AgentResponse::LeaseDenied {
                     reason: DenialReason::NoTrustedSession,
                 },
                 matched_session,
-            );
+            ));
         }
 
         // Pre-policy approval-admission gate (F-M2-002, HORO-792),
@@ -1198,7 +1277,7 @@ impl AuthorizationHandler {
             match self.approval_and_delegation_gate(request, observed, &peer_session_key, &verdict)
             {
                 Ok(delegated) => delegated,
-                Err((outcome, response)) => return (outcome, response, matched_session),
+                Err((outcome, response)) => return Err((outcome, response, matched_session)),
             };
 
         // Revocation-capability gate (F-M2-005, HORO-795): checked
@@ -1206,7 +1285,7 @@ impl AuthorizationHandler {
         // never wastes/holds a capacity slot for a lease that would
         // just be revoked immediately after.
         if let Some((outcome, response)) = self.revocation_capability_gate(request) {
-            return (outcome, response, matched_session);
+            return Err((outcome, response, matched_session));
         }
 
         let provenance = provenance_for(request, observed.clone());
@@ -1214,51 +1293,229 @@ impl AuthorizationHandler {
         let lease = match self.issue_reserving_capacity(provenance) {
             Ok(lease) => lease,
             Err(IssueFailure::CapacityExhausted { outstanding }) => {
-                return (
+                return Err((
                     AuthorizationOutcome::CapacityExhausted { outstanding },
                     AgentResponse::Error {
                         code: ErrorCode::Internal,
                     },
                     matched_session,
-                )
+                ))
             }
             Err(IssueFailure::Denied(decision)) => {
                 let reason = denial_reason_for(decision.reason());
-                return (
+                return Err((
                     AuthorizationOutcome::PolicyDenied { decision },
                     AgentResponse::LeaseDenied { reason },
                     matched_session,
-                );
+                ));
             }
             Err(IssueFailure::Other(error)) => {
-                return (
+                return Err((
                     AuthorizationOutcome::LeaseIssueFailed { error },
                     AgentResponse::Error {
                         code: ErrorCode::Internal,
                     },
                     matched_session,
-                )
+                ))
             }
         };
 
-        // `narrow_expiry` here — before `enforce_and_finalize` ever runs
-        // — is what makes a delegated grant's TTL bound structural
-        // rather than merely checked: the lease this call produces can
-        // never carry an expiry later than the delegation verdict's own
+        // `narrow_expiry` here — before either action path ever runs —
+        // is what makes a delegated grant's TTL bound structural rather
+        // than merely checked: the lease this call produces can never
+        // carry an expiry later than the delegation verdict's own
         // `not_after`.
         let lease = match &delegated {
             Some(ctx) => lease.narrow_expiry(ctx.not_after),
             None => lease,
         };
 
-        let (outcome, response) = self.enforce_and_finalize(
+        Ok(PreparedGrant {
             lease,
-            matched_session.as_ref(),
-            observed,
-            &peer_session_key,
+            matched_session,
+            observed: observed.clone(),
+            peer_session_key,
             delegated,
-        );
-        (outcome, response, matched_session)
+        })
+    }
+
+    fn handle_request_lease(
+        &self,
+        request: &LeaseRequest,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse, Option<SessionId>) {
+        match self.request_lease_verdict(request, peer) {
+            Ok(prepared) => {
+                let matched_session = prepared.matched_session.clone();
+                let (outcome, response) = match self.enforcement_mode {
+                    EnforcementMode::Enforce => {
+                        let PreparedGrant {
+                            lease,
+                            matched_session,
+                            observed,
+                            peer_session_key,
+                            delegated,
+                        } = prepared;
+                        self.enforce_and_finalize(
+                            lease,
+                            matched_session.as_ref(),
+                            &observed,
+                            &peer_session_key,
+                            delegated,
+                        )
+                    }
+                    EnforcementMode::Shadow => self.shadow_would_grant(&prepared),
+                };
+                (outcome, response, matched_session)
+            }
+            Err((outcome, response, matched_session)) => match self.enforcement_mode {
+                EnforcementMode::Enforce => (outcome, response, matched_session),
+                EnforcementMode::Shadow => {
+                    let (outcome, response) = Self::shadow_project_refusal(outcome, response);
+                    (outcome, response, matched_session)
+                }
+            },
+        }
+    }
+
+    /// Shadow-mode counterpart to [`Self::enforce_and_finalize`]
+    /// (F-M2-006, HORO-796 subtask 3): `prepared.lease` reached here
+    /// through the exact same `PolicySet::evaluate`/gate call chain
+    /// `enforce_and_finalize` itself uses — both are fed by
+    /// [`Self::request_lease_verdict`]. This method's only job is to
+    /// report what *would* have happened, without ever calling
+    /// [`ComputeBackend::enforce`]: verified by
+    /// `crates/eltanin-agent/tests/authz_shadow.rs`'s call-count
+    /// assertions, not merely by this comment.
+    ///
+    /// `prepared.lease` was already minted by `issue_reserving_capacity`
+    /// (a real `LeaseId`, a real capacity reservation) — reversed here
+    /// the exact same way `enforce_and_finalize`'s own non-`Allowed` arms
+    /// already do (`issuer_mut().revoke` + `release_reservation`), never
+    /// a new compensating mechanism.
+    ///
+    /// Deliberately does **not** mint a
+    /// [`eltanin_core::delegation::DelegationGrant`], even when
+    /// `prepared.delegated` is `Some`/`self.delegation` is configured:
+    /// minting one is `enforce_and_finalize`'s own real-grant side
+    /// effect, conditioned on `backend.enforce()` actually returning
+    /// `Allowed` — shadow mode never reaches that call at all, so there
+    /// is no real grant for a future delegated admission to chain from.
+    /// Likewise never associates the lease with a session (`insert`,
+    /// `associate_lease`) — nothing was actually granted.
+    fn shadow_would_grant(
+        &self,
+        prepared: &PreparedGrant,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let expires_at = prepared.lease.expires_at();
+        let lease_id = prepared.lease.id().clone();
+
+        // Reverse the mint: the exact same compensating path
+        // `enforce_and_finalize`'s non-`Allowed` arms already use.
+        // Deliberately never `backend.enforce()`/`backend.revoke()` —
+        // shadow mode must not touch the backend at all.
+        let mut guard = state::lock(&self.state);
+        guard.issuer_mut().revoke(&lease_id);
+        guard.release_reservation();
+        drop(guard);
+
+        (
+            AuthorizationOutcome::WouldGrant {
+                lease_id,
+                expires_at,
+            },
+            AgentResponse::ShadowObserved {
+                verdict: ShadowVerdict::WouldAllow,
+            },
+        )
+    }
+
+    /// Shadow-mode counterpart to a refusal
+    /// [`Self::request_lease_verdict`] already produced (F-M2-006,
+    /// HORO-796 subtask 3): `outcome` — the value recorded to audit — is
+    /// returned byte-identical to what `Enforce` mode would have
+    /// recorded for the same input; this is the differential-equivalence
+    /// property `authz_shadow.rs` verifies. Only the *wire* response
+    /// changes: from whichever concrete `AgentResponse::LeaseDenied`/
+    /// `Error` variant `Enforce` mode would have sent, to the coarse
+    /// [`AgentResponse::ShadowObserved`] projection — the specific gate/
+    /// policy reason stays in the audit trail only, same "lossy wire,
+    /// rich audit" discipline `DenialReason` already establishes.
+    ///
+    /// A gate/policy refusal — a genuine authorization verdict — projects
+    /// to `WouldDeny`/`WouldStepUp`. A refusal that is not itself a
+    /// decision (a backend-observe failure, capacity exhaustion, a
+    /// structurally-unreachable lease error) has no verdict to shadow and
+    /// keeps its existing `AgentResponse::Error` response unchanged in
+    /// both modes — it would be identically undecidable in `Enforce`
+    /// mode too, so there is nothing honest to report as "would deny."
+    ///
+    /// Matched explicitly over every `AuthorizationOutcome` variant,
+    /// never a wildcard, mirroring `denial_reason_for`'s own discipline —
+    /// a future variant added to this crate fails to compile here
+    /// instead of silently landing in the wrong bucket. The two `None`
+    /// groups below both return the same value today, which is why
+    /// clippy's `match_same_arms` is suppressed for this function — they
+    /// are kept structurally separate (reachable-but-not-a-decision vs.
+    /// genuinely unreachable from this call site) because that
+    /// distinction is exactly what a reviewer needs to verify this match
+    /// is honest, not because clippy can't see a difference that matters.
+    #[allow(clippy::match_same_arms)]
+    fn shadow_project_refusal(
+        outcome: AuthorizationOutcome,
+        response: AgentResponse,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let verdict = match &outcome {
+            AuthorizationOutcome::StepUpRequired { .. } => Some(ShadowVerdict::WouldStepUp),
+            AuthorizationOutcome::PeerNotAuthorizable
+            | AuthorizationOutcome::SessionRequired
+            | AuthorizationOutcome::ApprovalRequired
+            | AuthorizationOutcome::ApprovalDenied
+            | AuthorizationOutcome::DelegationRefused { .. }
+            | AuthorizationOutcome::DelegationIndeterminate { .. }
+            | AuthorizationOutcome::RiskDenied { .. }
+            | AuthorizationOutcome::PolicyDenied { .. }
+            | AuthorizationOutcome::EnforcementRefused { .. } => Some(ShadowVerdict::WouldDeny),
+            // Not decisions — internal/infrastructure failures that
+            // would be identically undecidable in `Enforce` mode, so
+            // there is no verdict to project. Only
+            // `CapacityExhausted`/`LeaseIssueFailed`/`ApprovalGateObserveFailed`
+            // are actually reachable from `request_lease_verdict`'s
+            // refusal path; `BackendFailed` is listed alongside them for
+            // the same reason (an `observe`/`enforce` failure is never a
+            // decision), even though its only current producer
+            // (`revocation_capability_gate`'s `observe` failure) already
+            // sits inside the refusal path too.
+            AuthorizationOutcome::CapacityExhausted { .. }
+            | AuthorizationOutcome::LeaseIssueFailed { .. }
+            | AuthorizationOutcome::BackendFailed { .. }
+            | AuthorizationOutcome::ApprovalGateObserveFailed { .. } => None,
+            // Structurally unreachable from `request_lease_verdict`'s
+            // `Err` arm — listed explicitly (never wildcarded) so a
+            // future `AuthorizationOutcome` variant fails to compile
+            // here rather than silently falling into either bucket
+            // above.
+            AuthorizationOutcome::Granted { .. }
+            | AuthorizationOutcome::WouldGrant { .. }
+            | AuthorizationOutcome::Released { .. }
+            | AuthorizationOutcome::ReleaseRefused { .. }
+            | AuthorizationOutcome::ReleaseUnknownLease
+            | AuthorizationOutcome::StatusReported
+            | AuthorizationOutcome::SessionEstablished { .. }
+            | AuthorizationOutcome::SessionEstablishFailed { .. }
+            | AuthorizationOutcome::SessionListed { .. }
+            | AuthorizationOutcome::SessionTerminated { .. }
+            | AuthorizationOutcome::SessionNotFound
+            | AuthorizationOutcome::ApprovalRecorded { .. }
+            | AuthorizationOutcome::ApprovalListed { .. }
+            | AuthorizationOutcome::ApprovalForgotten { .. }
+            | AuthorizationOutcome::ApprovalInternalError { .. }
+            | AuthorizationOutcome::GrantedByDelegation { .. } => None,
+        };
+        match verdict {
+            Some(verdict) => (outcome, AgentResponse::ShadowObserved { verdict }),
+            None => (outcome, response),
+        }
     }
 
     /// The grant-path tail of `handle_request_lease`, split out only to
@@ -1969,7 +2226,7 @@ impl RequestHandler for AuthorizationHandler {
     fn handle(&self, request: &ClientRequest, peer: &PeerContext) -> AgentResponse {
         let (operation, outcome, response, session) = match request {
             ClientRequest::AgentStatus {} => {
-                let (outcome, response) = Self::handle_status();
+                let (outcome, response) = self.handle_status();
                 (Operation::AgentStatus, outcome, response, None)
             }
             ClientRequest::RequestLease(lease_request) => {
@@ -2013,6 +2270,7 @@ impl RequestHandler for AuthorizationHandler {
             outcome: &outcome,
             response: &response,
             session,
+            mode: self.enforcement_mode,
         });
 
         response

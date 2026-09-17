@@ -287,12 +287,14 @@ pub enum RecordedOutcome {
         lease_id: LeaseId,
         expires_at: MonotonicTime,
     },
-    /// Reserved for shadow-enforcement mode (F-M2-006, HORO-796 subtask
-    /// 3): what *would* have been granted had the agent been enforcing
-    /// rather than observing. Never produced by any code path in this
-    /// subtask — the type exists now so the schema bump (`DOMAIN_SCHEMA_VERSION`
-    /// 5 → 6) covers the whole HORO-796 ticket in one bump, per that
-    /// bump's own rationale.
+    /// Shadow-enforcement mode (F-M2-006, HORO-796 subtask 3): what
+    /// *would* have been granted had the agent been enforcing rather
+    /// than observing — `eltanin_agent::authz::AuthorizationHandler`
+    /// produces this exactly when `mode` on the same record is
+    /// [`RecordedEnforcementMode::Shadow`] and every gate/policy
+    /// evaluation admitted the request. The lease named here was minted
+    /// and immediately reversed (revoked, never enforced or inserted
+    /// into the lease store) — never a claim of real authority.
     WouldGrant {
         lease_id: LeaseId,
         expires_at: MonotonicTime,
@@ -402,10 +404,11 @@ pub enum RecordedOutcome {
     },
 }
 
-/// Which enforcement posture was active when a record was produced.
-/// `Shadow` is reserved for HORO-796 subtask 3 (shadow-enforcement
-/// mode) — nothing in this subtask ever produces it; every record
-/// constructed today is `Enforce`.
+/// Which enforcement posture was active when a record was produced
+/// (F-M2-006, HORO-796 subtask 3) — mirrors
+/// `eltanin_protocol::response::EnforcementMode`, the wire copy of this
+/// same concept; this crate keeps its own plain mirror for the same
+/// dependency-direction reason every other `Recorded*` type here does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordedEnforcementMode {
@@ -426,19 +429,21 @@ pub struct AuditRecord {
     pub peer: RecordedPeer,
     pub outcome: RecordedOutcome,
     pub response: AgentResponse,
-    /// Which enforcement posture produced this record. Always `Enforce`
-    /// today — populating `Shadow` is HORO-796 subtask 3's job.
+    /// Which enforcement posture produced this record — `Shadow` exactly
+    /// when the agent was configured with
+    /// `eltanin_agent::authz::AuthorizationConfig::with_enforcement_mode(Shadow)`
+    /// at the time this record was made (F-M2-006, HORO-796 subtask 3).
     pub mode: RecordedEnforcementMode,
     /// The [`SessionId`] active for this request, when one is. Lives at
     /// the top level (not nested in a grant-specific outcome variant) so
-    /// it can eventually be populated for approval/delegation/risk
-    /// refusals too, not just successful grants — see
-    /// `RecordedOutcome::SessionEstablished`, which already embeds a
-    /// bare `SessionId` the same way; that type is a correlation
-    /// identifier only, "not a capability or a secret" per its own
-    /// module docs, so embedding it here needs no new safety argument.
-    /// Always `None` today — actual population is later HORO-796
-    /// subtask wiring.
+    /// it can be populated for approval/delegation/risk refusals too, not
+    /// just successful grants — see `RecordedOutcome::SessionEstablished`,
+    /// which already embeds a bare `SessionId` the same way; that type is
+    /// a correlation identifier only, "not a capability or a secret" per
+    /// its own module docs, so embedding it here needs no new safety
+    /// argument. Populated by `eltanin_agent::authz::AuthorizationHandler`
+    /// since HORO-796 subtask 2 (see `AuthorizationEvent::session`'s own
+    /// doc for exactly when it is/isn't resolved).
     pub session: Option<SessionId>,
 }
 

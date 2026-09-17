@@ -11,11 +11,12 @@ use eltanin_core::lease::IssuerInstanceId;
 mod support;
 use support::{peer, status_entry};
 
-/// One serialized `status_entry()` line is ~850 bytes and its
-/// `AuditLogRotated` marker line is ~236 bytes; `2600` fits exactly 3
+/// One serialized `status_entry()` line is ~885 bytes (F-M2-006, HORO-796
+/// subtask 3 grew `AgentStatusView` by one field) and its
+/// `AuditLogRotated` marker line is ~236 bytes; `2700` fits exactly 3
 /// decision lines per generation, so rotation happens predictably at a
 /// known append count instead of depending on exact byte counts.
-const MAX_BYTES: u64 = 2600;
+const MAX_BYTES: u64 = 2700;
 
 #[test]
 fn read_log_spans_both_generations_in_write_order_after_one_rotation() {

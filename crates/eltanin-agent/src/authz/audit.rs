@@ -24,8 +24,8 @@
 use std::path::Path;
 
 use eltanin_audit::record::{
-    AuditClock, RecordedDecisionReason, RecordedDelegation, RecordedLeaseError,
-    RecordedLeaseValidity, RecordedOperation, RecordedOutcome, RecordedPeer,
+    AuditClock, RecordedDecisionReason, RecordedDelegation, RecordedEnforcementMode,
+    RecordedLeaseError, RecordedLeaseValidity, RecordedOperation, RecordedOutcome, RecordedPeer,
     RecordedPeerConsistency, RecordedPeerCredential, RecordedPolicyDecision,
     RecordedPolicyProvenance, RecordedRequest, RecordedSessionAdmissionError,
 };
@@ -35,9 +35,17 @@ use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_core::policy::{DecisionReason, PolicyDecision, PolicyProvenance};
 use eltanin_core::session::{EmptyScope, SessionError};
 use eltanin_protocol::request::ClientRequest;
+use eltanin_protocol::response::EnforcementMode;
 
 use super::event::{AuthorizationEvent, AuthorizationOutcome, EventSink, Operation};
 use super::session::SessionAdmissionError;
+
+fn recorded_enforcement_mode(mode: EnforcementMode) -> RecordedEnforcementMode {
+    match mode {
+        EnforcementMode::Enforce => RecordedEnforcementMode::Enforce,
+        EnforcementMode::Shadow => RecordedEnforcementMode::Shadow,
+    }
+}
 
 fn recorded_operation(operation: Operation) -> RecordedOperation {
     match operation {
@@ -205,6 +213,13 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
             lease_id,
             expires_at,
         },
+        AuthorizationOutcome::WouldGrant {
+            lease_id,
+            expires_at,
+        } => RecordedOutcome::WouldGrant {
+            lease_id,
+            expires_at,
+        },
         AuthorizationOutcome::PolicyDenied { decision } => RecordedOutcome::PolicyDenied {
             decision: recorded_policy_decision(&decision),
         },
@@ -357,6 +372,7 @@ impl EventSink for AuditEventSink {
             peer: recorded_peer(event.peer),
             outcome: recorded_outcome(event.outcome),
             response: event.response.clone(),
+            mode: recorded_enforcement_mode(event.mode),
             session: event.session.clone(),
         };
         if let Err(error) = self.inner.append(entry) {

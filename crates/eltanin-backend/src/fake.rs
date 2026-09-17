@@ -30,6 +30,7 @@ pub struct FakeBackend {
     resources: RwLock<HashMap<ResourceIdentity, ProtectedResource>>,
     scripted_enforcement: RwLock<HashMap<ResourceIdentity, EnforcementResult>>,
     revoke_calls: RwLock<HashMap<ResourceIdentity, u32>>,
+    enforce_calls: RwLock<HashMap<ResourceIdentity, u32>>,
 }
 
 impl FakeBackend {
@@ -109,6 +110,26 @@ impl FakeBackend {
             .copied()
             .unwrap_or(0)
     }
+
+    /// How many times [`ComputeBackend::enforce`] has been called for
+    /// `identity` so far. Exists for the same reason
+    /// [`Self::revoke_call_count`] does (F-M2-006, HORO-796 subtask 3):
+    /// shadow-enforcement mode's whole contract is that it never calls
+    /// `enforce` at all, and a test needs a way to observe that a caller
+    /// genuinely didn't, not merely that the wire response looked right.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned — see [`Self::insert`].
+    #[must_use]
+    pub fn enforce_call_count(&self, identity: &ResourceIdentity) -> u32 {
+        self.enforce_calls
+            .read()
+            .expect("lock poisoned")
+            .get(identity)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 impl ComputeBackend for FakeBackend {
@@ -134,6 +155,12 @@ impl ComputeBackend for FakeBackend {
     }
 
     fn enforce(&self, request: &ComputeRequest) -> Result<EnforcementResult, BackendError> {
+        *self
+            .enforce_calls
+            .write()
+            .expect("lock poisoned")
+            .entry(request.resource.clone())
+            .or_insert(0) += 1;
         let resource = self.observe(&request.resource)?;
 
         // Capability is checked first, before any scripted override. A

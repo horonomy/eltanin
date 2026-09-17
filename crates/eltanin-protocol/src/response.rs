@@ -152,6 +152,49 @@ pub enum ForgetOutcome {
     Refused,
 }
 
+/// Which enforcement posture the agent is currently running under
+/// (F-M2-006, HORO-796 subtask 3). Lives here, not
+/// `eltanin_agent::authz`, because [`AgentStatusView`] must report it and
+/// this crate cannot depend back on `eltanin-agent` — mirrors
+/// `eltanin_audit::record::RecordedEnforcementMode`'s identical
+/// dependency-direction reasoning, one crate boundary over.
+/// `eltanin_agent::authz::AuthorizationHandler` holds this type directly
+/// (no separate agent-internal copy) rather than duplicating it, since
+/// unlike `SessionRequirement`/`ApprovalRequirement`/`RevocationRequirement`
+/// (agent-internal only, no wire representation) this configuration must
+/// already cross the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnforcementMode {
+    /// Every granted `RequestLease` actually reaches
+    /// `ComputeBackend::enforce` and is inserted into the lease store.
+    #[default]
+    Enforce,
+    /// Every gate and policy evaluation runs identically to `Enforce`,
+    /// but a would-be grant is never enforced or stored — see
+    /// `eltanin_agent::authz`'s module docs for the full contract.
+    Shadow,
+}
+
+/// The coarse, client-facing verdict a shadow-mode `RequestLease`
+/// reports via [`AgentResponse::ShadowObserved`] (F-M2-006, HORO-796
+/// subtask 3). Deliberately as lossy as [`DenialReason`]'s own
+/// discipline: the specific gate/policy reason that produced this
+/// verdict stays in the audit trail
+/// (`eltanin_audit::record::RecordedOutcome`), never on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShadowVerdict {
+    /// Every gate and `PolicySet::evaluate` would have admitted this
+    /// request — nothing was actually granted or enforced.
+    WouldAllow,
+    /// A gate or `PolicySet::evaluate` would have refused this request.
+    WouldDeny,
+    /// The risk layer (F-M2-004, HORO-794) would have classified this
+    /// refusal as remediable via step-up.
+    WouldStepUp,
+}
+
 /// Minimal liveness/version probe response. Deliberately does not
 /// include the agent's [`eltanin_core::lease::IssuerInstanceId`] — not
 /// secret, but there is no MVP 1.0 caller that needs it and no reason to
@@ -159,6 +202,11 @@ pub enum ForgetOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentStatusView {
     pub protocol_version: u16,
+    /// Which enforcement posture is currently active (F-M2-006,
+    /// HORO-796 subtask 3) — lets an operator (or a later validation
+    /// tool, HORO-797) confirm whether an agent is actually running in
+    /// shadow mode without inferring it from side effects.
+    pub enforcement_mode: EnforcementMode,
 }
 
 /// A closed set of protocol-level error codes. Deliberately has **no**
@@ -217,6 +265,15 @@ pub enum AgentResponse {
     },
     ApprovalForgotten {
         outcome: ForgetOutcome,
+    },
+    /// The agent is running in [`EnforcementMode::Shadow`] and this
+    /// response is to a `RequestLease` — nothing was actually granted
+    /// or enforced; `verdict` reports only what *would* have happened
+    /// (F-M2-006, HORO-796 subtask 3). Never produced by any other
+    /// operation — see `eltanin_agent::authz`'s module docs on shadow
+    /// mode's scope.
+    ShadowObserved {
+        verdict: ShadowVerdict,
     },
 }
 

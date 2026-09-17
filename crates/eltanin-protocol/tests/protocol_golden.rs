@@ -17,8 +17,9 @@ use eltanin_protocol::request::{
     ReleaseRequest, Request, RequestBody, RequestId,
 };
 use eltanin_protocol::response::{
-    AgentResponse, AgentStatusView, ApprovalView, DenialReason, ErrorCode, ForgetOutcome,
-    LeaseView, ReleaseOutcome, Response, ResponseBody, SessionView, TerminationOutcome,
+    AgentResponse, AgentStatusView, ApprovalView, DenialReason, EnforcementMode, ErrorCode,
+    ForgetOutcome, LeaseView, ReleaseOutcome, Response, ResponseBody, SessionView, ShadowVerdict,
+    TerminationOutcome,
 };
 
 fn resource() -> ResourceIdentity {
@@ -134,10 +135,25 @@ fn response_status_matches_fixture() {
         body: AgentResponse::Status {
             status: AgentStatusView {
                 protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
+                enforcement_mode: EnforcementMode::Enforce,
             },
         },
     });
     assert_golden(&value, include_str!("fixtures/response_status.json"));
+}
+
+#[test]
+fn response_shadow_observed_matches_fixture() {
+    let value: Response = Versioned::current(ResponseBody {
+        request_id: Some(RequestId(4)),
+        body: AgentResponse::ShadowObserved {
+            verdict: ShadowVerdict::WouldDeny,
+        },
+    });
+    assert_golden(
+        &value,
+        include_str!("fixtures/response_shadow_observed.json"),
+    );
 }
 
 #[test]

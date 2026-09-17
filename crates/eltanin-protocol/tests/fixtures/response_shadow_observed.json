@@ -1,0 +1,10 @@
+{
+  "version": 6,
+  "payload": {
+    "request_id": 4,
+    "body": {
+      "result": "shadow_observed",
+      "verdict": "would_deny"
+    }
+  }
+}

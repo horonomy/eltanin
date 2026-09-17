@@ -5,7 +5,8 @@
     "body": {
       "result": "status",
       "status": {
-        "protocol_version": 6
+        "protocol_version": 6,
+        "enforcement_mode": "enforce"
       }
     }
   }
