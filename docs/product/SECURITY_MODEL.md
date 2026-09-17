@@ -560,6 +560,93 @@ event — named as an explicit forward obligation for HORO-796
 (audit/provenance) rather than closed here, to avoid a second forced
 re-approval cycle for one ticket's marginal audit completeness.
 
+## Audit Durability, Bounded Retention, and Shadow Enforcement Mode (F-M2-006, HORO-796) — MVP 2.0
+
+See [ADR 0014](../adr/0014-lease-lifecycle-audit-durability-and-shadow-mode.md)
+for the full design record, rejected alternatives, and AC mapping.
+`PolicySet::evaluate` and `LeaseIssuer::issue`/`revoke` are unchanged by
+every part of this ticket.
+
+**Shadow enforcement mode is not a security control — read this before
+anything else.** `AuthorizationConfig::with_enforcement_mode(Shadow)`
+(default remains `Enforce`) makes every gate and `PolicySet::evaluate`
+run identically to `Enforce` mode, but a would-be grant is never
+inserted into the lease store and `ComputeBackend::enforce()` is never
+called. **An agent running in `Shadow` mode enforces nothing.** Every
+workload spawned under it runs completely unconstrained, regardless of
+what `AgentResponse::ShadowObserved{verdict}` reports. This is stated
+without qualification specifically because the most dangerous way to
+misuse this feature is to mistake a shadow-mode deployment for a safe
+or partial default — it is not: it is a dry-run/observability posture
+for validating a policy or configuration change against real traffic
+*before* trusting it, and nothing more. `eltanin status` and `eltanin
+run`'s own shadow-mode banner both surface this with the explicit
+`UNENFORCED/OBSERVED-ONLY` phrasing for exactly this reason.
+
+`ShadowVerdict::{WouldAllow, WouldDeny, WouldStepUp}` is deliberately as
+lossy on the wire as `DenialReason` — the specific gate/policy reason
+stays in the audit trail (`RecordedOutcome::WouldGrant` and the other
+`RecordedOutcome` variants, tagged with `AuditRecord.mode ==
+RecordedEnforcementMode::Shadow`) and never crosses the wire. A
+differential mode-equivalence test suite (`authz_shadow.rs`) proves
+byte-identical `AuthorizationOutcome` across `Enforce`/`Shadow` for
+every refusal bucket it can construct — **with one disclosed gap**:
+`RecordedOutcome::DelegationIndeterminate` is not covered, because that
+bucket is reachable only via a candidate already admitted into
+`delegation_admission`'s loop, i.e. only after a real `DelegationGrant`
+already exists — and shadow mode structurally never mints a real grant
+(minting is `enforce_and_finalize`'s own real-enforcement-path side
+effect, conditioned on a `backend.enforce()` success shadow mode never
+reaches). There is no way to exercise this bucket on the shadow side of
+a differential pair without a same-mode setup that would silently test
+something other than equivalence — left as an honest, disclosed gap
+rather than papered over.
+
+**Audit log rotation is bounded, and bounded means lossy — a real
+trade-off against the audit trail's own evidentiary value, not just a
+storage optimization.** `AuditFileSink` rotates once the active
+generation would exceed 64 MiB (default), renaming it to `<path>.1`
+— **overwriting and permanently discarding** whatever `.1` held before —
+and opening a fresh active file. This bounds total on-disk audit storage
+at ~128 MiB with zero configuration (AC6), a genuine requirement given
+`eltanin run`'s long-running supervised-workload model where an
+unbounded append-only log is a real disk-exhaustion vector. The accepted
+cost: a query spanning a discarded generation returns
+`eltanin_audit::explain::SelectionResult::RetentionDiscarded`, not the
+record — an operator relying on this log for incident forensics,
+compliance evidence, or dispute resolution can lose records that
+rotated out before anyone looked. This is disclosed here in full rather
+than left implicit in "bounded retention" sounding like pure resource
+management. Consistent with "audit is evidence, not authority" (D-A,
+HORO-824, unchanged): a `RetentionDiscarded` result never affects, and
+never can affect, an authorization outcome — it is a visibility gap for
+an operator, never an authorization input.
+
+**Lease expiry now closes the HORO-795 forward obligation: it is no
+longer audit-silent.** `AuthorizationHandler::sweep_expired_leases`
+(the same lock-then-drop-then-call-backend plumbing ADR 0013's Bug B fix
+already established) now emits one
+`RecordedAgentEvent::LeaseExpired{lease_id, resource, expired_at,
+backend}` per swept lease, `backend` carrying the real
+`Option<EnforcementResult>` from that lease's own teardown attempt
+(`None` exactly when no teardown was attempted because another live
+lease still names the same resource). Session-death cascade revocation
+(a session reaped by expiry or anchor-leader death tearing down its
+leases at the backend) was fixed in HORO-795/ADR 0013, unchanged here —
+this ticket's contribution is specifically that the *lease's own*
+expiry-by-timeout now has an audit trail, where HORO-795 only fixed the
+backend teardown itself.
+
+**`DOMAIN_SCHEMA_VERSION` bumps from 5 to 6** — one bump, made in this
+ticket's first subtask, covering every wire-shape change across all
+five subtasks (`LogEntry` tagging, `AuditRecord.{mode,session}`,
+`RecordedOutcome::WouldGrant`, `RecordedAgentEvent`,
+`AgentResponse::ShadowObserved`, `AgentStatusView.enforcement_mode`) in
+one place — the same side effect as every prior bump: every
+pre-existing durable `Approval` requires re-approval after this ships.
+Confirmed unchanged (still exactly `6`) by every later subtask in this
+ticket, including this documentation subtask's own source cross-check.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of
