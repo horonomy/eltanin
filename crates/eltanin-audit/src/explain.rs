@@ -472,3 +472,46 @@ pub fn render(record: &AuditRecord) -> String {
     }
     out
 }
+
+/// Render one agent-emitted event as human-readable text — the
+/// [`AgentEventRecord`] counterpart of [`render`], used by
+/// `eltanin-cli`'s `explain`/`audit` commands so both surfaces format
+/// every line of the log through this crate rather than re-deriving
+/// their own presentation of it.
+#[must_use]
+pub fn render_agent_event(event: &AgentEventRecord) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "event: {}", event.event_id);
+    let _ = writeln!(
+        out,
+        "recorded_at: unix {}s.{:09}n",
+        event.recorded_at.unix_secs, event.recorded_at.nanos
+    );
+    match &event.event {
+        RecordedAgentEvent::LeaseExpired {
+            lease_id,
+            resource,
+            expired_at,
+            backend,
+        } => {
+            let _ = writeln!(out, "agent event: lease expired");
+            let _ = writeln!(out, "lease: {lease_id:?}");
+            let _ = writeln!(out, "resource: {resource:?}");
+            let _ = writeln!(out, "expired_at: {expired_at:?}");
+            let _ = writeln!(out, "backend teardown: {backend:?}");
+        }
+        RecordedAgentEvent::AuditLogRotated {
+            rotated_at_sequence,
+            discarded_through_sequence,
+        } => {
+            let _ = writeln!(out, "agent event: audit log rotated");
+            let _ = writeln!(out, "rotated_at_sequence: {rotated_at_sequence}");
+            let _ = writeln!(
+                out,
+                "discarded_through_sequence: {discarded_through_sequence:?}"
+            );
+        }
+    }
+    out
+}

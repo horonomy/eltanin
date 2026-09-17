@@ -13,7 +13,7 @@ use std::process::{Command, ExitStatus};
 use std::time::Instant;
 
 use eltanin_protocol::request::{ClientRequest, LeaseRequest};
-use eltanin_protocol::response::AgentResponse;
+use eltanin_protocol::response::{AgentResponse, ShadowVerdict};
 
 use crate::args::RunInvocation;
 use crate::client::AgentClient;
@@ -21,7 +21,7 @@ use crate::context::{GovernedContext, NullContext};
 use crate::exit::{workload_signal_exit_code, ExitCode};
 use crate::failure::{classify_response, LaunchFailure};
 use crate::profile::load_profile;
-use crate::supervise::{release, supervise, RunOutcome};
+use crate::supervise::{release, supervise, Authorization, RunOutcome};
 use crate::{context, signals};
 
 /// The final outcome of a launch attempt.
@@ -67,22 +67,24 @@ pub fn run(invocation: &RunInvocation) -> LaunchOutcome {
             return LaunchOutcome::Failure(e.into());
         }
     };
-    let (lease_id, remaining, grant_observed_at) = match request_initial_lease(&client, &request) {
-        Ok(granted) => granted,
+    let authorization = match request_initial_authorization(&client, &request) {
+        Ok(authorization) => authorization,
         Err(failure) => {
             teardown(&governed_context);
             return LaunchOutcome::Failure(failure);
         }
     };
+    announce_shadow_mode(&authorization);
 
     // S5: install signal handlers before the workload exists.
     let signal_receiver = match signals::install() {
         Ok(receiver) => receiver,
         Err(e) => {
-            // The lease was already granted (enforcement already
+            // A real lease was already granted (enforcement already
             // applied) — release it before reporting failure, same as
-            // any other post-grant failure path.
-            release(&client, &lease_id);
+            // any other post-grant failure path. Shadow mode granted
+            // nothing, so there is nothing to release.
+            release_if_leased(&client, &authorization);
             teardown(&governed_context);
             return LaunchOutcome::Failure(LaunchFailure::AgentUnavailable(format!(
                 "failed to install signal handlers: {e}"
@@ -104,22 +106,14 @@ pub fn run(invocation: &RunInvocation) -> LaunchOutcome {
 
     match command.spawn() {
         Ok(child) => {
-            let outcome = supervise(
-                &client,
-                &request,
-                lease_id,
-                remaining,
-                grant_observed_at,
-                child,
-                &signal_receiver,
-            );
+            let outcome = supervise(&client, &request, authorization, child, &signal_receiver);
             teardown(&governed_context);
             outcome_to_exit(outcome)
         }
         Err(e) => {
-            // Enforcement was already applied at S4 — release and tear
-            // down even though the workload never ran.
-            release(&client, &lease_id);
+            // Enforcement was already applied at S4 (if leased) — release
+            // and tear down even though the workload never ran.
+            release_if_leased(&client, &authorization);
             teardown(&governed_context);
             let code = spawn_failure_code(&e);
             LaunchOutcome::Exit(code)
@@ -127,18 +121,58 @@ pub fn run(invocation: &RunInvocation) -> LaunchOutcome {
     }
 }
 
-fn request_initial_lease(
+/// Release `authorization`'s lease if it holds one — a no-op for
+/// [`Authorization::Shadow`], which never granted anything to release.
+fn release_if_leased(client: &AgentClient, authorization: &Authorization) {
+    if let Authorization::Leased { lease_id, .. } = authorization {
+        release(client, lease_id);
+    }
+}
+
+/// Print a clearly-labeled stderr banner when `authorization` is
+/// [`Authorization::Shadow`] — the human-facing signal F-M2-006/HORO-796
+/// subtask 4 requires: this run's workload is about to be spawned and
+/// supervised, but under no real authorization at all, only observed.
+/// A no-op for [`Authorization::Leased`], which needs no such warning.
+fn announce_shadow_mode(authorization: &Authorization) {
+    let Authorization::Shadow { verdict } = authorization else {
+        return;
+    };
+    let verdict_text = match verdict {
+        ShadowVerdict::WouldAllow => "would-allow",
+        ShadowVerdict::WouldDeny => "would-deny",
+        ShadowVerdict::WouldStepUp => "would-step-up",
+    };
+    eprintln!(
+        "eltanin run: UNENFORCED/OBSERVED-ONLY (shadow mode) — verdict: {verdict_text}. No \
+         lease was granted or enforced; the workload will run without protection under this \
+         invocation. Run `eltanin status` to confirm the agent's enforcement mode."
+    );
+}
+
+/// Send the initial `RequestLease` and interpret whichever real response
+/// the agent gives back into an [`Authorization`] — [`AgentResponse::LeaseGranted`]
+/// under [`eltanin_protocol::response::EnforcementMode::Enforce`], or
+/// [`AgentResponse::ShadowObserved`] under
+/// [`eltanin_protocol::response::EnforcementMode::Shadow`] (F-M2-006,
+/// HORO-796 subtask 4) — both are real, non-failure responses to this
+/// request; every other response classifies as a [`LaunchFailure`] via
+/// [`classify_response`], unchanged from before this subtask.
+fn request_initial_authorization(
     client: &AgentClient,
     request: &LeaseRequest,
-) -> Result<(eltanin_core::lease::LeaseId, std::time::Duration, Instant), LaunchFailure> {
+) -> Result<Authorization, LaunchFailure> {
     let grant_observed_at = Instant::now();
     let response = client
         .exchange(ClientRequest::RequestLease(request.clone()))
         .map_err(LaunchFailure::from)?;
     match response {
-        AgentResponse::LeaseGranted { lease } => {
-            Ok((lease.lease_id, lease.remaining, grant_observed_at))
-        }
+        AgentResponse::LeaseGranted { lease } => Ok(Authorization::Leased {
+            lease_id: lease.lease_id,
+            remaining: lease.remaining,
+            grant_observed_at,
+        }),
+        AgentResponse::ShadowObserved { verdict } => Ok(Authorization::Shadow { verdict }),
         other => Err(
             classify_response(&other).unwrap_or(LaunchFailure::AgentUnavailable(
                 "the agent's response could not be classified".to_string(),

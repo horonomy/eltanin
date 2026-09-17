@@ -26,13 +26,16 @@
 
 pub mod approve;
 pub mod args;
+pub mod audit;
 pub mod client;
 pub mod context;
 pub mod exit;
+pub mod explain;
 pub mod failure;
 pub mod launch;
 pub mod profile;
 pub mod sequence;
 pub mod session;
 pub mod signals;
+pub mod status;
 pub mod supervise;

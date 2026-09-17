@@ -6,11 +6,21 @@
 //! `docs/product/CLI_CONTRACT.md`'s "Argv grammar" section.
 
 use std::ffi::{OsStr, OsString};
+use std::path::PathBuf;
 use std::time::Duration;
 
+use eltanin_audit::explain::Selector;
+use eltanin_audit::record::AuditEventId;
 use eltanin_core::approval::{ApprovalDisposition, ApprovalId};
+use eltanin_core::lease::{IssuerInstanceId, LeaseId};
 
 use crate::profile::ProfileName;
+
+/// Default `eltanin audit` line limit (F-M2-006, HORO-796 subtask 4) —
+/// deliberately small: this command is a human-facing recent-activity
+/// browse, not a full log dump (`eltanin-explain`'s file-order read
+/// already serves that need).
+pub const DEFAULT_AUDIT_LIMIT: usize = 20;
 
 /// A fully parsed `eltanin run` invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +66,38 @@ pub enum ApproveInvocation {
     Forget { id: ApprovalId },
 }
 
-/// Any of the three top-level subcommands this binary understands.
+/// A fully parsed `eltanin explain (--event|--lease|--pid) <v> [--chain]
+/// [--log <path>]` invocation (F-M2-006, HORO-796 subtask 4).
+/// `log_path` is `None` when neither `--log` nor `ELTANIN_AUDIT_LOG` (see
+/// `crate::explain`) resolves one — reported as a failure at run time,
+/// not a usage error, mirroring `eltanin-explain`'s own binary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainInvocation {
+    pub selector: Selector,
+    /// Follow the causal chain (originating lease grant, related
+    /// session, delegation ancestry) rather than just the direct
+    /// selection — see `crate::explain`'s module docs for exactly what
+    /// this expands.
+    pub chain: bool,
+    pub log_path: Option<PathBuf>,
+}
+
+/// A fully parsed `eltanin audit [--limit N] [--log <path>]` invocation
+/// (F-M2-006, HORO-796 subtask 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditInvocation {
+    pub limit: usize,
+    pub log_path: Option<PathBuf>,
+}
+
+/// A fully parsed `eltanin status` invocation (F-M2-006, HORO-796
+/// subtask 4). Takes no arguments — a struct rather than a unit type so
+/// a future flag is additive, matching this crate's other invocation
+/// types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusInvocation;
+
+/// Any of the six top-level subcommands this binary understands.
 /// `eltanin run`'s own argument grammar (see [`parse_run`]) is
 /// byte-for-byte unchanged by this type's introduction.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +105,9 @@ pub enum Invocation {
     Run(RunInvocation),
     Session(SessionInvocation),
     Approve(ApproveInvocation),
+    Explain(ExplainInvocation),
+    Audit(AuditInvocation),
+    Status(StatusInvocation),
 }
 
 /// Why argv parsing rejected the invocation — always maps to
@@ -76,10 +120,41 @@ pub enum UsageError {
     NotSessionSubcommand { found: Option<OsString> },
     #[error("expected the first argument to be \"approve\", got {found:?}")]
     NotApproveSubcommand { found: Option<OsString> },
+    #[error("expected the first argument to be \"explain\", got {found:?}")]
+    NotExplainSubcommand { found: Option<OsString> },
+    #[error("expected the first argument to be \"audit\", got {found:?}")]
+    NotAuditSubcommand { found: Option<OsString> },
+    #[error("expected the first argument to be \"status\", got {found:?}")]
+    NotStatusSubcommand { found: Option<OsString> },
     #[error(
-        "expected the first argument to be \"run\", \"session\", or \"approve\", got {found:?}"
+        "expected the first argument to be \"run\", \"session\", \"approve\", \"explain\", \
+         \"audit\", or \"status\", got {found:?}"
     )]
     UnknownSubcommand { found: Option<OsString> },
+    #[error("exactly one of --event, --lease, or --pid is required")]
+    SelectorMissing,
+    #[error("--event, --lease, and --pid are mutually exclusive")]
+    SelectorGivenTwice,
+    #[error("--event requires a value")]
+    EventMissingValue,
+    #[error("--event value {found:?} is not valid (expected <instance>#<sequence>): {reason}")]
+    InvalidEvent { found: OsString, reason: String },
+    #[error("--lease requires a value")]
+    LeaseMissingValue,
+    #[error("--lease value {found:?} is not valid (expected <instance>#<sequence>): {reason}")]
+    InvalidLease { found: OsString, reason: String },
+    #[error("--pid requires a value")]
+    PidMissingValue,
+    #[error("--pid value {found:?} is not a valid process id: {reason}")]
+    InvalidPid { found: OsString, reason: String },
+    #[error("--log requires a value")]
+    LogMissingValue,
+    #[error("--limit requires a value")]
+    LimitMissingValue,
+    #[error("--limit value {found:?} is not a valid non-negative integer: {reason}")]
+    InvalidLimit { found: OsString, reason: String },
+    #[error("\"eltanin status\" takes no arguments, got {found:?}")]
+    UnexpectedStatusArgument { found: OsString },
     #[error(
         "expected \"approve\" to be followed by \"list\", \"forget\", or --profile, got {found:?}"
     )]
@@ -199,10 +274,179 @@ pub fn parse(argv: impl IntoIterator<Item = OsString>) -> Result<Invocation, Usa
         Some(s) if s == OsStr::new("run") => Ok(Invocation::Run(parse_run(argv)?)),
         Some(s) if s == OsStr::new("session") => Ok(Invocation::Session(parse_session(argv)?)),
         Some(s) if s == OsStr::new("approve") => Ok(Invocation::Approve(parse_approve(argv)?)),
+        Some(s) if s == OsStr::new("explain") => Ok(Invocation::Explain(parse_explain(argv)?)),
+        Some(s) if s == OsStr::new("audit") => Ok(Invocation::Audit(parse_audit(argv)?)),
+        Some(s) if s == OsStr::new("status") => Ok(Invocation::Status(parse_status(argv)?)),
         other => Err(UsageError::UnknownSubcommand {
             found: other.map(OsStr::to_os_string),
         }),
     }
+}
+
+/// Parse an `eltanin explain (--event|--lease|--pid) <v> [--chain]
+/// [--log <path>]` invocation. `argv` starts with the `explain` token
+/// itself, mirroring [`parse_session`]'s own convention.
+///
+/// # Errors
+///
+/// Returns [`UsageError`] on any malformed invocation.
+pub fn parse_explain(
+    argv: impl IntoIterator<Item = OsString>,
+) -> Result<ExplainInvocation, UsageError> {
+    let mut argv = argv.into_iter();
+
+    let first = argv.next();
+    if first.as_deref() != Some(OsStr::new("explain")) {
+        return Err(UsageError::NotExplainSubcommand { found: first });
+    }
+
+    let mut selector: Option<Selector> = None;
+    let mut chain = false;
+    let mut log_path: Option<PathBuf> = None;
+
+    while let Some(arg) = argv.next() {
+        if arg == OsStr::new("--chain") {
+            chain = true;
+            continue;
+        }
+        if arg == OsStr::new("--log") {
+            let value = argv.next().ok_or(UsageError::LogMissingValue)?;
+            log_path = Some(PathBuf::from(value));
+            continue;
+        }
+        if arg == OsStr::new("--event") {
+            let value = argv.next().ok_or(UsageError::EventMissingValue)?;
+            let event_id = parse_event_id(&value).map_err(|reason| UsageError::InvalidEvent {
+                found: value.clone(),
+                reason,
+            })?;
+            set_selector(&mut selector, Selector::Event(event_id))?;
+            continue;
+        }
+        if arg == OsStr::new("--lease") {
+            let value = argv.next().ok_or(UsageError::LeaseMissingValue)?;
+            let event_id = parse_event_id(&value).map_err(|reason| UsageError::InvalidLease {
+                found: value.clone(),
+                reason,
+            })?;
+            let lease_id = LeaseId {
+                issuer: event_id.instance,
+                sequence: event_id.sequence,
+            };
+            set_selector(&mut selector, Selector::Lease(lease_id))?;
+            continue;
+        }
+        if arg == OsStr::new("--pid") {
+            let value = argv.next().ok_or(UsageError::PidMissingValue)?;
+            let pid: u32 = value
+                .to_str()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| UsageError::InvalidPid {
+                    found: value.clone(),
+                    reason: "expected a non-negative integer".to_string(),
+                })?;
+            set_selector(&mut selector, Selector::Pid(pid))?;
+            continue;
+        }
+        return Err(UsageError::UnrecognizedArgument { found: arg });
+    }
+
+    let selector = selector.ok_or(UsageError::SelectorMissing)?;
+    Ok(ExplainInvocation {
+        selector,
+        chain,
+        log_path,
+    })
+}
+
+fn set_selector(selector: &mut Option<Selector>, value: Selector) -> Result<(), UsageError> {
+    if selector.is_some() {
+        return Err(UsageError::SelectorGivenTwice);
+    }
+    *selector = Some(value);
+    Ok(())
+}
+
+/// Parse `<instance>#<sequence>` into an [`AuditEventId`] — the same
+/// grammar `crates/eltanin-audit/src/bin/eltanin-explain.rs` already
+/// establishes for `--event`/`--lease`.
+fn parse_event_id(raw: &OsStr) -> Result<AuditEventId, String> {
+    let text = raw
+        .to_str()
+        .ok_or_else(|| "not valid UTF-8".to_string())?;
+    let (instance, sequence) = text
+        .rsplit_once('#')
+        .ok_or_else(|| format!("expected <instance>#<sequence>, got {text:?}"))?;
+    let sequence: u64 = sequence
+        .parse()
+        .map_err(|e| format!("invalid sequence in {text:?}: {e}"))?;
+    Ok(AuditEventId {
+        instance: IssuerInstanceId::new(instance),
+        sequence,
+    })
+}
+
+/// Parse an `eltanin audit [--limit N] [--log <path>]` invocation.
+/// `argv` starts with the `audit` token itself.
+///
+/// # Errors
+///
+/// Returns [`UsageError`] on any malformed invocation.
+pub fn parse_audit(
+    argv: impl IntoIterator<Item = OsString>,
+) -> Result<AuditInvocation, UsageError> {
+    let mut argv = argv.into_iter();
+
+    let first = argv.next();
+    if first.as_deref() != Some(OsStr::new("audit")) {
+        return Err(UsageError::NotAuditSubcommand { found: first });
+    }
+
+    let mut limit = DEFAULT_AUDIT_LIMIT;
+    let mut log_path: Option<PathBuf> = None;
+
+    while let Some(arg) = argv.next() {
+        if arg == OsStr::new("--limit") {
+            let value = argv.next().ok_or(UsageError::LimitMissingValue)?;
+            limit = value
+                .to_str()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| UsageError::InvalidLimit {
+                    found: value.clone(),
+                    reason: "expected a non-negative integer".to_string(),
+                })?;
+            continue;
+        }
+        if arg == OsStr::new("--log") {
+            let value = argv.next().ok_or(UsageError::LogMissingValue)?;
+            log_path = Some(PathBuf::from(value));
+            continue;
+        }
+        return Err(UsageError::UnrecognizedArgument { found: arg });
+    }
+
+    Ok(AuditInvocation { limit, log_path })
+}
+
+/// Parse an `eltanin status` invocation. `argv` starts with the
+/// `status` token itself; it takes no further arguments.
+///
+/// # Errors
+///
+/// Returns [`UsageError`] on any malformed invocation.
+pub fn parse_status(
+    argv: impl IntoIterator<Item = OsString>,
+) -> Result<StatusInvocation, UsageError> {
+    let mut argv = argv.into_iter();
+
+    let first = argv.next();
+    if first.as_deref() != Some(OsStr::new("status")) {
+        return Err(UsageError::NotStatusSubcommand { found: first });
+    }
+    if let Some(found) = argv.next() {
+        return Err(UsageError::UnexpectedStatusArgument { found });
+    }
+    Ok(StatusInvocation)
 }
 
 /// Parse an `eltanin approve ...` invocation. `argv` starts with the

@@ -80,6 +80,7 @@ S3  connect to the agent's Unix Domain Socket        → exit 69 on failure
       (ELTANIN_AGENT_SOCKET, else the agent's documented default path)
 S4  send RequestLease{resource, action}; read exactly one response
       LeaseGranted{lease_id, remaining} → continue to S5
+      ShadowObserved{verdict}           → continue to S5 (see below)
       LeaseDenied{reason}               → exit 77, workload never spawned
       Error{code}                       → exit 70, workload never spawned
 S5  install signal handlers (before spawning, so no signal delivered
@@ -106,6 +107,22 @@ returns `LeaseGranted`. The agent's own `AuthorizationHandler` calls
 (`docs/architecture/domain-model.md`'s "Local authorization agent
 integration" section). `eltanin run`'s entire obligation is: no
 `Command::spawn` on any path that has not observed `LeaseGranted`.
+
+**Shadow-mode `S4`→`S7` (F-M2-006, HORO-796 subtask 4)**: when the agent
+is running `EnforcementMode::Shadow` (`eltanin status` reports which
+mode is active), every `RequestLease` gets back `ShadowObserved{verdict}`
+instead of `LeaseGranted`/`LeaseDenied` — regardless of whether the
+request would have been allowed, denied, or required step-up in
+`Enforce` mode. `eltanin run` still proceeds through S5-S7 and spawns and
+supervises the workload: shadow mode never blocks or enforces anything,
+by design. Before spawning, it prints a clearly labeled stderr banner
+(`UNENFORCED/OBSERVED-ONLY (shadow mode) — verdict: <verdict>`) naming
+the verdict — the one thing distinguishing this run from an ordinary
+authorized one, since the exit-code/spawn/exit-status behavior is
+otherwise identical. `crate::supervise::Authorization::Shadow` holds no
+lease id and S7's renewal loop is a no-op in this mode (there is nothing
+to renew, no deadline to lapse against); S9 releases nothing, since
+nothing was ever granted.
 
 **Lease renewal (within S7, implemented HORO-846 — `crate::supervise`)**:
 MVP 1.0 has no lease "extend" — a renewal
@@ -185,6 +202,7 @@ continuing an unauthorized workload.
 | 76 | authorization lapsed mid-run; `eltanin run` terminated the workload |
 | 77 | the request was denied by policy (`LeaseDenied{reason}`) |
 | 78 | `--profile` could not be resolved |
+| 71 | `eltanin explain`/`eltanin audit`: the audit log could not be resolved or read |
 
 Exit 76 overrides the `128+N` convention when `eltanin run` itself sent
 the terminating signal — stderr names the workload's own exit status
@@ -305,3 +323,82 @@ eltanin approve forget <id>
   cannot distinguish which workload is actually run through a given
   launcher — an interpreter (`python`, `node`, `bash`) approved once
   admits every script later run through it. See ADR 0010's AC4 section.
+
+## `eltanin status` — enforcement posture probe (F-M2-006, HORO-796 subtask 4)
+
+```
+eltanin status
+```
+
+- Sends `AgentStatus{}`, prints the agent's `protocol_version` and
+  `enforcement_mode` (`enforce` or `shadow`), and exits 0. A `shadow`
+  report is printed with the same `UNENFORCED/OBSERVED-ONLY` language
+  `eltanin run`'s own shadow-mode banner uses (see the launch state
+  machine's shadow-mode paragraph above), so an operator sees one
+  consistent phrase for this concept everywhere it appears.
+- Takes no arguments. No new exit codes — an unreachable agent still
+  exits 69, an `Error{code}` response still exits 70, exactly like every
+  other subcommand's use of `crate::client::AgentClient`.
+- `AgentStatusView` carries only `protocol_version` and
+  `enforcement_mode` — there is no richer shadow-specific state on the
+  wire (e.g. a running tally of would-grant/would-deny counts) for this
+  command to surface. Adding one is additive, out of this subtask's
+  scope.
+
+## `eltanin explain` — audit-log decision explanation (F-M2-006, HORO-796 subtask 4)
+
+```
+eltanin explain --event <instance>#<sequence> [--chain] [--log <path>]
+eltanin explain --lease <instance>#<sequence> [--chain] [--log <path>]
+eltanin explain --pid <pid> [--chain] [--log <path>]
+```
+
+- Exactly one of `--event`, `--lease`, `--pid` is required — the same
+  selector grammar `crates/eltanin-audit/src/bin/eltanin-explain.rs`
+  already established; this subcommand is that binary's functionality
+  folded into the real `eltanin` CLI, per this document's original
+  F-M1-008 scope.
+- `--log <path>` overrides `ELTANIN_AUDIT_LOG` (the same environment
+  variable `eltanin-agentd` reads to enable audit logging at all — see
+  `docs/product/QUICKSTART.md`). Neither given is a usage-adjacent
+  failure (exit 71), not a usage error, since it depends on runtime
+  configuration rather than argv shape alone.
+- No audit log yet found at the resolved path prints a clean
+  informational message and exits 0 — the common first-run case, not a
+  failure. A genuinely unreadable path (permission denied, and similarly
+  for a malformed one) exits 71.
+- A selector matching no record reports one of three distinct outcomes
+  (never conflated): not found at all, found to be a possibly-lost write
+  inside an observed sequence gap, or found to be legitimately recorded
+  but since discarded by the log's bounded-retention policy — see
+  `eltanin_audit::explain::SelectionResult`'s own docs for the security
+  reasoning behind keeping these three distinct.
+- `--chain` additionally follows a found record's originating lease
+  grant/release, its Trusted Compute Session correlation, and (for a
+  delegated grant) its parent lease's own records — see
+  `crate::explain`'s module docs for the exact expansion rules. For a
+  `--lease` selector, `--chain`'s lease-correlation step is a no-op
+  (`Selector::Lease` already returns every record naming that lease); its
+  value there is purely the session/delegation correlation.
+
+## `eltanin audit` — recent audit-log activity (F-M2-006, HORO-796 subtask 4)
+
+```
+eltanin audit [--limit N] [--log <path>]
+```
+
+- Prints every readable log line (`AuditRecord` and agent-emitted events
+  such as a lease expiring on its own or the log rotating), most recent
+  first, capped at `--limit` (default 20). `--log`/`ELTANIN_AUDIT_LOG`
+  resolution and the "no log yet" vs. "unreadable" distinction are
+  identical to `eltanin explain`'s, above.
+- **Ordering is best-effort, not authoritative**: lines are ordered by
+  each record's wall-clock `recorded_at`, tie-broken by sequence number.
+  A wall clock can move backward (NTP correction, suspend/resume) — see
+  `eltanin_audit::record`'s own module docs on why nothing in this
+  codebase lets that fact affect an authorization decision. The same
+  caution applies here to *display* order only: `eltanin audit` does not
+  claim strict cross-instance ordering is authoritative, only that it is
+  a reasonable human-facing default. Use `eltanin explain` when a
+  specific record's exact position in one agent instance's own sequence
+  matters.

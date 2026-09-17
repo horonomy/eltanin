@@ -172,6 +172,7 @@ dependencies = [
 name = "eltanin-cli"
 version = "0.1.0"
 dependencies = [
+ "eltanin-audit",
  "eltanin-core",
  "eltanin-protocol",
  "rustix",

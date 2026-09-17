@@ -32,6 +32,10 @@ fn cli_contract_exit_code_table_matches_the_exit_code_enum() {
         ),
         (ExitCode::Denied, "denied by policy"),
         (ExitCode::ProfileUnresolved, "could not be resolved"),
+        (
+            ExitCode::AuditUnavailable,
+            "audit log could not be resolved or read",
+        ),
     ];
     for (code, doc_fragment) in codes {
         // Require the code and its description on the *same* table row —
