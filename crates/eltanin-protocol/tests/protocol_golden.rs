@@ -136,6 +136,9 @@ fn response_status_matches_fixture() {
             status: AgentStatusView {
                 protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
                 enforcement_mode: EnforcementMode::Enforce,
+                session_required: false,
+                approval_required: false,
+                revocation_required: false,
             },
         },
     });

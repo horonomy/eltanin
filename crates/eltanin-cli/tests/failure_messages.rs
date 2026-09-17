@@ -140,6 +140,9 @@ fn responses_eltanin_run_never_sends_a_request_for_classify_to_an_agent_error_no
         status: AgentStatusView {
             protocol_version: 1,
             enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
+            session_required: false,
+            approval_required: false,
+            revocation_required: false,
         },
     };
     assert!(classify_response(&status).is_some());

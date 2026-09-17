@@ -6,7 +6,10 @@
       "result": "status",
       "status": {
         "protocol_version": 6,
-        "enforcement_mode": "enforce"
+        "enforcement_mode": "enforce",
+        "session_required": false,
+        "approval_required": false,
+        "revocation_required": false
       }
     }
   }

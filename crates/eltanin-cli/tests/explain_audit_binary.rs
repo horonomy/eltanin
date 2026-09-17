@@ -75,6 +75,9 @@ fn status_entry(pid: u32) -> AuditEntry {
             status: AgentStatusView {
                 protocol_version: 1,
                 enforcement_mode: EnforcementMode::Enforce,
+                session_required: false,
+                approval_required: false,
+                revocation_required: false,
             },
         },
         mode: RecordedEnforcementMode::Enforce,

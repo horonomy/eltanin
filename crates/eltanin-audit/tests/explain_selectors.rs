@@ -31,6 +31,9 @@ fn status_entry() -> AuditEntry {
             status: eltanin_protocol::response::AgentStatusView {
                 protocol_version: 1,
                 enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
+                session_required: false,
+                approval_required: false,
+                revocation_required: false,
             },
         },
         mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
@@ -177,6 +180,9 @@ fn a_sequence_gap_between_two_records_is_reported_as_possibly_lost() {
                 status: eltanin_protocol::response::AgentStatusView {
                     protocol_version: 1,
                     enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
+                    session_required: false,
+                    approval_required: false,
+                    revocation_required: false,
                 },
             },
             mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
@@ -235,6 +241,9 @@ fn a_lost_first_write_is_reported_as_possibly_lost_not_never_issued() {
                 status: eltanin_protocol::response::AgentStatusView {
                     protocol_version: 1,
                     enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
+                    session_required: false,
+                    approval_required: false,
+                    revocation_required: false,
                 },
             },
             mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
@@ -311,6 +320,9 @@ fn a_version_mismatched_lines_recovered_event_id_counts_as_present_not_a_gap() {
                 status: eltanin_protocol::response::AgentStatusView {
                     protocol_version: 1,
                     enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
+                    session_required: false,
+                    approval_required: false,
+                    revocation_required: false,
                 },
             },
             mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,

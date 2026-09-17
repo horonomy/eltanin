@@ -78,9 +78,13 @@ impl RequestHandler for StatusOnlyHandler {
                 status: AgentStatusView {
                     protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
                     // This handler has no authorization backend wired in
-                    // at all — there is no enforcement posture to report
-                    // other than the wire default.
+                    // at all — there is no enforcement posture or gate
+                    // configuration to report other than the wire
+                    // defaults.
                     enforcement_mode: EnforcementMode::Enforce,
+                    session_required: false,
+                    approval_required: false,
+                    revocation_required: false,
                 },
             },
             ClientRequest::RequestLease(_)

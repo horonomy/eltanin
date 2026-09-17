@@ -207,6 +207,29 @@ pub struct AgentStatusView {
     /// tool, HORO-797) confirm whether an agent is actually running in
     /// shadow mode without inferring it from side effects.
     pub enforcement_mode: EnforcementMode,
+    /// Whether this deployment requires an active Trusted Compute
+    /// Session before `RequestLease` is granted (F-M2-001, HORO-791;
+    /// operator-configurable via `ELTANIN_AGENT_SESSION_REQUIRED`,
+    /// HORO-797 prep). Unlike `enforcement_mode`, the agent-internal
+    /// `SessionRequirement`/`ApprovalRequirement`/`RevocationRequirement`
+    /// enums themselves have no wire representation (see this struct's
+    /// module-level context) — this is a plain `bool` projection of
+    /// `SessionRequirement::Required`, added specifically so a client
+    /// (`eltanin status`, `eltanin session start`) can disclose plainly
+    /// when a gate is not active rather than leaving that silent.
+    pub session_required: bool,
+    /// Whether this deployment requires a matching remembered approval
+    /// before `RequestLease` is granted (F-M2-002, HORO-792;
+    /// operator-configurable via `ELTANIN_AGENT_APPROVAL_REQUIRED` +
+    /// `ELTANIN_AGENT_APPROVAL_STORE`, HORO-797 prep). See
+    /// `session_required`'s doc for why this is a plain `bool`.
+    pub approval_required: bool,
+    /// Whether this deployment requires `Capability::DeviceRevoke`
+    /// support as a grant-time precondition (F-M2-005, HORO-795;
+    /// operator-configurable via `ELTANIN_AGENT_REVOCATION_REQUIRED`,
+    /// HORO-797 prep). See `session_required`'s doc for why this is a
+    /// plain `bool`.
+    pub revocation_required: bool,
 }
 
 /// A closed set of protocol-level error codes. Deliberately has **no**
