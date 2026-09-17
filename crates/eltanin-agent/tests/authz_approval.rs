@@ -341,6 +341,76 @@ fn list_approvals_returns_only_the_calling_peers_own() {
     assert_eq!(approvals.len(), 1);
 }
 
+/// S5 (HORO-797 adversarial matrix) — `PINS_LIMITATION`, no prior
+/// coverage: approving an interpreter launcher once and later invoking
+/// that same launcher with a different script/argument is admitted
+/// silently, with no re-prompt, because the argument is never part of
+/// what is checked or even observable.
+///
+/// ADR 0010's AC4 section states three independently sufficient
+/// structural reasons this cannot be fixed at this layer — each
+/// re-verified against current source for this test:
+/// 1. `crates/eltanin-cli/src/sequence.rs` fixes stage S4 (`RequestLease`)
+///    strictly before stage S6 (`SpawnWorkload`) — there is no stage
+///    where an interpreter's argv could be observed before the lease
+///    decision is made.
+/// 2. `eltanin-protocol`'s wire types carry no client-declared-identity
+///    field anywhere (`crates/eltanin-protocol/src/request.rs`'s own
+///    module docs: "no producer of `Evidence`/`WorkloadIdentity`/
+///    `ExecutionContext`") — a client cannot declare "I am running
+///    script X" even if it wanted to.
+/// 3. `crates/eltanin-audit/tests/redaction.rs` mechanically forbids any
+///    collector from ever reading `/proc/<pid>/cmdline` — the one
+///    kernel source that could in principle reveal an interpreter's
+///    argv.
+///
+/// This test demonstrates the consequence directly: `TestPeer` (this
+/// suite's `PeerContext`/`WorkloadIdentity` builder, mirroring what the
+/// real platform collectors produce) has no argv/script field to vary at
+/// all — two "different invocations" of the same interpreter are, by
+/// construction, indistinguishable identities. `eltanin approve` binds
+/// only to the launcher (uid/path/digest/cgroup), never to the
+/// argument, so the second invocation is admitted with zero new
+/// `eltanin approve` calls.
+#[test]
+fn s5_approving_an_interpreter_admits_a_later_invocation_with_a_different_script() {
+    // Stands in for `python script_a.py`: this launcher's identity is
+    // uid + path + digest only, per `ApprovalBinding` — there is no
+    // script argument dimension for `TestPeer`/`WorkloadIdentity` to
+    // even carry.
+    let interpreter_invocation_a = TestPeer::fresh(1000, "sha256:python-3.11-trusted");
+    let handler = handler_required(
+        allow_policy_for_uid(1000),
+        backend_with_resource(&[Capability::DeviceEnforce]),
+        temp_approval_store_path("interpreter-reuse"),
+    );
+
+    let approve_response = handler.handle(
+        &approve_request(eltanin_core::approval::ApprovalDisposition::Remember),
+        &interpreter_invocation_a.context(),
+    );
+    assert!(
+        matches!(approve_response, AgentResponse::ApprovalRecorded { .. }),
+        "expected ApprovalRecorded, got {approve_response:?}"
+    );
+
+    // Stands in for a *later*, different `python script_b.py` through
+    // the exact same interpreter binary — same uid/path/digest, which is
+    // the only identity this mechanism can ever observe.
+    let interpreter_invocation_b = TestPeer::fresh(
+        interpreter_invocation_a.uid,
+        interpreter_invocation_a.executable_hash,
+    );
+    let response = handler.handle(&lease_request(), &interpreter_invocation_b.context());
+
+    assert!(
+        matches!(response, AgentResponse::LeaseGranted { .. }),
+        "a different script run through an already-approved interpreter must be admitted \
+         with no re-prompt — the script/argv dimension is structurally invisible to this \
+         mechanism (ADR 0010 AC4 section), got {response:?}"
+    );
+}
+
 /// A remembered approval and a Trusted Compute Session (HORO-791) are
 /// independent, conjunctive gates: both must pass. A recorded approval
 /// alone does not satisfy a `SessionRequirement::Required` deployment.

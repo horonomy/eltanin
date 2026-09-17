@@ -843,3 +843,197 @@ fn default_config_without_step_up_is_byte_identical_to_pre_horo_794() {
         "the default config must never carry a StepUpPolicy"
     );
 }
+
+// ---------------------------------------------------------------------
+// HORO-797 adversarial trust-boundary matrix: S7 (downloaded/temp
+// executable) and S8 (detached persistent daemon), composed through the
+// real gate chain rather than `eltanin_core::risk::assess` in isolation.
+// ---------------------------------------------------------------------
+
+/// S7 (HORO-797 adversarial matrix) — `PROVES_DEFENSE`, genuinely new at
+/// this level: `crates/eltanin-core/tests/risk_assessment.rs` already
+/// proves `UntrustedExecutionPath` fires correctly and can never
+/// hard-deny in isolation (`untrusted_execution_path_fires_from_configured_prefix`,
+/// `trusted_execution_path_does_not_fire`, `path_signal_cannot_deny`,
+/// `path_signal_can_step_up`), but no existing test composes it through
+/// the real `AuthorizationHandler` gate chain
+/// (`peer.authorizable()` → session gate → approval gate → risk
+/// classification). This test does: a launcher under a configured
+/// `untrusted_path_prefixes` entry, with no approval ever recorded (so
+/// the approval gate refuses and risk classification actually runs),
+/// must surface as a step-up-shaped refusal — never `RiskDenied`, since
+/// `StepUpPolicy::new` structurally forbids mapping
+/// `RiskSignal::UntrustedExecutionPath` to `SignalDisposition::Deny`
+/// (`eltanin_core::risk`'s own module docs). This test also implicitly
+/// reconfirms `path_signal_cannot_deny`'s invariant at the agent level.
+#[test]
+fn s7_agent_level_untrusted_execution_path_composes_through_the_real_gate_chain() {
+    let peer = TestPeer::fresh(1000, "sha256:trusted");
+    let backend = backend_with_resource(&resource_identity(), &[Capability::DeviceEnforce]);
+    let sink = Arc::new(CapturingSink::default());
+    let step_up = StepUpPolicy::new(
+        [(
+            RiskSignal::UntrustedExecutionPath,
+            SignalDisposition::StepUp,
+        )]
+        .into_iter()
+        .collect(),
+        BTreeSet::from(["/usr/bin/eltanin-test".to_string()]),
+    )
+    .expect("StepUp is a valid disposition for UntrustedExecutionPath");
+    let handler = handler_with_step_up(
+        allow_policy_for_uid(1000),
+        backend,
+        temp_approval_store_path("step-up-untrusted-path-agent-level"),
+        step_up,
+        sink.clone(),
+    );
+
+    // The prefix comparison is load-bearing for this test, so assert it
+    // directly rather than relying on `TestPeer`'s fixed
+    // `executable_path` staying "/usr/bin/eltanin-test-workload" by
+    // coincidence — if that support helper ever changes, this failure
+    // should name the real cause instead of looking like a risk-layer
+    // regression.
+    match &peer.context().observed().workload.executable_path {
+        Evidence::Present { value, .. } => assert!(
+            value.starts_with("/usr/bin/eltanin-test"),
+            "test setup assumption broken: TestPeer's executable_path {value:?} no longer \
+             starts with the configured untrusted prefix"
+        ),
+        other => panic!("expected a Present executable_path, got {other:?}"),
+    }
+
+    // No prior approval recorded — the approval gate refuses, which is
+    // what routes this request through the real risk-classification
+    // layer at all (`assess` runs only from a gate's refusal arm).
+    let response = handler.handle(&lease_request(), &peer.context());
+
+    assert_eq!(
+        response,
+        AgentResponse::LeaseDenied {
+            reason: DenialReason::StepUpRequired
+        },
+        "an untrusted-path signal must surface as a step-up-shaped refusal, never RiskDenied \
+         — StepUpPolicy::new structurally forbids mapping UntrustedExecutionPath to Deny, got \
+         {response:?}"
+    );
+    match sink.last() {
+        AuthorizationOutcome::StepUpRequired { signals } => {
+            assert!(
+                signals.contains(&RiskSignal::UntrustedExecutionPath),
+                "expected UntrustedExecutionPath in {signals:?}"
+            );
+        }
+        other => panic!("expected StepUpRequired, got {other:?}"),
+    }
+}
+
+/// S8(a) (HORO-797 adversarial matrix) — `PROVES_DEFENSE` at the
+/// detection level: a REAL detached (`setsid()`-ed) process fires
+/// `RiskSignal::DetachedExecution` through the real
+/// `AuthorizationHandler` gate chain, not merely
+/// `eltanin_core::risk::assess` called directly in isolation (as
+/// `crates/eltanin-core/tests/risk_assessment.rs`'s
+/// `not_member_fires_detached_execution`/
+/// `indeterminate_membership_fires_detached_execution_and_evidence_indeterminate`
+/// already do at the core level). Reuses `spawn_real_child()` — a real
+/// child that calls `setsid()` at startup (`session_probe_fixture`,
+/// also used by `authz_session.rs`'s own AC2 test) — so this is a
+/// genuinely observed kernel session-key mismatch, not a synthetic
+/// `TestPeer` standing in for one.
+#[test]
+fn s8a_a_real_detached_process_fires_detached_execution_through_the_real_gate_chain() {
+    let (detached_child, detached_pid) = spawn_real_child();
+    let uid = real_self_uid();
+    let peer = peer_context_for_pid(detached_pid, uid);
+
+    let backend = backend_with_resource(&resource_identity(), &[Capability::DeviceEnforce]);
+    let sink = Arc::new(CapturingSink::default());
+    let step_up = StepUpPolicy::new(
+        [(RiskSignal::DetachedExecution, SignalDisposition::StepUp)]
+            .into_iter()
+            .collect(),
+        BTreeSet::new(),
+    )
+    .unwrap();
+    let handler = handler_with_step_up(
+        allow_policy_for_uid(uid),
+        backend,
+        temp_approval_store_path("detached-execution-agent-level"),
+        step_up,
+        sink.clone(),
+    );
+
+    // No session ever established for anyone, and no approval ever
+    // recorded for this real, genuinely detached process — the approval
+    // gate refuses, routing this through real risk classification.
+    let response = handler.handle(&lease_request(), &peer);
+    kill_probe(detached_child);
+
+    assert_eq!(
+        response,
+        AgentResponse::LeaseDenied {
+            reason: DenialReason::StepUpRequired
+        },
+        "a real, setsid()-detached process must fire DetachedExecution through the real \
+         agent-level gate chain, got {response:?}"
+    );
+    match sink.last() {
+        AuthorizationOutcome::StepUpRequired { signals } => {
+            assert!(
+                signals.contains(&RiskSignal::DetachedExecution),
+                "expected DetachedExecution in {signals:?}"
+            );
+        }
+        other => panic!("expected StepUpRequired, got {other:?}"),
+    }
+}
+
+/// S8(b) (HORO-797 adversarial matrix) — `PINS_LIMITATION` at the
+/// default-config level: the exact same real detached process from
+/// `s8a` above is silently ADMITTED under the default
+/// `AuthorizationConfig` (no `ApprovalRequirement`, no `StepUpPolicy`).
+///
+/// Stated precisely, not loosely: under the default config,
+/// `approval_and_delegation_gate` returns immediately at its own
+/// `if self.approval_requirement != Required` guard (`authz/mod.rs`) —
+/// the approval gate never even runs, so `refuse_with_risk` is never
+/// reached and `risk::assess_refusal` is never called at all.
+/// `DetachedExecution` is not "computed and then ignored" here — it is
+/// never computed in the first place. Detection is opt-in at two
+/// independent levels: `ApprovalRequirement::Required` must be
+/// configured before risk classification runs at all (see
+/// `refuse_with_risk`'s own `let Some(policy) = &self.step_up else`
+/// fallback for the second level, when approval is required but no
+/// `StepUpPolicy` is configured). This is real, honest disclosure in
+/// the same shape as ADR 0011 disclosure 1 ("a descendant that never
+/// calls `eltanin run` is invisible to this model entirely... this is
+/// topology, not an implementation shortcut") — here the gap is one
+/// layer up: nothing about a detached/daemon-like process is denied,
+/// step-up-challenged, or even classified by default.
+#[test]
+fn s8b_pins_that_under_the_default_config_a_detached_process_is_admitted_anyway() {
+    let (detached_child, detached_pid) = spawn_real_child();
+    let uid = real_self_uid();
+    let peer = peer_context_for_pid(detached_pid, uid);
+
+    let handler = AuthorizationHandler::new(
+        IssuerInstanceId::new("test-instance"),
+        allow_policy_for_uid(uid),
+        backend_with_resource(&resource_identity(), &[Capability::DeviceEnforce]),
+        FixedClock::new(),
+        Arc::new(CapturingSink::default()),
+        &AuthorizationConfig::new(Duration::from_secs(300)).unwrap(),
+    );
+
+    let response = handler.handle(&lease_request(), &peer);
+    kill_probe(detached_child);
+
+    assert!(
+        matches!(response, AgentResponse::LeaseGranted { .. }),
+        "under the default config (no ApprovalRequirement, no StepUpPolicy configured), a \
+         real detached process must be admitted with zero friction — DetachedExecution \
+         detection is opt-in only, got {response:?}"
+    );
+}
