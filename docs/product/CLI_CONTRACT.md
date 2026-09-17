@@ -275,6 +275,17 @@ eltanin session end
   run` under a deployment that requires an active session) reuses the
   existing `ExitCode::Denied` (77) with a stderr message directing the
   user to run `eltanin session start`.
+- `start`'s success output also names when the agent does not actually
+  require a session (HORO-797 prep, D1b): `SessionRequirement::NotRequired`
+  is the default, and a session established against such an agent has
+  no enforcement effect at all — `eltanin run` behaves identically
+  whether or not it exists. Rather than print a bare "established ..."
+  that implies a gate now exists, `start` queries `AgentStatus` and
+  appends an explicit warning when `session_required` is `false`. This
+  never changes `start`'s exit code — the session genuinely was
+  established; the warning is disclosure, not a new failure mode. See
+  `eltanin-agentd`'s `ELTANIN_AGENT_SESSION_REQUIRED` env var (below)
+  for how an operator actually turns this gate on.
 
 ## `eltanin approve` — remembered authorization intent (F-M2-002, HORO-792)
 
@@ -344,14 +355,52 @@ eltanin status
   `eltanin run --shadow` flag or equivalent client-side switch: shadow
   mode is exclusively an agent-deployment decision, never something a
   client can request or opt out of per invocation.
+- `eltanin status` also prints `session_required`/`approval_required`/
+  `revocation_required` (HORO-797 prep) — whether this deployment
+  actually requires a Trusted Compute Session, a remembered approval, or
+  `Capability::DeviceRevoke` support before `RequestLease` is granted.
+  Each is `NO` unless the matching env var below is set; a `NO` is
+  printed loudly (uppercase, with an explanation), mirroring shadow
+  mode's own "state an unenforced/weak posture, don't leave it silent"
+  convention.
 - Takes no arguments. No new exit codes — an unreachable agent still
   exits 69, an `Error{code}` response still exits 70, exactly like every
   other subcommand's use of `crate::client::AgentClient`.
-- `AgentStatusView` carries only `protocol_version` and
-  `enforcement_mode` — there is no richer shadow-specific state on the
-  wire (e.g. a running tally of would-grant/would-deny counts) for this
-  command to surface. Adding one is additive, out of this subtask's
-  scope.
+- `AgentStatusView` carries `protocol_version`, `enforcement_mode`, and
+  the three gate-requirement booleans above — there is no richer
+  shadow-specific state on the wire (e.g. a running tally of
+  would-grant/would-deny counts) for this command to surface. Adding one
+  is additive, out of this subtask's scope.
+
+### `eltanin-agentd` gate-configuration environment variables (HORO-797 prep)
+
+Before this ticket's prep work, `eltanin-agentd` built its
+`AuthorizationConfig` with only lease ttl and `enforcement_mode`
+operator-configurable — Trusted Compute Session (F-M2-001), remembered
+approval (F-M2-002), and revocation-capability (F-M2-005) gates were
+reachable only by a caller embedding `eltanin-agent` as a library, never
+by an operator of the real binary. The following env vars close that
+gap; delegation and risk-based step-up remain library-only (see
+`docs/product/SECURITY_MODEL.md`'s corresponding sections for why).
+
+- `ELTANIN_AGENT_SESSION_REQUIRED` — `"1"` or `"true"` enables
+  `SessionRequirement::Required`; unset (or absent) leaves it
+  `NotRequired`, the pre-existing default. Any other set value is a
+  startup-time configuration error.
+- `ELTANIN_AGENT_APPROVAL_REQUIRED` + `ELTANIN_AGENT_APPROVAL_STORE` —
+  both must be set together to enable `ApprovalRequirement::Required`
+  with the given durable approval-store path
+  (`AuthorizationConfig::with_approval_store`'s own "no `Required`
+  without a store path" invariant, enforced here at the env-var
+  boundary): setting one without the other is a startup-time
+  configuration error, not a silent no-op.
+- `ELTANIN_AGENT_REVOCATION_REQUIRED` — `"1"` or `"true"` enables
+  `RevocationRequirement::Required`; unset leaves it `NotRequired`, the
+  pre-existing default. Any other set value is a startup-time
+  configuration error.
+
+Every one of these is opt-in: a deployment that sets none of them
+behaves byte-identically to before this ticket.
 
 ## `eltanin explain` — audit-log decision explanation (F-M2-006, HORO-796 subtask 4)
 

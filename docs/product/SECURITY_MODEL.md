@@ -440,9 +440,21 @@ trust change that caused it (a `RiskSignal`, e.g. `LauncherIdentityChanged`,
 can configure each signal class as `Informational` (audit only, the
 default), `StepUp` (elevates the refusal to `DenialReason::StepUpRequired`),
 or `Deny` (elevates to `DenialReason::RiskDenied`, hard, unremediable by
-re-approving). See [ADR 0012](../adr/0012-risk-based-step-up.md) for the
-full design record, the exhaustive signal-composition table, and the
-rejected alternatives.
+re-approving) — **today this is library-only**: `StepUpPolicy` is
+constructed and wired in exclusively via
+`AuthorizationConfig::with_step_up`, a direct `eltanin-agent` library
+call. As of HORO-797's release-readiness prep work, the real
+`eltanin-agentd` binary has no environment variable exposing this
+configuration — `StepUpPolicy`'s 11 signals × 3 dispositions have no
+natural single-scalar env-var encoding (unlike the scalar
+session/approval/revocation gates HORO-797's prep work did expose — see
+the Compute Lease Lifecycle Hardening section above), and inventing one
+was explicitly out of that ticket's scope. An operator running the
+shipped binary cannot configure step-up today; only a caller embedding
+`eltanin-agent` as a library can. See
+[ADR 0012](../adr/0012-risk-based-step-up.md) for the full design
+record, the exhaustive signal-composition table, and the rejected
+alternatives.
 
 **No admit/proceed path exists on the risk layer's own verdict type** —
 `StepUpVerdict` is `NoStepUp`/`StepUpRequired`/`RiskDenied` only, all
@@ -537,7 +549,23 @@ require `Capability::DeviceRevoke` support as a grant-time precondition
 (`AuthorizationConfig::with_revocation_requirement`), refusing to lease
 a resource that cannot structurally be revoked. Defaults to
 `NotRequired` — every pre-existing deployment/test harness is
-byte-identical unless it opts in.
+byte-identical unless it opts in. As of HORO-797's release-readiness
+prep work, an operator running the real `eltanin-agentd` binary enables
+this directly via the `ELTANIN_AGENT_REVOCATION_REQUIRED=1` (or `true`)
+environment variable — before that, this gate was reachable only by a
+caller of the `eltanin-agent` library directly, not by an operator of
+the shipped binary. The same prep work exposed
+`SessionRequirement`/`ApprovalRequirement` (F-M2-001/F-M2-002) the same
+way, via `ELTANIN_AGENT_SESSION_REQUIRED` and
+`ELTANIN_AGENT_APPROVAL_REQUIRED`/`ELTANIN_AGENT_APPROVAL_STORE`
+respectively — see `docs/product/CLI_CONTRACT.md`'s `eltanin-agentd`
+section for the full env var contract. Delegation
+(`AuthorizationConfig::with_delegation`) and risk-based step-up
+(`AuthorizationConfig::with_step_up`) remain library-only: both take a
+structured, multi-field argument (`DelegationBounds`, `StepUpPolicy`)
+with no natural single-scalar env-var encoding, and HORO-797's prep work
+deliberately did not invent one — see the next section's correction for
+step-up specifically.
 
 **"Best-effort revoke" remains undecorated, not proven.** This ticket
 makes the *plumbing* honest — lease-layer revocation is structural and
