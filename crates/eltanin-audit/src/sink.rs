@@ -86,6 +86,10 @@ pub struct AuditEntry {
     pub peer: RecordedPeer,
     pub outcome: RecordedOutcome,
     pub response: eltanin_protocol::response::AgentResponse,
+    /// Which enforcement posture was active when the caller observed
+    /// this outcome (F-M2-006, HORO-796 subtask 3). Threaded straight
+    /// onto [`AuditRecord::mode`], never recomputed here.
+    pub mode: RecordedEnforcementMode,
     /// The [`SessionId`] active for this request, when the caller had
     /// already resolved one at the point this entry was built — `None`
     /// both when no session was active and when the request was refused
@@ -282,7 +286,7 @@ impl AuditFileSink {
             peer: entry.peer,
             outcome: entry.outcome,
             response: entry.response,
-            mode: RecordedEnforcementMode::Enforce,
+            mode: entry.mode,
             session: entry.session,
         });
 

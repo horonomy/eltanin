@@ -125,6 +125,7 @@ fn responses_eltanin_run_never_sends_a_request_for_classify_to_an_agent_error_no
     let status = AgentResponse::Status {
         status: AgentStatusView {
             protocol_version: 1,
+            enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
         },
     };
     assert!(classify_response(&status).is_some());

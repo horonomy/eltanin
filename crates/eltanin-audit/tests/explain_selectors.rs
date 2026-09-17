@@ -30,8 +30,10 @@ fn status_entry() -> AuditEntry {
         response: AgentResponse::Status {
             status: eltanin_protocol::response::AgentStatusView {
                 protocol_version: 1,
+                enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
             },
         },
+        mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
         session: None,
     }
 }
@@ -48,6 +50,7 @@ fn denied_entry(pid: u32) -> AuditEntry {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::IndeterminateEvidence,
         },
+        mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
         session: None,
     }
 }
@@ -173,6 +176,7 @@ fn a_sequence_gap_between_two_records_is_reported_as_possibly_lost() {
             response: AgentResponse::Status {
                 status: eltanin_protocol::response::AgentStatusView {
                     protocol_version: 1,
+                    enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
                 },
             },
             mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
@@ -230,6 +234,7 @@ fn a_lost_first_write_is_reported_as_possibly_lost_not_never_issued() {
             response: AgentResponse::Status {
                 status: eltanin_protocol::response::AgentStatusView {
                     protocol_version: 1,
+                    enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
                 },
             },
             mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
@@ -305,6 +310,7 @@ fn a_version_mismatched_lines_recovered_event_id_counts_as_present_not_a_gap() {
             response: AgentResponse::Status {
                 status: eltanin_protocol::response::AgentStatusView {
                     protocol_version: 1,
+                    enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
                 },
             },
             mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
@@ -375,6 +381,7 @@ fn a_grant_and_its_later_release_correlate_by_lease_id() {
                 remaining: std::time::Duration::from_secs(1),
             },
         },
+        mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
         session: None,
     })
     .unwrap();
@@ -391,6 +398,7 @@ fn a_grant_and_its_later_release_correlate_by_lease_id() {
         response: AgentResponse::LeaseReleased {
             outcome: eltanin_protocol::response::ReleaseOutcome::Released,
         },
+        mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
         session: None,
     })
     .unwrap();

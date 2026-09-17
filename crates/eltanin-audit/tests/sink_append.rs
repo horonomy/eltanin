@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use eltanin_audit::explain::read_log;
 use eltanin_audit::record::{
-    RecordedAgentEvent, RecordedOperation, RecordedOutcome, RecordedRequest,
+    RecordedAgentEvent, RecordedEnforcementMode, RecordedOperation, RecordedOutcome,
+    RecordedRequest,
 };
 use eltanin_audit::sink::{rotated_path, AuditEntry, AuditFileSink};
 use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime};
@@ -25,8 +26,10 @@ fn status_entry() -> AuditEntry {
         response: AgentResponse::Status {
             status: eltanin_protocol::response::AgentStatusView {
                 protocol_version: 1,
+                enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
             },
         },
+        mode: RecordedEnforcementMode::Enforce,
         session: None,
     }
 }
@@ -131,15 +134,17 @@ fn a_failed_write_still_advances_the_sequence_leaving_a_detectable_gap() {
 
 #[test]
 fn rotation_triggers_at_the_configured_byte_threshold() {
-    // One serialized status_entry() line is ~850 bytes; a threshold of
-    // ~3 lines' worth guarantees exactly one rotation partway through 5
-    // appends, and no more than one — so every appended record must
-    // still be present (nothing has been discarded yet, since a
-    // generation is only ever discarded by a *second* rotation).
+    // One serialized status_entry() line is ~885 bytes (F-M2-006,
+    // HORO-796 subtask 3 grew `AgentStatusView` by one field); a
+    // threshold of ~3 lines' worth guarantees exactly one rotation
+    // partway through 5 appends, and no more than one — so every
+    // appended record must still be present (nothing has been discarded
+    // yet, since a generation is only ever discarded by a *second*
+    // rotation).
     let path = temp_log_path("rotate-threshold");
     let sink = AuditFileSink::open(&path, IssuerInstanceId::new("i"))
         .unwrap()
-        .with_max_bytes(2600);
+        .with_max_bytes(2700);
 
     assert!(
         !rotated_path(&path).exists(),

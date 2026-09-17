@@ -7,7 +7,7 @@
 
 use eltanin_core::peer::PeerContext;
 use eltanin_protocol::request::ClientRequest;
-use eltanin_protocol::response::{AgentResponse, AgentStatusView, ErrorCode};
+use eltanin_protocol::response::{AgentResponse, AgentStatusView, EnforcementMode, ErrorCode};
 
 /// Answers one decoded [`ClientRequest`] against one connection's
 /// derived [`PeerContext`].
@@ -77,6 +77,10 @@ impl RequestHandler for StatusOnlyHandler {
             ClientRequest::AgentStatus {} => AgentResponse::Status {
                 status: AgentStatusView {
                     protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
+                    // This handler has no authorization backend wired in
+                    // at all — there is no enforcement posture to report
+                    // other than the wire default.
+                    enforcement_mode: EnforcementMode::Enforce,
                 },
             },
             ClientRequest::RequestLease(_)

@@ -111,7 +111,13 @@ impl LaunchFailure {
 /// Classify a non-grant `AgentResponse` into a [`LaunchFailure`].
 /// `AgentResponse::LeaseGranted` has no failure to classify — call sites
 /// only reach this after already handling the grant path.
+// The `ShadowObserved` arm below is deliberately kept separate from the
+// "genuinely unreachable" group above even though both currently return
+// the same value — see that arm's own comment on why they are not the
+// same case and must not be silently merged just because clippy can't
+// see the difference in a `_` value.
 #[must_use]
+#[allow(clippy::match_same_arms)]
 pub fn classify_response(response: &AgentResponse) -> Option<LaunchFailure> {
     match response {
         AgentResponse::LeaseGranted { .. } => None,
@@ -130,6 +136,17 @@ pub fn classify_response(response: &AgentResponse) -> Option<LaunchFailure> {
         | AgentResponse::ApprovalRecorded { .. }
         | AgentResponse::ApprovalList { .. }
         | AgentResponse::ApprovalForgotten { .. } => {
+            Some(LaunchFailure::AgentError(ErrorCode::Internal))
+        }
+        // F-M2-006/HORO-796 subtask 3: `ShadowObserved` *is* a real
+        // response to the `RequestLease` this crate's call sites send —
+        // unlike the group above, it is not wire-unreachable here. This
+        // crate does not yet interpret it (real `eltanin run` shadow-mode
+        // support is HORO-796 subtask 4's job); classifying it as an
+        // internal agent error for now is a deliberate placeholder, kept
+        // in its own arm so it is never silently merged into the
+        // "genuinely unreachable" group above.
+        AgentResponse::ShadowObserved { .. } => {
             Some(LaunchFailure::AgentError(ErrorCode::Internal))
         }
     }

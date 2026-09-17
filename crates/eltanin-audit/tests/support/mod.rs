@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 use eltanin_audit::record::{
-    AuditClock, RecordedOperation, RecordedOutcome, RecordedPeer, RecordedPeerConsistency,
-    RecordedPeerCredential, RecordedRequest, WallClockTime,
+    AuditClock, RecordedEnforcementMode, RecordedOperation, RecordedOutcome, RecordedPeer,
+    RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
 };
 use eltanin_audit::sink::AuditEntry;
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
@@ -91,8 +91,10 @@ pub fn status_entry() -> AuditEntry {
         response: eltanin_protocol::response::AgentResponse::Status {
             status: eltanin_protocol::response::AgentStatusView {
                 protocol_version: 1,
+                enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
             },
         },
+        mode: RecordedEnforcementMode::Enforce,
         session: None,
     }
 }
