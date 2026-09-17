@@ -156,7 +156,19 @@ continuing an unauthorized workload.
   used for audit correlation.
 - If `eltanin run` itself receives `SIGKILL`, no cleanup can run at all;
   the lease persists until its own TTL. This is the accepted fail-closed
-  floor (see ADR 0005).
+  floor (see ADR 0005). **Updated (F-M2-005, HORO-795):** once that TTL
+  elapses, the agent's own lazy expired-lease sweep — run at the top of
+  every subsequent `RequestLease`/`ReleaseLease` handling, from *any*
+  peer, not necessarily the killed one — now actually tears down the
+  resource's backend-side enforcement (`backend.revoke()`), where before
+  this fix the lease-state record silently disappeared with enforcement
+  left live indefinitely. This narrows, but does not eliminate, the
+  exposure window: enforcement teardown still waits for the lease's own
+  TTL to elapse *and* some subsequent request to touch the agent — there
+  is no background timer. See
+  [ADR 0013](../adr/0013-compute-lease-lifecycle-hardening.md) for the
+  full disclosure, including that device-layer teardown itself remains
+  `BLOCKED_ON_E3`/`UNVERIFIED_ON_BARE_METAL`.
 
 ## Exit codes
 

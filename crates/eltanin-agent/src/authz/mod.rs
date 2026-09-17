@@ -82,7 +82,7 @@ use eltanin_core::lease::{
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySet};
 use eltanin_core::provenance::ProvenanceRecord;
-use eltanin_core::resource::{ComputeRequest, EnforcementResult};
+use eltanin_core::resource::{Capability, ComputeRequest, EnforcementResult};
 use eltanin_core::session::{
     membership, IntentProof, LocalSessionAnchor, MembershipVerdict, SessionAssurance,
     SessionAuthority, SessionId, SessionScope,
@@ -141,6 +141,22 @@ pub enum ConfigError {
     NonPositiveLeaseTtl,
 }
 
+/// Agent deployment configuration (F-M2-005, HORO-795): whether
+/// `RequestLease` requires the resource to support
+/// [`Capability::DeviceRevoke`] before a lease is ever granted for it.
+/// Mirrors [`session::SessionRequirement`]/[`approval::ApprovalRequirement`]'s
+/// exact shape and the same blast-radius discipline: `NotRequired` is
+/// the default, and every pre-HORO-795 deployment/test harness that
+/// never heard of this gate must keep behaving exactly as before —
+/// today, only `enforce() == Allowed` gates whether a lease is granted;
+/// `Capability::DeviceRevoke` is never consulted at grant time at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RevocationRequirement {
+    Required,
+    #[default]
+    NotRequired,
+}
+
 /// Configuration for one [`AuthorizationHandler`]. `lease_ttl` has no
 /// default — mirroring [`crate::config::AgentConfig`]'s `socket_mode`,
 /// there is no safe default for a security-relevant duration; the
@@ -166,6 +182,10 @@ pub struct AuthorizationConfig {
     /// refusal path's behavior is then byte-identical to before this
     /// ticket (HORO-794).
     step_up: Option<eltanin_core::risk::StepUpPolicy>,
+    /// F-M2-005, HORO-795. Defaults to [`RevocationRequirement::NotRequired`]
+    /// — see [`RevocationRequirement`]'s own doc for the blast-radius
+    /// rationale.
+    revocation_requirement: RevocationRequirement,
 }
 
 const DEFAULT_MAX_OUTSTANDING_LEASES: usize = 1024;
@@ -227,6 +247,12 @@ impl AuthorizationConfig {
             // of risk-based step-up must keep behaving exactly as
             // before — the risk layer is never consulted at all.
             step_up: None,
+            // HORO-795's own blast-radius obligation, mirroring every
+            // ticket above: every pre-HORO-795 test harness and
+            // deployment that never heard of revocation-capability
+            // gating must keep behaving exactly as before — a resource
+            // lacking Capability::DeviceRevoke remains leasable.
+            revocation_requirement: RevocationRequirement::NotRequired,
         })
     }
 
@@ -318,6 +344,21 @@ impl AuthorizationConfig {
         self.approval_store_path = Some(approval_store);
         self.step_up = Some(policy);
         self
+    }
+
+    /// Require the resource to support [`Capability::DeviceRevoke`]
+    /// before `RequestLease` grants a lease for it (F-M2-005, HORO-795).
+    /// See [`RevocationRequirement`]'s own doc for the default and its
+    /// blast-radius rationale.
+    #[must_use]
+    pub fn with_revocation_requirement(mut self, requirement: RevocationRequirement) -> Self {
+        self.revocation_requirement = requirement;
+        self
+    }
+
+    #[must_use]
+    pub fn revocation_requirement(&self) -> RevocationRequirement {
+        self.revocation_requirement
     }
 
     #[must_use]
@@ -510,6 +551,7 @@ pub struct AuthorizationHandler {
     once_approval_ttl: Duration,
     delegation: Option<eltanin_core::delegation::DelegationBounds>,
     step_up: Option<eltanin_core::risk::StepUpPolicy>,
+    revocation_requirement: RevocationRequirement,
 }
 
 impl AuthorizationHandler {
@@ -572,6 +614,7 @@ impl AuthorizationHandler {
             once_approval_ttl: config.once_approval_ttl,
             delegation: config.delegation.clone(),
             step_up: config.step_up.clone(),
+            revocation_requirement: config.revocation_requirement,
         }
     }
 
@@ -611,6 +654,38 @@ impl AuthorizationHandler {
         }
     }
 
+    /// Bug fix (HORO-795): tear down backend enforcement for any lease
+    /// that has expired since it was granted. `LeaseState::prune` (called
+    /// by `issue_reserving_capacity` and `handle_release_lease` below)
+    /// removes an expired lease's *lease-state* record but owns no
+    /// [`ComputeBackend`] reference and cannot itself call
+    /// `backend.revoke()` — without this sweep, a workload whose
+    /// controlling `eltanin run` process was killed (so `ReleaseLease` is
+    /// never called) keeps live backend-side enforcement indefinitely
+    /// after its lease has silently expired and been pruned. Called at
+    /// the top of both `handle_request_lease` and `handle_release_lease`
+    /// — a separate step, run *before* either of those functions' own
+    /// existing `prune` call, never threaded through
+    /// `issue_reserving_capacity`'s signature (a different function with
+    /// a different job).
+    ///
+    /// Mirrors [`Self::membership_for_peer`]'s reap-then-cascade shape,
+    /// and `LeaseState::sweep_expired`'s own "compute what to do under
+    /// the lock, drop the lock, then act" discipline: the state lock is
+    /// released before any `backend.revoke()` call, exactly like every
+    /// other backend call this handler makes outside `handle_release_lease`'s
+    /// own deliberate exception (see that method's doc comment on why it
+    /// alone holds the lock across its `backend.revoke()` call).
+    fn sweep_expired_leases(&self) {
+        let now = self.clock.now();
+        let mut guard = state::lock(&self.state);
+        let work = guard.sweep_expired(now);
+        drop(guard);
+        for (_, resource) in work {
+            let _ = self.backend.revoke(&resource);
+        }
+    }
+
     fn handle_status() -> (AuthorizationOutcome, AgentResponse) {
         (
             AuthorizationOutcome::StatusReported,
@@ -645,27 +720,58 @@ impl AuthorizationHandler {
     ) {
         let now = self.clock.now();
         let mut sessions = session_state::lock(&self.sessions);
-        sessions.reap(now, session::collect_workload_identity);
+        let reaped = sessions.reap(now, session::collect_workload_identity);
 
         let pid = peer.observed().workload.pid;
         let peer_key = session::collect_session_key(pid);
-        let Some(candidate) = (match &peer_key {
+        let matched_and_verdict = match &peer_key {
             Evidence::Present { value, .. } => sessions.find_by_key(*value),
             Evidence::Missing { .. } | Evidence::Unsupported => None,
-        }) else {
-            return (
+        }
+        .map(|candidate| {
+            let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
+            let verdict = membership(candidate, &peer_key, &leader);
+            let matched =
+                matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
+            (matched, verdict)
+        });
+        drop(sessions);
+
+        // Bug fix (HORO-795): a session reaped just above — by EXPIRY or
+        // ANCHOR-LEADER DEATH, as opposed to an explicit
+        // `TerminateSession` (whose own cascade already handled this
+        // correctly) — must cascade-revoke its leases at the
+        // backend/lease-state layer the same way, or a killed
+        // `eltanin run` process's device-level access outlives its own
+        // now-dead session indefinitely. See `SessionState::reap`'s doc
+        // comment.
+        for (_, lease_ids) in reaped {
+            self.cascade_revoke_leases(lease_ids);
+        }
+
+        match matched_and_verdict {
+            Some((matched, verdict)) => (matched, verdict, peer_key),
+            None => (
                 None,
                 MembershipVerdict::Indeterminate {
                     reason: "no session found for this peer's session key".to_string(),
                 },
                 peer_key,
-            );
-        };
+            ),
+        }
+    }
 
-        let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
-        let verdict = membership(candidate, &peer_key, &leader);
-        let matched = matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
-        (matched, verdict, peer_key)
+    /// Cascade-revoke every lease id in `lease_ids` at the lease-state/
+    /// backend layer, reusing exactly the mechanism
+    /// `handle_terminate_session`'s explicit-termination cascade already
+    /// established: [`Self::revoke_lease_for_session_teardown`] for each
+    /// id. Shared by every lazy-reaping call site (Bug fix, HORO-795) so
+    /// a session dying by EXPIRY or ANCHOR-LEADER DEATH is cascaded
+    /// identically to one dying by explicit `TerminateSession`.
+    fn cascade_revoke_leases(&self, lease_ids: BTreeSet<LeaseId>) {
+        for lease_id in lease_ids {
+            self.revoke_lease_for_session_teardown(&lease_id);
+        }
     }
 
     /// The result of [`AuthorizationHandler::approval_admission`].
@@ -955,11 +1061,69 @@ impl AuthorizationHandler {
         }
     }
 
+    /// Revocation-capability gate (F-M2-005, HORO-795): a no-op returning
+    /// `None` whenever `revocation_requirement` is `NotRequired` (the
+    /// default) — no backend call is made in that case, so the default
+    /// configuration path stays byte-identical to pre-HORO-795. When
+    /// `Required`, re-observes the resource (mirroring
+    /// `approval_admission`'s identical `ComputeBackend::observe`
+    /// re-check) and refuses the grant if it does not support
+    /// `Capability::DeviceRevoke` — reusing the existing
+    /// `AuthorizationOutcome::EnforcementRefused` variant/`Error{Internal}`
+    /// wire mapping already established for "internal/capability-level
+    /// refusal, not a policy decision," rather than introducing a new
+    /// wire `DenialReason` variant. An `observe` failure itself reuses
+    /// the existing `AuthorizationOutcome::BackendFailed` variant
+    /// (a real backend call failed, not a gate decision) rather than a
+    /// new one — deliberately, so this ticket's audit-event surface
+    /// stays within `crate::authz`'s own three in-scope files and never
+    /// has to touch `eltanin-audit`'s `RecordedOutcome` mirror.
+    #[allow(clippy::result_large_err)]
+    fn revocation_capability_gate(
+        &self,
+        request: &LeaseRequest,
+    ) -> Option<(AuthorizationOutcome, AgentResponse)> {
+        if self.revocation_requirement != RevocationRequirement::Required {
+            return None;
+        }
+        match self.backend.observe(&request.resource) {
+            Ok(resource) => {
+                if resource.capabilities.supports(Capability::DeviceRevoke) {
+                    None
+                } else {
+                    Some((
+                        AuthorizationOutcome::EnforcementRefused {
+                            result: EnforcementResult::Unsupported {
+                                capability: Capability::DeviceRevoke,
+                            },
+                        },
+                        AgentResponse::Error {
+                            code: ErrorCode::Internal,
+                        },
+                    ))
+                }
+            }
+            Err(error) => Some((
+                AuthorizationOutcome::BackendFailed { error },
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            )),
+        }
+    }
+
     fn handle_request_lease(
         &self,
         request: &LeaseRequest,
         peer: &PeerContext,
     ) -> (AuthorizationOutcome, AgentResponse) {
+        // Bug fix (HORO-795): sweep any lease that has expired since it
+        // was granted, tearing down its backend enforcement — see
+        // `sweep_expired_leases`'s own doc comment. Runs before every
+        // other check below, same as `LeaseState::prune`'s existing
+        // touch-point discipline.
+        self.sweep_expired_leases();
+
         let Some(observed) = peer.authorizable() else {
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
@@ -1000,6 +1164,14 @@ impl AuthorizationHandler {
                 Ok(delegated) => delegated,
                 Err(response) => return response,
             };
+
+        // Revocation-capability gate (F-M2-005, HORO-795): checked
+        // before capacity is ever reserved, so a request refused here
+        // never wastes/holds a capacity slot for a lease that would
+        // just be revoked immediately after.
+        if let Some(response) = self.revocation_capability_gate(request) {
+            return response;
+        }
 
         let provenance = provenance_for(request, observed.clone());
 
@@ -1180,6 +1352,10 @@ impl AuthorizationHandler {
         request: &ReleaseRequest,
         peer: &PeerContext,
     ) -> (AuthorizationOutcome, AgentResponse) {
+        // Bug fix (HORO-795): see `sweep_expired_leases`'s own doc
+        // comment and `handle_request_lease`'s identical call above.
+        self.sweep_expired_leases();
+
         let Some(observed) = peer.authorizable() else {
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
@@ -1235,8 +1411,22 @@ impl AuthorizationHandler {
         // lease's enforcement. Holding the lock here serializes this
         // decide-and-execute sequence against every insert, which also
         // requires this same lock (see state::LeaseState::insert).
+        // Bug fix (HORO-795): a real `Err` here used to be `.ok()`'d into
+        // `None`, indistinguishable from the legitimate `None` produced
+        // by `revoke_backend` being `false` above (another live lease on
+        // the same resource, so no teardown was ever attempted). Mapping
+        // it to the existing `EnforcementResult::Error` variant instead
+        // makes the plumbing honest: this proves nothing about whether a
+        // real backend can actually invalidate an already-open device
+        // handle, only that a real failure to try is now recorded rather
+        // than silently discarded.
         let backend_result = if revoke_backend {
-            self.backend.revoke(&resource).ok()
+            match self.backend.revoke(&resource) {
+                Ok(result) => Some(result),
+                Err(error) => Some(EnforcementResult::Error {
+                    message: error.to_string(),
+                }),
+            }
         } else {
             None
         };
@@ -1305,20 +1495,18 @@ impl AuthorizationHandler {
         }
     }
 
-    fn handle_create_session(
-        &self,
-        request: &CreateSessionRequest,
-        peer: &PeerContext,
-    ) -> (AuthorizationOutcome, AgentResponse) {
-        let Some(observed) = peer.authorizable() else {
-            return (
-                AuthorizationOutcome::PeerNotAuthorizable,
-                AgentResponse::Error {
-                    code: ErrorCode::Internal,
-                },
-            );
-        };
-
+    /// Derive the anchor key / owner uid / scope `handle_create_session`
+    /// needs to call `establish`, or the exact early-refusal `(outcome,
+    /// response)` pair it should return immediately. Split out only to
+    /// stay under this crate's line-count lint — no behavioral seam.
+    #[allow(clippy::result_large_err)]
+    fn session_establish_inputs(
+        observed: &eltanin_core::identity::ExecutionContext,
+        resources: &[eltanin_core::resource::ResourceIdentity],
+    ) -> Result<
+        (eltanin_core::session::SessionKey, u32, SessionScope),
+        (AuthorizationOutcome, AgentResponse),
+    > {
         // Intent proof (F-M2-001, HORO-791): the requester is the
         // authorizable local peer of this very request — no additional
         // hardware-backed step. See `eltanin_core::session::IntentProof`'s
@@ -1343,17 +1531,48 @@ impl AuthorizationHandler {
             // `peer.authorizable()` gate above: evidence about the
             // requester could not be confirmed, not a policy or session
             // decision.
-            return (
+            return Err((
                 AuthorizationOutcome::PeerNotAuthorizable,
                 AgentResponse::Error {
                     code: ErrorCode::Internal,
                 },
-            );
+            ));
         };
         let Evidence::Present {
             value: owner_uid, ..
         } = &observed.workload.uid
         else {
+            return Err((
+                AuthorizationOutcome::PeerNotAuthorizable,
+                AgentResponse::Error {
+                    code: ErrorCode::Internal,
+                },
+            ));
+        };
+
+        let scope = match SessionScope::new(resources.iter().cloned()) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return Err((
+                    AuthorizationOutcome::SessionEstablishFailed {
+                        error: SessionAdmissionError::EmptyScope(error),
+                    },
+                    AgentResponse::Error {
+                        code: ErrorCode::Internal,
+                    },
+                ))
+            }
+        };
+
+        Ok((key, *owner_uid, scope))
+    }
+
+    fn handle_create_session(
+        &self,
+        request: &CreateSessionRequest,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse) {
+        let Some(observed) = peer.authorizable() else {
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
                 AgentResponse::Error {
@@ -1362,19 +1581,11 @@ impl AuthorizationHandler {
             );
         };
 
-        let scope = match SessionScope::new(request.resources.iter().cloned()) {
-            Ok(scope) => scope,
-            Err(error) => {
-                return (
-                    AuthorizationOutcome::SessionEstablishFailed {
-                        error: SessionAdmissionError::EmptyScope(error),
-                    },
-                    AgentResponse::Error {
-                        code: ErrorCode::Internal,
-                    },
-                )
-            }
-        };
+        let (key, owner_uid, scope) =
+            match Self::session_establish_inputs(observed, &request.resources) {
+                Ok(inputs) => inputs,
+                Err(response) => return response,
+            };
 
         let anchor = LocalSessionAnchor {
             key,
@@ -1382,9 +1593,9 @@ impl AuthorizationHandler {
         };
         let now = self.clock.now();
         let mut sessions = session_state::lock(&self.sessions);
-        sessions.reap(now, session::collect_workload_identity);
+        let reaped = sessions.reap(now, session::collect_workload_identity);
         let established = sessions.authority_mut().establish(
-            *owner_uid,
+            owner_uid,
             anchor,
             scope,
             IntentProof::LocalPeerPresence,
@@ -1392,14 +1603,13 @@ impl AuthorizationHandler {
             now,
             request.ttl,
         );
-        match established {
+        let result = match established {
             Ok(established) => {
                 let session_id = established.id().clone();
                 let expires_at = established.expires_at();
                 let remaining = expires_at.saturating_duration_since(now);
                 let resources = established.scope().resources().iter().cloned().collect();
                 sessions.insert(established);
-                drop(sessions);
                 (
                     AuthorizationOutcome::SessionEstablished {
                         session_id: session_id.clone(),
@@ -1422,7 +1632,17 @@ impl AuthorizationHandler {
                     code: ErrorCode::Internal,
                 },
             ),
+        };
+        drop(sessions);
+
+        // Bug fix (HORO-795): see `membership_for_peer`'s identical
+        // cascade — this lazy-reaping call site discarded `reap`'s
+        // return value entirely before this fix.
+        for (_, lease_ids) in reaped {
+            self.cascade_revoke_leases(lease_ids);
         }
+
+        result
     }
 
     fn handle_list_sessions(&self, peer: &PeerContext) -> (AuthorizationOutcome, AgentResponse) {
@@ -1468,9 +1688,7 @@ impl AuthorizationHandler {
         drop(sessions);
 
         if let Some((_, lease_ids)) = removed {
-            for lease_id in lease_ids {
-                self.revoke_lease_for_session_teardown(&lease_id);
-            }
+            self.cascade_revoke_leases(lease_ids);
         }
 
         let wire_outcome = if matches!(

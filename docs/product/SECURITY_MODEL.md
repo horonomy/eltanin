@@ -489,6 +489,77 @@ criterion as every prior MVP 2.0 bump) — the same side effect as every
 prior bump: every pre-existing durable `Approval` requires re-approval
 after this ships.
 
+## Compute Lease Lifecycle Hardening (F-M2-005, HORO-795) — MVP 2.0
+
+Most of this ticket's Acceptance Criteria were already true: renewal
+(a fresh `RequestLease` from the same peer, re-gated exactly like any
+other request) already worked via `eltanin run`'s existing supervisor
+loop, and restart/reboot recovery was already structurally guaranteed
+by `ComputeLease` being `Serialize`-only and `IssuerInstanceId`-scoped.
+This ticket's actual contribution is two real, disclosed fail-open bugs
+found and fixed, one honesty fix, one new opt-in gate, and test
+coverage/documentation for behavior that was already correct. See
+[ADR 0013](../adr/0013-compute-lease-lifecycle-hardening.md) for the
+full design record and rejected alternatives.
+
+**Bug fix — a session reaped by expiry or anchor-leader death now
+cascades to `backend.revoke()`.** `SessionState::reap`'s returned lease
+ids were previously discarded at both lazy-reaping call sites
+(`membership_for_peer`, `handle_create_session`) — only explicit
+`TerminateSession` correctly cascaded. A session dying passively (its
+process killed, or its TTL elapsing with nothing ever calling
+`TerminateSession`) never tore down its leases' backend enforcement.
+Now fixed: both call sites cascade through the same mechanism explicit
+termination already used.
+
+**Bug fix — an expired lease now triggers `backend.revoke()`.**
+`LeaseState::prune` (the expiry sweep) removes a lease's lease-state
+record but owns no backend reference and could not itself call
+`revoke`; neither call site compensated. Concrete consequence before
+this fix: if the controlling `eltanin run` process was killed (a case
+already acknowledged possible), the workload could keep live
+backend-side enforcement indefinitely after its lease silently expired.
+A new lazy sweep, run at the top of every `RequestLease`/`ReleaseLease`
+handling — before any other check — now tears this down, dropping its
+internal lock before ever calling into the backend.
+
+**Honesty fix — a real backend revoke error is recorded, not silently
+discarded.** `ReleaseLease` previously mapped a real `Err(BackendError)`
+from `backend.revoke()` to `None`, indistinguishable from the
+legitimate `None` produced when another live lease on the same
+resource means no teardown should be attempted at all. Now mapped to
+the existing `EnforcementResult::Error` variant — an honest signal that
+teardown was attempted and failed, not proof that it succeeded or was
+skipped deliberately.
+
+**New opt-in gate — `RevocationRequirement`.** A deployment can now
+require `Capability::DeviceRevoke` support as a grant-time precondition
+(`AuthorizationConfig::with_revocation_requirement`), refusing to lease
+a resource that cannot structurally be revoked. Defaults to
+`NotRequired` — every pre-existing deployment/test harness is
+byte-identical unless it opts in.
+
+**"Best-effort revoke" remains undecorated, not proven.** This ticket
+makes the *plumbing* honest — lease-layer revocation is structural and
+always succeeds; device-layer teardown is attempted and its real
+outcome recorded — but proves nothing about whether a real NVIDIA
+backend can actually invalidate an already-open device handle on real
+hardware. `BLOCKED_ON_E3`/`UNVERIFIED_ON_BARE_METAL` still applies,
+identically to HORO-791/792/793's revocation-adjacent claims.
+
+**Policy change requires an agent restart to take effect** — there is
+no hot-reload path. "Policy change prevents subsequent renewal" is
+satisfied only via restart → new `IssuerInstanceId` → `ForeignIssuer`
+rejection of any stale lease, never via live policy-revision tracking.
+
+**No `DOMAIN_SCHEMA_VERSION` bump** — stays at 5. This ticket's grant
+refusal reuses the existing `EnforcementResult::Unsupported`/
+`AgentResponse::Error{Internal}` wire mapping; no new `DenialReason`
+variant was added. Lease expiry itself still emits no dedicated audit
+event — named as an explicit forward obligation for HORO-796
+(audit/provenance) rather than closed here, to avoid a second forced
+re-approval cycle for one ticket's marginal audit completeness.
+
 ## Non-goals (explicit, not oversights)
 
 Windows/macOS, AMD/Intel, hardware attestation, retroactive revoke of

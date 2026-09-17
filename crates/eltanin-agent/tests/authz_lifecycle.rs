@@ -193,6 +193,46 @@ fn concurrent_requests_never_overshoot_max_outstanding_leases() {
     );
 }
 
+/// Bug regression (F-M2-005, HORO-795): before this fix,
+/// `LeaseState::prune` (called by `issue_reserving_capacity` and
+/// `handle_release_lease`) removed an expired lease's *lease-state*
+/// record but never called `backend.revoke()` — a workload whose
+/// controlling `eltanin run` process was killed (so `ReleaseLease` is
+/// never called) kept live backend-side enforcement indefinitely after
+/// its lease silently expired.
+#[test]
+fn bug_b_an_expired_lease_releases_backend_enforcement_via_the_sweep() {
+    let clock = FixedClock::new();
+    let backend = backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]);
+    let handler = AuthorizationHandler::new(
+        IssuerInstanceId::new("instance-a"),
+        allow_policy_for_uid(1000),
+        Arc::clone(&backend) as Arc<dyn eltanin_backend::contract::ComputeBackend>,
+        Arc::clone(&clock) as Arc<dyn eltanin_agent::authz::Clock>,
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(5)).unwrap(),
+    );
+    let first_peer = TestPeer::fresh(1000, "sha256:trusted");
+    let granted = handler.handle(&lease_request(), &first_peer.context());
+    assert!(matches!(granted, AgentResponse::LeaseGranted { .. }));
+    assert_eq!(backend.revoke_call_count(&resource_identity()), 0);
+
+    // Simulate the controlling `eltanin run` process being killed:
+    // nothing ever calls ReleaseLease, and the lease simply expires.
+    clock.advance(Duration::from_secs(6));
+
+    // A subsequent request (from any peer) triggers the lazy
+    // expired-lease sweep at the top of RequestLease handling.
+    let second_peer = TestPeer::fresh(1000, "sha256:trusted");
+    let _ = handler.handle(&lease_request(), &second_peer.context());
+
+    assert_eq!(
+        backend.revoke_call_count(&resource_identity()),
+        1,
+        "an expired lease must trigger exactly one backend.revoke() call for its resource"
+    );
+}
+
 #[test]
 fn an_expired_leases_slot_is_reclaimed_by_prune_before_the_capacity_check() {
     let clock = FixedClock::new();

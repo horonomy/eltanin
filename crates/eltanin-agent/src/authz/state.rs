@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
 use eltanin_core::lease::{ComputeLease, LeaseId, LeaseIssuer, MonotonicTime};
+use eltanin_core::resource::ResourceIdentity;
 
 /// Owns one [`LeaseIssuer`] instance and the leases it has issued that
 /// are still outstanding.
@@ -53,6 +54,68 @@ impl LeaseState {
     /// never report success for a lease that has already expired.
     pub(crate) fn prune(&mut self, now: MonotonicTime) {
         self.leases.retain(|_, lease| lease.expires_at() > now);
+    }
+
+    /// Remove every lease whose `expires_at <= now`, returning
+    /// `(LeaseId, ResourceIdentity)` for exactly the resources whose
+    /// backend enforcement must actually be torn down — i.e. every
+    /// distinct resource named by a just-expired lease for which no
+    /// other still-live lease remains. `LeaseId` is one representative
+    /// expired lease's id for that resource, carried through for audit
+    /// fidelity; the actual backend call the caller makes with this
+    /// result is keyed on the resource alone (mirroring
+    /// `AuthorizationHandler::handle_release_lease`'s own
+    /// `backend.revoke(&resource)` call).
+    ///
+    /// Bug fix (HORO-795): [`Self::prune`] above (called by
+    /// `issue_reserving_capacity` and `AuthorizationHandler::handle_release_lease`)
+    /// drops an expired lease's *lease-state* record but owns no
+    /// [`eltanin_backend::contract::ComputeBackend`] reference and
+    /// cannot itself call `backend.revoke()` — without this sweep, a
+    /// workload whose controlling `eltanin run` process was killed (so
+    /// `ReleaseLease` is never called) keeps live backend-side
+    /// enforcement indefinitely after its lease has silently expired and
+    /// been pruned. This method owns no backend reference either
+    /// (mirrors `SessionState::reap`'s identical "returns work for the
+    /// caller, owns no backend reference" shape) — `#[must_use]` because
+    /// a caller that drops this return value silently reproduces exactly
+    /// that bug.
+    #[must_use]
+    pub(crate) fn sweep_expired(&mut self, now: MonotonicTime) -> Vec<(LeaseId, ResourceIdentity)> {
+        let expired_ids: Vec<LeaseId> = self
+            .leases
+            .iter()
+            .filter(|(_, lease)| lease.expires_at() <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let expired: Vec<ComputeLease> = expired_ids
+            .into_iter()
+            .filter_map(|id| self.leases.remove(&id))
+            .collect();
+
+        // Every expired lease is already removed from `self.leases`
+        // above, so checking "any other live lease for this resource"
+        // now means checking the leases that remain — the same rule
+        // `any_other_live_lease_for_same_resource` applies, evaluated
+        // once per distinct resource rather than once per lease so a
+        // resource named by several simultaneously-expired leases is
+        // not handed back (and later revoked) more than once.
+        let mut seen_resources = std::collections::BTreeSet::new();
+        let mut work = Vec::new();
+        for lease in &expired {
+            let resource = lease.origin().request.resource.clone();
+            if !seen_resources.insert(resource.clone()) {
+                continue;
+            }
+            let still_live = self
+                .leases
+                .values()
+                .any(|other| other.origin().request.resource == resource);
+            if !still_live {
+                work.push((lease.id().clone(), resource));
+            }
+        }
+        work
     }
 
     pub(crate) fn is_at_capacity(&self) -> bool {

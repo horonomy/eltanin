@@ -263,6 +263,75 @@ fn ac4_a_fresh_agent_instance_never_honors_a_prior_instances_session() {
     );
 }
 
+/// Bug regression (F-M2-005, HORO-795): a session reaped by EXPIRY —
+/// never explicitly `TerminateSession`d — must cascade-revoke the
+/// leases it issued, exactly like `ac3_terminating_a_session_revokes_leases_issued_under_it`
+/// above already proves for the *explicit* path. Before the fix,
+/// `SessionState::reap`'s returned lease ids were silently discarded at
+/// every lazy-reaping call site, so a killed `eltanin run` process's
+/// device-level access outlived its own now-dead session indefinitely.
+#[test]
+fn bug_a_a_session_reaped_by_expiry_cascade_revokes_its_leases() {
+    let backend = backend_with_resource(&[
+        eltanin_core::resource::Capability::DeviceEnforce,
+        eltanin_core::resource::Capability::DeviceRevoke,
+    ]);
+    let clock = FixedClock::new();
+    let handler = AuthorizationHandler::new(
+        IssuerInstanceId::new("test-instance"),
+        allow_policy_for_uid(real_self_uid()),
+        Arc::clone(&backend) as Arc<dyn eltanin_backend::contract::ComputeBackend>,
+        Arc::clone(&clock) as Arc<dyn eltanin_agent::authz::Clock>,
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(60))
+            .unwrap()
+            .with_session_requirement(SessionRequirement::Required),
+    );
+    let peer = self_peer_context();
+
+    let established = handler.handle(
+        &ClientRequest::CreateSession(CreateSessionRequest {
+            resources: vec![resource_identity()],
+            ttl: Duration::from_secs(30),
+        }),
+        &peer,
+    );
+    assert!(matches!(
+        established,
+        AgentResponse::SessionEstablished { .. }
+    ));
+
+    let granted = handler.handle(&lease_request(), &peer);
+    assert!(
+        matches!(granted, AgentResponse::LeaseGranted { .. }),
+        "expected a granted lease, got {granted:?}"
+    );
+    assert_eq!(backend.revoke_call_count(&resource_identity()), 0);
+
+    // Time passes beyond the session's own TTL. Nothing has explicitly
+    // terminated it — this is EXPIRY, not TerminateSession.
+    clock.advance(Duration::from_secs(31));
+
+    // Any session-touching operation lazily reaps the now-expired
+    // session. This call is itself refused for lack of a (now-expired)
+    // session — the point is the side effect the reap it triggers must
+    // have on the lease issued under that session.
+    let response = handler.handle(&lease_request(), &peer);
+    assert_eq!(
+        response,
+        AgentResponse::LeaseDenied {
+            reason: DenialReason::NoTrustedSession
+        }
+    );
+
+    assert_eq!(
+        backend.revoke_call_count(&resource_identity()),
+        1,
+        "a session reaped by expiry must cascade-revoke the leases it issued at the backend \
+         layer, not merely disappear from the session store"
+    );
+}
+
 /// AC2: another ordinary process cannot join merely by copying session
 /// metadata/ID. Spawns a real child (`session_probe_fixture`) that
 /// detaches into its own fresh POSIX session, and proves the handler
