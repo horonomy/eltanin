@@ -27,7 +27,7 @@ use eltanin_core::session::{SessionId, SessionTerminationOutcome};
 
 use eltanin_backend::contract::BackendError;
 use eltanin_protocol::request::ClientRequest;
-use eltanin_protocol::response::AgentResponse;
+use eltanin_protocol::response::{AgentResponse, EnforcementMode};
 
 use super::session::SessionAdmissionError;
 
@@ -50,6 +50,17 @@ pub enum Operation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthorizationOutcome {
     Granted {
+        lease_id: LeaseId,
+        expires_at: MonotonicTime,
+    },
+    /// Shadow-enforcement mode (F-M2-006, HORO-796 subtask 3): every
+    /// gate and `PolicySet::evaluate` admitted this `RequestLease`, but
+    /// nothing was actually granted — the just-minted lease was
+    /// immediately reversed, never enforced or inserted into the lease
+    /// store. Produced only by `AuthorizationHandler::shadow_would_grant`,
+    /// only when `EnforcementMode::Shadow` is configured. Mirrors
+    /// `eltanin_audit::record::RecordedOutcome::WouldGrant` exactly.
+    WouldGrant {
         lease_id: LeaseId,
         expires_at: MonotonicTime,
     },
@@ -202,6 +213,12 @@ pub struct AuthorizationEvent<'a> {
     /// `crate::authz::AuthorizationHandler::handle_request_lease`'s own
     /// doc comment on exactly where that resolution happens.
     pub session: Option<SessionId>,
+    /// Which enforcement posture the handler was configured with when
+    /// this event was produced (F-M2-006, HORO-796 subtask 3) — the
+    /// handler's own `enforcement_mode`, not derived from `outcome`, so
+    /// a `Shadow`-mode record is labeled `Shadow` even for operations
+    /// (e.g. `CreateSession`) shadow mode never branches on.
+    pub mode: EnforcementMode,
 }
 
 /// Records [`AuthorizationEvent`]s. Called exactly once per request, at
