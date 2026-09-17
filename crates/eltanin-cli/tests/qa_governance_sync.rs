@@ -1,12 +1,13 @@
 //! Mechanical QA-governance drift guards: `docs/qa/README.md`'s
-//! Feature Verification Record inventory and `docs/qa/test-plans/mvp-1.0.md`'s
-//! test-file citations must not silently drift from what actually exists
-//! on disk (HORO-810), and `docs/qa/e2e/README.md`'s Track B scenario
-//! manifest must not silently drift from `canonical_e2e.rs`'s own
-//! `COVERS` claim (HORO-811). `docs/qa/README.md` already lives one path
-//! segment away from `eltanin-cli` for a reason — `docs_sync.rs` in this
-//! same crate already `include_str!`s into `docs/qa/e2e/` — so this file
-//! is a natural extension of an existing pattern, not a new one.
+//! Feature Verification Record inventory and each `docs/qa/test-plans/
+//! mvp-*.md` test plan's test-file citations must not silently drift
+//! from what actually exists on disk (HORO-810), and `docs/qa/e2e/
+//! README.md`'s Track B scenario manifest must not silently drift from
+//! `canonical_e2e.rs`'s own `COVERS` claim (HORO-811). `docs/qa/README.md`
+//! already lives one path segment away from `eltanin-cli` for a reason —
+//! `docs_sync.rs` in this same crate already `include_str!`s into
+//! `docs/qa/e2e/` — so this file is a natural extension of an existing
+//! pattern, not a new one.
 //!
 //! What this does **not** check: whether every Feature *has* a record
 //! (F-M1-001/002/007 legitimately don't yet — see the inventory's own
@@ -22,15 +23,29 @@ use std::fs;
 use std::path::PathBuf;
 
 const README: &str = include_str!("../../../docs/qa/README.md");
-const TEST_PLAN: &str = include_str!("../../../docs/qa/test-plans/mvp-1.0.md");
+const TEST_PLAN_MVP_1_0: &str = include_str!("../../../docs/qa/test-plans/mvp-1.0.md");
+const TEST_PLAN_MVP_2_0: &str = include_str!("../../../docs/qa/test-plans/mvp-2.0.md");
+/// Every versioned Track A test plan this crate mechanically checks —
+/// add a new `include_str!` above and a new entry here for each future
+/// milestone's test plan, rather than replacing `TEST_PLAN_MVP_1_0`.
+const TEST_PLANS: &[(&str, &str)] = &[
+    ("docs/qa/test-plans/mvp-1.0.md", TEST_PLAN_MVP_1_0),
+    ("docs/qa/test-plans/mvp-2.0.md", TEST_PLAN_MVP_2_0),
+];
 const E2E_INDEX: &str = include_str!("../../../docs/qa/e2e/README.md");
 const F_M1_008_RECORD: &str = include_str!("../../../docs/qa/e2e/F-M1-008-controlled-launch.md");
 const CANONICAL_E2E: &str = include_str!("canonical_e2e.rs");
 
 const FEATURE_IDS: &[&str] = &[
     "F-M1-001", "F-M1-002", "F-M1-003", "F-M1-004", "F-M1-005", "F-M1-006", "F-M1-007", "F-M1-008",
-    "F-M1-009", "F-M1-010",
+    "F-M1-009", "F-M1-010", "F-M2-001", "F-M2-002", "F-M2-003", "F-M2-004", "F-M2-005", "F-M2-006",
 ];
+
+/// The `F-M*-` prefixes this file recognizes when extracting Feature IDs
+/// from a governance document — `F-M1-` (MVP 1.0) and `F-M2-` (MVP 2.0).
+/// Extend this list, not `extract_feature_ids`'s body, when a future
+/// milestone introduces a new `F-M<N>-` prefix.
+const FEATURE_ID_PREFIXES: &[&str] = &["F-M1-", "F-M2-"];
 
 /// Parse `canonical_e2e.rs`'s `pub const COVERS: &[&str] = &[...]` literal
 /// back into a `Vec<&str>` — the one place this scenario's Feature-coverage
@@ -54,26 +69,30 @@ fn parse_covers() -> Vec<&'static str> {
         .collect()
 }
 
-/// Extract every `F-M1-NNN`-shaped substring from `s` — used to read back
-/// "which Feature IDs does this slice of a doc claim" without needing a
-/// regex dependency. `F-M1-` plus exactly 3 ASCII digits, so it can't
-/// partially match a longer token.
+/// Extract every `F-M1-NNN`/`F-M2-NNN`-shaped substring from `s` — used
+/// to read back "which Feature IDs does this slice of a doc claim"
+/// without needing a regex dependency. Any prefix in [`FEATURE_ID_PREFIXES`]
+/// plus exactly 3 ASCII digits, so it can't partially match a longer
+/// token, and a future milestone's prefix is a one-line addition to that
+/// list rather than a change here.
 fn extract_feature_ids(s: &str) -> BTreeSet<&str> {
     let mut ids = BTreeSet::new();
-    let mut i = 0;
-    while let Some(offset) = s[i..].find("F-M1-") {
-        let start = i + offset;
-        let digits_start = start + "F-M1-".len();
-        let digits_end = digits_start + 3;
-        if digits_end <= s.len()
-            && s[digits_start..digits_end]
-                .bytes()
-                .all(|b| b.is_ascii_digit())
-        {
-            ids.insert(&s[start..digits_end]);
-            i = digits_end;
-        } else {
-            i = start + "F-M1-".len();
+    for prefix in FEATURE_ID_PREFIXES {
+        let mut i = 0;
+        while let Some(offset) = s[i..].find(prefix) {
+            let start = i + offset;
+            let digits_start = start + prefix.len();
+            let digits_end = digits_start + 3;
+            if digits_end <= s.len()
+                && s[digits_start..digits_end]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit())
+            {
+                ids.insert(&s[start..digits_end]);
+                i = digits_end;
+            } else {
+                i = start + prefix.len();
+            }
         }
     }
     ids
@@ -240,32 +259,36 @@ fn every_feature_id_appears_once_in_the_inventory_with_a_non_empty_status() {
     }
 }
 
-/// Every `crates/.../tests/*.rs` path `docs/qa/test-plans/mvp-1.0.md`
-/// cites as evidence must exist on disk — a test-plan citation rots
-/// exactly as easily as a stale code comment, and nothing else checks it.
+/// Every `crates/.../tests/*.rs` path any versioned Track A test plan in
+/// [`TEST_PLANS`] cites as evidence must exist on disk — a test-plan
+/// citation rots exactly as easily as a stale code comment, and nothing
+/// else checks it. Runs once per test plan, not just `mvp-1.0.md`, so a
+/// future milestone's test plan gets this guard automatically once added
+/// to `TEST_PLANS`.
 #[test]
-fn every_test_path_cited_by_the_mvp_1_0_test_plan_exists() {
+fn every_test_path_cited_by_a_test_plan_exists() {
     let root = repo_root();
-    let mut checked = 0;
-    for token in TEST_PLAN.split(|c: char| !is_path_char(c)) {
-        let Some(crates_at) = token.find("crates/") else {
-            continue;
-        };
-        let candidate = &token[crates_at..];
-        if std::path::Path::new(candidate).extension() == Some("rs".as_ref()) {
-            let path = root.join(candidate);
-            assert!(
-                path.exists(),
-                "docs/qa/test-plans/mvp-1.0.md cites {token:?}, which does not exist"
-            );
-            checked += 1;
+    for (plan_path, plan_text) in TEST_PLANS {
+        let mut checked = 0;
+        for token in plan_text.split(|c: char| !is_path_char(c)) {
+            let Some(crates_at) = token.find("crates/") else {
+                continue;
+            };
+            let candidate = &token[crates_at..];
+            if std::path::Path::new(candidate).extension() == Some("rs".as_ref()) {
+                let path = root.join(candidate);
+                assert!(
+                    path.exists(),
+                    "{plan_path} cites {token:?}, which does not exist"
+                );
+                checked += 1;
+            }
         }
+        assert!(
+            checked >= 10,
+            "expected at least 10 crates/**/tests/*.rs citations in {plan_path}, found {checked}"
+        );
     }
-    assert!(
-        checked >= 10,
-        "expected at least 10 crates/**/tests/*.rs citations in docs/qa/test-plans/mvp-1.0.md, \
-         found {checked}"
-    );
 }
 
 fn is_path_char(c: char) -> bool {
