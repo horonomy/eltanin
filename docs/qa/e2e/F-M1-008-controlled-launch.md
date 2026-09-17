@@ -18,7 +18,9 @@ architecture_no_shell}.rs`, `crates/eltanin-agent/tests/authz_renewal.rs`).
 
 ## Precondition
 
-Linux only (`#![cfg(target_os = "linux")]`); the whole workspace must
+Linux and macOS (`#![cfg(any(target_os = "linux", target_os = "macos"))]`
+— widened from Linux-only by HORO-1013's macOS platform adapter); the
+whole workspace must
 already be built (`cargo build --workspace` — CI always runs this before
 `cargo test --workspace`) so `eltanin-agentd` and `eltanin-explain` exist
 next to `eltanin` in the same `target/<profile>/` directory; the test
