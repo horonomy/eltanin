@@ -195,6 +195,13 @@ pub struct AuthorizationEvent<'a> {
     pub peer: &'a PeerContext,
     pub outcome: &'a AuthorizationOutcome,
     pub response: &'a AgentResponse,
+    /// The [`SessionId`] already resolved for this request, when one was
+    /// available at the point the outcome was produced (HORO-796
+    /// subtask 2). `None` both when no session was active and when the
+    /// request was refused before session resolution ever ran — see
+    /// `crate::authz::AuthorizationHandler::handle_request_lease`'s own
+    /// doc comment on exactly where that resolution happens.
+    pub session: Option<SessionId>,
 }
 
 /// Records [`AuthorizationEvent`]s. Called exactly once per request, at

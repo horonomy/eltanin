@@ -1144,7 +1144,7 @@ impl AuthorizationHandler {
         &self,
         request: &LeaseRequest,
         peer: &PeerContext,
-    ) -> (AuthorizationOutcome, AgentResponse) {
+    ) -> (AuthorizationOutcome, AgentResponse, Option<SessionId>) {
         // Bug fix (HORO-795): sweep any lease that has expired since it
         // was granted, tearing down its backend enforcement — see
         // `sweep_expired_leases`'s own doc comment. Runs before every
@@ -1153,11 +1153,15 @@ impl AuthorizationHandler {
         self.sweep_expired_leases();
 
         let Some(observed) = peer.authorizable() else {
+            // Genuinely runs before session resolution below — `None`
+            // is the honest value here (HORO-796 subtask 2), not a
+            // placeholder.
             return (
                 AuthorizationOutcome::PeerNotAuthorizable,
                 AgentResponse::LeaseDenied {
                     reason: DenialReason::IndeterminateEvidence,
                 },
+                None,
             );
         };
 
@@ -1169,7 +1173,10 @@ impl AuthorizationHandler {
         // path below regardless of `session_requirement`, so a lease
         // issued while a session happens to be active gets associated
         // with it (for session-termination revocation) even when that
-        // session was not required for admission.
+        // session was not required for admission. Every return point
+        // from here on carries `matched_session` on the audit record too
+        // (HORO-796 subtask 2) — it is the resolved session for this
+        // request, whether or not that request was ultimately admitted.
         let (matched_session, verdict, peer_session_key) = self.membership_for_peer(peer);
         if self.session_requirement == SessionRequirement::Required
             && !matches!(verdict, MembershipVerdict::Member)
@@ -1179,6 +1186,7 @@ impl AuthorizationHandler {
                 AgentResponse::LeaseDenied {
                     reason: DenialReason::NoTrustedSession,
                 },
+                matched_session,
             );
         }
 
@@ -1190,15 +1198,15 @@ impl AuthorizationHandler {
             match self.approval_and_delegation_gate(request, observed, &peer_session_key, &verdict)
             {
                 Ok(delegated) => delegated,
-                Err(response) => return response,
+                Err((outcome, response)) => return (outcome, response, matched_session),
             };
 
         // Revocation-capability gate (F-M2-005, HORO-795): checked
         // before capacity is ever reserved, so a request refused here
         // never wastes/holds a capacity slot for a lease that would
         // just be revoked immediately after.
-        if let Some(response) = self.revocation_capability_gate(request) {
-            return response;
+        if let Some((outcome, response)) = self.revocation_capability_gate(request) {
+            return (outcome, response, matched_session);
         }
 
         let provenance = provenance_for(request, observed.clone());
@@ -1211,6 +1219,7 @@ impl AuthorizationHandler {
                     AgentResponse::Error {
                         code: ErrorCode::Internal,
                     },
+                    matched_session,
                 )
             }
             Err(IssueFailure::Denied(decision)) => {
@@ -1218,6 +1227,7 @@ impl AuthorizationHandler {
                 return (
                     AuthorizationOutcome::PolicyDenied { decision },
                     AgentResponse::LeaseDenied { reason },
+                    matched_session,
                 );
             }
             Err(IssueFailure::Other(error)) => {
@@ -1226,6 +1236,7 @@ impl AuthorizationHandler {
                     AgentResponse::Error {
                         code: ErrorCode::Internal,
                     },
+                    matched_session,
                 )
             }
         };
@@ -1240,13 +1251,14 @@ impl AuthorizationHandler {
             None => lease,
         };
 
-        self.enforce_and_finalize(
+        let (outcome, response) = self.enforce_and_finalize(
             lease,
             matched_session.as_ref(),
             observed,
             &peer_session_key,
             delegated,
-        )
+        );
+        (outcome, response, matched_session)
     }
 
     /// The grant-path tail of `handle_request_lease`, split out only to
@@ -1673,7 +1685,10 @@ impl AuthorizationHandler {
         result
     }
 
-    fn handle_list_sessions(&self, peer: &PeerContext) -> (AuthorizationOutcome, AgentResponse) {
+    fn handle_list_sessions(
+        &self,
+        peer: &PeerContext,
+    ) -> (AuthorizationOutcome, AgentResponse, Option<SessionId>) {
         let (matched_session, _verdict, _peer_key) = self.membership_for_peer(peer);
         let sessions_guard = session_state::lock(&self.sessions);
         let now = self.clock.now();
@@ -1693,13 +1708,14 @@ impl AuthorizationHandler {
         (
             AuthorizationOutcome::SessionListed { sessions: ids },
             AgentResponse::SessionList { sessions: views },
+            matched_session,
         )
     }
 
     fn handle_terminate_session(
         &self,
         peer: &PeerContext,
-    ) -> (AuthorizationOutcome, AgentResponse) {
+    ) -> (AuthorizationOutcome, AgentResponse, Option<SessionId>) {
         let (matched_session, _verdict, _peer_key) = self.membership_for_peer(peer);
         let Some(session_id) = matched_session else {
             return (
@@ -1707,6 +1723,7 @@ impl AuthorizationHandler {
                 AgentResponse::SessionTerminated {
                     outcome: TerminationOutcome::Refused,
                 },
+                None,
             );
         };
 
@@ -1733,6 +1750,7 @@ impl AuthorizationHandler {
             AgentResponse::SessionTerminated {
                 outcome: wire_outcome,
             },
+            Some(session_id),
         )
     }
 
@@ -1949,42 +1967,42 @@ impl AuthorizationHandler {
 
 impl RequestHandler for AuthorizationHandler {
     fn handle(&self, request: &ClientRequest, peer: &PeerContext) -> AgentResponse {
-        let (operation, outcome, response) = match request {
+        let (operation, outcome, response, session) = match request {
             ClientRequest::AgentStatus {} => {
                 let (outcome, response) = Self::handle_status();
-                (Operation::AgentStatus, outcome, response)
+                (Operation::AgentStatus, outcome, response, None)
             }
             ClientRequest::RequestLease(lease_request) => {
-                let (outcome, response) = self.handle_request_lease(lease_request, peer);
-                (Operation::RequestLease, outcome, response)
+                let (outcome, response, session) = self.handle_request_lease(lease_request, peer);
+                (Operation::RequestLease, outcome, response, session)
             }
             ClientRequest::ReleaseLease(release_request) => {
                 let (outcome, response) = self.handle_release_lease(release_request, peer);
-                (Operation::ReleaseLease, outcome, response)
+                (Operation::ReleaseLease, outcome, response, None)
             }
             ClientRequest::CreateSession(create_request) => {
                 let (outcome, response) = self.handle_create_session(create_request, peer);
-                (Operation::CreateSession, outcome, response)
+                (Operation::CreateSession, outcome, response, None)
             }
             ClientRequest::ListSessions {} => {
-                let (outcome, response) = self.handle_list_sessions(peer);
-                (Operation::ListSessions, outcome, response)
+                let (outcome, response, session) = self.handle_list_sessions(peer);
+                (Operation::ListSessions, outcome, response, session)
             }
             ClientRequest::TerminateSession {} => {
-                let (outcome, response) = self.handle_terminate_session(peer);
-                (Operation::TerminateSession, outcome, response)
+                let (outcome, response, session) = self.handle_terminate_session(peer);
+                (Operation::TerminateSession, outcome, response, session)
             }
             ClientRequest::Approve(approve_request) => {
                 let (outcome, response) = self.handle_approve(approve_request, peer);
-                (Operation::Approve, outcome, response)
+                (Operation::Approve, outcome, response, None)
             }
             ClientRequest::ListApprovals {} => {
                 let (outcome, response) = self.handle_list_approvals(peer);
-                (Operation::ListApprovals, outcome, response)
+                (Operation::ListApprovals, outcome, response, None)
             }
             ClientRequest::ForgetApproval(forget_request) => {
                 let (outcome, response) = self.handle_forget_approval(forget_request, peer);
-                (Operation::ForgetApproval, outcome, response)
+                (Operation::ForgetApproval, outcome, response, None)
             }
         };
 
@@ -1994,6 +2012,7 @@ impl RequestHandler for AuthorizationHandler {
             peer,
             outcome: &outcome,
             response: &response,
+            session,
         });
 
         response

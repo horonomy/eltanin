@@ -357,6 +357,7 @@ impl EventSink for AuditEventSink {
             peer: recorded_peer(event.peer),
             outcome: recorded_outcome(event.outcome),
             response: event.response.clone(),
+            session: event.session.clone(),
         };
         if let Err(error) = self.inner.append(entry) {
             // Best-effort, by explicit founder decision (this module's

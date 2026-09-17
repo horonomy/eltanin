@@ -25,6 +25,7 @@ fn status_entry() -> AuditEntry {
                 protocol_version: 1,
             },
         },
+        session: None,
     }
 }
 

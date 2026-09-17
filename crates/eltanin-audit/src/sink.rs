@@ -52,6 +52,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::IssuerInstanceId;
+use eltanin_core::session::SessionId;
 
 use crate::record::{
     AgentEventRecord, AuditEventId, AuditRecord, LogEntry, RecordedAgentEvent,
@@ -85,6 +86,12 @@ pub struct AuditEntry {
     pub peer: RecordedPeer,
     pub outcome: RecordedOutcome,
     pub response: eltanin_protocol::response::AgentResponse,
+    /// The [`SessionId`] active for this request, when the caller had
+    /// already resolved one at the point this entry was built — `None`
+    /// both when no session was active and when the request was refused
+    /// before session resolution ever ran (HORO-796 subtask 2). Threaded
+    /// straight onto [`AuditRecord::session`], never recomputed here.
+    pub session: Option<SessionId>,
 }
 
 /// Why [`AuditFileSink::open`] or [`AuditFileSink::append`] failed.
@@ -276,7 +283,7 @@ impl AuditFileSink {
             outcome: entry.outcome,
             response: entry.response,
             mode: RecordedEnforcementMode::Enforce,
-            session: None,
+            session: entry.session,
         });
 
         let result = self.maybe_rotate(&mut state, &probe).and_then(|()| {
