@@ -118,10 +118,7 @@ fn a_shadow_run_prints_an_unenforced_banner_naming_the_verdict() {
     let output = run_shadow(&agent, &profile_dir, &["true"]);
     assert_eq!(output.status.code(), Some(0));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("UNENFORCED/OBSERVED-ONLY"),
-        "got: {stderr}"
-    );
+    assert!(stderr.contains("UNENFORCED/OBSERVED-ONLY"), "got: {stderr}");
     assert!(stderr.contains("would-step-up"), "got: {stderr}");
 }
 

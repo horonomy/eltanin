@@ -99,9 +99,7 @@ pub fn run(invocation: &ExplainInvocation) -> ExplainCliOutcome {
              policy (see docs/product/SECURITY_MODEL.md)."
                 .to_string(),
         ),
-        SelectionResult::NotFound => {
-            ExplainCliOutcome::Ok("no matching record found.".to_string())
-        }
+        SelectionResult::NotFound => ExplainCliOutcome::Ok("no matching record found.".to_string()),
     }
 }
 
@@ -164,9 +162,10 @@ fn expand_chain<'a>(
 
     while let Some(record) = queue.pop_front() {
         if let Some(lease_id) = record.lease_id() {
-            if let SelectionResult::Found(matches) =
-                select(scan, &eltanin_audit::explain::Selector::Lease(lease_id.clone()))
-            {
+            if let SelectionResult::Found(matches) = select(
+                scan,
+                &eltanin_audit::explain::Selector::Lease(lease_id.clone()),
+            ) {
                 for candidate in matches {
                     if visited.insert(candidate.event_id.clone()) {
                         result.push(candidate);

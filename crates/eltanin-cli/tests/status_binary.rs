@@ -46,10 +46,7 @@ fn status_reports_shadow_mode_with_an_unenforced_warning() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("shadow"), "got: {stdout}");
-    assert!(
-        stdout.contains("UNENFORCED/OBSERVED-ONLY"),
-        "got: {stdout}"
-    );
+    assert!(stdout.contains("UNENFORCED/OBSERVED-ONLY"), "got: {stdout}");
 }
 
 #[test]

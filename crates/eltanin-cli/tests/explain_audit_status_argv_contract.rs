@@ -9,8 +9,7 @@ use std::path::PathBuf;
 use eltanin_audit::explain::Selector;
 use eltanin_audit::record::AuditEventId;
 use eltanin_cli::args::{
-    parse, parse_audit, parse_explain, parse_status, Invocation, UsageError,
-    DEFAULT_AUDIT_LIMIT,
+    parse, parse_audit, parse_explain, parse_status, Invocation, UsageError, DEFAULT_AUDIT_LIMIT,
 };
 use eltanin_core::lease::{IssuerInstanceId, LeaseId};
 

@@ -338,13 +338,12 @@ pub fn parse_explain(
         }
         if arg == OsStr::new("--pid") {
             let value = argv.next().ok_or(UsageError::PidMissingValue)?;
-            let pid: u32 = value
-                .to_str()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| UsageError::InvalidPid {
+            let pid: u32 = value.to_str().and_then(|s| s.parse().ok()).ok_or_else(|| {
+                UsageError::InvalidPid {
                     found: value.clone(),
                     reason: "expected a non-negative integer".to_string(),
-                })?;
+                }
+            })?;
             set_selector(&mut selector, Selector::Pid(pid))?;
             continue;
         }
@@ -371,9 +370,7 @@ fn set_selector(selector: &mut Option<Selector>, value: Selector) -> Result<(), 
 /// grammar `crates/eltanin-audit/src/bin/eltanin-explain.rs` already
 /// establishes for `--event`/`--lease`.
 fn parse_event_id(raw: &OsStr) -> Result<AuditEventId, String> {
-    let text = raw
-        .to_str()
-        .ok_or_else(|| "not valid UTF-8".to_string())?;
+    let text = raw.to_str().ok_or_else(|| "not valid UTF-8".to_string())?;
     let (instance, sequence) = text
         .rsplit_once('#')
         .ok_or_else(|| format!("expected <instance>#<sequence>, got {text:?}"))?;
@@ -408,13 +405,12 @@ pub fn parse_audit(
     while let Some(arg) = argv.next() {
         if arg == OsStr::new("--limit") {
             let value = argv.next().ok_or(UsageError::LimitMissingValue)?;
-            limit = value
-                .to_str()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| UsageError::InvalidLimit {
+            limit = value.to_str().and_then(|s| s.parse().ok()).ok_or_else(|| {
+                UsageError::InvalidLimit {
                     found: value.clone(),
                     reason: "expected a non-negative integer".to_string(),
-                })?;
+                }
+            })?;
             continue;
         }
         if arg == OsStr::new("--log") {

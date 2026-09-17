@@ -110,7 +110,9 @@ pub enum Authorization {
     /// that announcement can quote it — [`supervise`] itself never reads
     /// it, since every verdict behaves identically once supervision
     /// starts (shadow mode never blocks, regardless of verdict).
-    Shadow { verdict: eltanin_protocol::response::ShadowVerdict },
+    Shadow {
+        verdict: eltanin_protocol::response::ShadowVerdict,
+    },
 }
 
 /// Supervise `child` through to exit, maintaining the lease it was

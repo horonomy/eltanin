@@ -11,15 +11,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use eltanin_audit::record::{
-    AuditEventId, RecordedAgentEvent, RecordedEnforcementMode, RecordedOperation,
-    RecordedOutcome, RecordedPeer, RecordedPeerConsistency, RecordedPeerCredential,
-    RecordedRequest,
+    AuditEventId, RecordedAgentEvent, RecordedEnforcementMode, RecordedOperation, RecordedOutcome,
+    RecordedPeer, RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest,
 };
 use eltanin_audit::sink::{AuditEntry, AuditFileSink};
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
 use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime, RevocationOutcome};
 use eltanin_core::resource::{Action, ResourceIdentity, ResourceKind, ResourceVendor};
-use eltanin_protocol::response::{AgentResponse, AgentStatusView, EnforcementMode, LeaseView, ReleaseOutcome};
+use eltanin_protocol::response::{
+    AgentResponse, AgentStatusView, EnforcementMode, LeaseView, ReleaseOutcome,
+};
 
 fn temp_log_path(tag: &str) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -94,13 +95,7 @@ fn explain_finds_a_record_by_pid() {
     let sink = AuditFileSink::open(&path, IssuerInstanceId::new("i")).unwrap();
     sink.append(status_entry(4242)).unwrap();
 
-    let output = eltanin(&[
-        "explain",
-        "--pid",
-        "4242",
-        "--log",
-        path.to_str().unwrap(),
-    ]);
+    let output = eltanin(&["explain", "--pid", "4242", "--log", path.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("pid=4242"), "got: {stdout}");
@@ -127,13 +122,7 @@ fn explain_reports_not_found_as_a_clean_success() {
 #[test]
 fn explain_against_a_nonexistent_log_is_a_clean_success_not_a_failure() {
     let path = temp_log_path("nonexistent");
-    let output = eltanin(&[
-        "explain",
-        "--pid",
-        "1",
-        "--log",
-        path.to_str().unwrap(),
-    ]);
+    let output = eltanin(&["explain", "--pid", "1", "--log", path.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("no audit log found"), "got: {stdout}");
@@ -242,7 +231,10 @@ fn explain_chain_pulls_in_the_originating_grant_for_a_release_record() {
         2,
         "expected --chain to also surface the originating grant, got: {stdout_chain}"
     );
-    assert!(stdout_chain.contains(&grant_id.to_string()), "got: {stdout_chain}");
+    assert!(
+        stdout_chain.contains(&grant_id.to_string()),
+        "got: {stdout_chain}"
+    );
 }
 
 #[test]
