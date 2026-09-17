@@ -62,6 +62,8 @@ jobs:
       - run: cargo build --workspace --all-targets
       - name: Track B — canonical Product/Business E2E
         run: cargo test -p eltanin-cli --test canonical_e2e
+      - name: Track B — MVP 2.0 developer flow E2E
+        run: cargo test -p eltanin-cli --test mvp2_dev_flow_e2e
       - name: Track A — full hardware-free suite
         if: success() || failure()
         run: cargo test --workspace
@@ -90,6 +92,8 @@ jobs:
       - run: cargo build --workspace --all-targets --exclude eltanin-apple
       - name: Track B — canonical Product/Business E2E
         run: cargo test -p eltanin-cli --test canonical_e2e
+      - name: Track B — MVP 2.0 developer flow E2E
+        run: cargo test -p eltanin-cli --test mvp2_dev_flow_e2e
       - name: Track A — full hardware-free suite (excludes eltanin-apple's real-hardware Metal probe)
         if: success() || failure()
         run: cargo test --workspace --exclude eltanin-apple
