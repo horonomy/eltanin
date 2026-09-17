@@ -681,8 +681,36 @@ impl AuthorizationHandler {
         let mut guard = state::lock(&self.state);
         let sweep = guard.sweep_expired(now);
         drop(guard);
-        for (_, resource) in sweep.teardown {
-            let _ = self.backend.revoke(&resource);
+
+        // HORO-795's dedup rule, unchanged: revoke at most once per
+        // distinct resource. The result is kept (not discarded with
+        // `let _`) so every expired lease named by this resource can
+        // report the actual backend outcome below.
+        let mut backend_results = std::collections::BTreeMap::new();
+        for (_, resource) in &sweep.teardown {
+            let result = match self.backend.revoke(resource) {
+                Ok(result) => result,
+                Err(error) => EnforcementResult::Error {
+                    message: error.to_string(),
+                },
+            };
+            backend_results.insert(resource.clone(), result);
+        }
+
+        // Audit fidelity (HORO-796 subtask 2): every expired lease gets
+        // its own `LeaseExpired` event, regardless of whether its
+        // resource was in `teardown` — `backend` is `None` exactly when
+        // this resource's teardown was skipped because another live
+        // lease still names it.
+        for (lease_id, resource, expired_at) in sweep.expired {
+            let backend = backend_results.get(&resource).cloned();
+            self.sink
+                .record_agent_event(eltanin_audit::record::RecordedAgentEvent::LeaseExpired {
+                    lease_id,
+                    resource,
+                    expired_at,
+                    backend,
+                });
         }
     }
 
