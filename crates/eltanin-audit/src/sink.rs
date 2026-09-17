@@ -302,6 +302,57 @@ impl AuditFileSink {
         })
     }
 
+    /// Append an agent-emitted event (e.g. a lease expiring on its own —
+    /// HORO-796 subtask 2), sharing this sink's sequence space with
+    /// [`Self::append`] exactly as [`AgentEventRecord`]'s own docs
+    /// require. Mirrors `append`'s "probe, maybe rotate, then reserve"
+    /// ordering precisely — see that method's own doc comment for why
+    /// the sequence must never be reserved before rotation is decided.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AuditSinkError`] if serialization or the write itself
+    /// fails.
+    pub fn append_agent_event(
+        &self,
+        event: RecordedAgentEvent,
+    ) -> Result<AuditEventId, AuditSinkError> {
+        let recorded_at = self.clock.now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+
+        let probe_sequence = state.next_sequence;
+        let probe = LogEntry::Agent(AgentEventRecord {
+            event_id: AuditEventId {
+                instance: self.instance.clone(),
+                sequence: probe_sequence,
+            },
+            recorded_at,
+            event,
+        });
+
+        let result = self.maybe_rotate(&mut state, &probe).and_then(|()| {
+            let sequence = state.next_sequence;
+            state.next_sequence += 1;
+            let mut record = match probe {
+                LogEntry::Agent(record) => record,
+                LogEntry::Decision(_) => unreachable!("probe is always LogEntry::Agent"),
+            };
+            record.event_id.sequence = sequence;
+            let line = LogEntry::Agent(record);
+            let written = Self::write_line(&mut state.writer, &line)?;
+            state.bytes_written += written as u64;
+            Ok(sequence)
+        });
+        drop(state);
+        if result.is_err() {
+            self.failed_writes.fetch_add(1, Ordering::SeqCst);
+        }
+        result.map(|sequence| AuditEventId {
+            instance: self.instance.clone(),
+            sequence,
+        })
+    }
+
     /// Rotate to a new generation, under the same lock as the write that
     /// triggered it, if `upcoming` would push the current generation
     /// past `self.max_bytes`. No-op for a [`Self::from_writer`] sink

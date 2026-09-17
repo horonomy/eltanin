@@ -30,6 +30,10 @@ impl EventSink for CapturingSink {
     fn record(&self, event: &AuthorizationEvent<'_>) {
         self.outcomes.lock().unwrap().push(event.outcome.clone());
     }
+
+    // No agent-emitted event assertions in this test file; discarding
+    // here mirrors NullSink's own explicit (not defaulted) no-op.
+    fn record_agent_event(&self, _event: eltanin_audit::record::RecordedAgentEvent) {}
 }
 
 impl CapturingSink {

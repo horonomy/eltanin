@@ -368,4 +368,15 @@ impl EventSink for AuditEventSink {
             );
         }
     }
+
+    fn record_agent_event(&self, event: eltanin_audit::record::RecordedAgentEvent) {
+        if let Err(error) = self.inner.append_agent_event(event) {
+            // Same best-effort discipline as `record` above: logged
+            // loudly, never authoritative.
+            eprintln!(
+                "eltanin-agent: audit write failed (failed_writes={}): {error}",
+                self.inner.failed_writes()
+            );
+        }
+    }
 }
