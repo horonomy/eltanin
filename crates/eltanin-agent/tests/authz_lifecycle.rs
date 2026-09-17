@@ -302,6 +302,13 @@ fn an_expired_leases_slot_is_reclaimed_by_prune_before_the_capacity_check() {
     );
 }
 
+/// F-M2-006 (HORO-796 subtask 2): every expired lease gets its own
+/// `LeaseExpired` audit event, even when several leases on the same
+/// resource expire together — this must not regress HORO-795's own
+/// dedup rule that `backend.revoke()` is called at most once per
+/// resource. Both are asserted here together so a change that
+/// re-introduces per-resource deduping of the *audit* events (as opposed
+/// to the backend call) is caught immediately.
 #[test]
 fn two_leases_expiring_on_the_same_resource_each_emit_their_own_lease_expired_event() {
     let clock = FixedClock::new();
@@ -432,4 +439,58 @@ fn an_expired_lease_with_a_still_live_sibling_reports_no_backend_teardown() {
         "teardown was skipped because b's lease keeps the resource live, so \
          `backend` must be None, not a fabricated result"
     );
+}
+
+/// A `backend.revoke()` failure during the sweep must surface on the
+/// corresponding `LeaseExpired` event as `Some(EnforcementResult::Error)`
+/// — never silently `None`, which would be indistinguishable from the
+/// legitimate "teardown skipped" case above.
+#[test]
+fn a_backend_revoke_error_during_the_sweep_surfaces_on_the_lease_expired_event() {
+    let clock = FixedClock::new();
+    let backend = backend_with_resource(&[Capability::DeviceEnforce, Capability::DeviceRevoke]);
+    let sink = Arc::new(CapturingAgentEventSink::default());
+    let handler = AuthorizationHandler::new(
+        IssuerInstanceId::new("instance-a"),
+        allow_policy_for_uid(1000),
+        Arc::clone(&backend) as Arc<dyn eltanin_backend::contract::ComputeBackend>,
+        Arc::clone(&clock) as Arc<dyn eltanin_agent::authz::Clock>,
+        Arc::clone(&sink) as Arc<dyn eltanin_agent::authz::event::EventSink>,
+        &AuthorizationConfig::new(Duration::from_secs(5)).unwrap(),
+    );
+
+    let peer_a = TestPeer::fresh(1000, "sha256:trusted");
+    let granted_a = handler.handle(&lease_request(), &peer_a.context());
+    let id_a = granted_lease_id(&granted_a);
+
+    clock.advance(Duration::from_secs(6));
+
+    // Simulate the backend becoming unavailable for this resource before
+    // the sweep's own revoke() call — FakeBackend::revoke observes the
+    // resource first and returns Err(BackendError::Unavailable) when it
+    // is gone, exactly as a real backend would if the device disappeared
+    // mid-session.
+    backend.remove(&resource_identity());
+
+    let _ = handler.handle(
+        &sweep_trigger_release("instance-a", 999),
+        &TestPeer::fresh(1000, "sha256:trusted").context(),
+    );
+
+    let events = sink.events();
+    let expired: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            RecordedAgentEvent::LeaseExpired {
+                lease_id, backend, ..
+            } => Some((lease_id.clone(), backend.clone())),
+            RecordedAgentEvent::AuditLogRotated { .. } => None,
+        })
+        .collect();
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].0, id_a);
+    match &expired[0].1 {
+        Some(EnforcementResult::Error { .. }) => {}
+        other => panic!("expected Some(EnforcementResult::Error), got {other:?}"),
+    }
 }
