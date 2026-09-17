@@ -1,11 +1,27 @@
 //! Append-only NDJSON audit sink (F-M1-009, HORO-824).
 //!
-//! One `Versioned<AuditRecord>` JSON document per line, opened
-//! append-only at file mode `0600` (Unix). [`AuditFileSink`] mints the
-//! [`AuditEventId`] and [`crate::record::WallClockTime`] for every entry — a caller
-//! supplies only what it observed ([`AuditEntry`]), never the id or
-//! timestamp, so nothing outside this sink can forge or backdate a
-//! record.
+//! One `Versioned<LogEntry>` JSON document per line — a
+//! [`crate::record::LogEntry::Decision`] for every appended [`AuditEntry`],
+//! plus a [`crate::record::LogEntry::Agent`] marker whenever this sink
+//! rotates the log to a new generation (see "Bounded retention" below) —
+//! opened append-only at file mode `0600` (Unix). [`AuditFileSink`]
+//! mints the [`AuditEventId`] and [`crate::record::WallClockTime`] for
+//! every entry — a caller supplies only what it observed
+//! ([`AuditEntry`]), never the id or timestamp, so nothing outside this
+//! sink can forge or backdate a record.
+//!
+//! # Bounded retention (AC6)
+//!
+//! A path-backed sink (built via [`AuditFileSink::open`]) rotates to a
+//! new generation once the current one would exceed
+//! [`AuditFileSink::with_max_bytes`]'s threshold (64 MiB by default):
+//! the current file is renamed to `<path>.1` (overwriting any prior
+//! `.1`, which is deliberately discarded — this is the one retained
+//! generation, bounding total storage at ~128 MiB with zero
+//! configuration), a fresh file is opened at `<path>`, and a
+//! [`crate::record::RecordedAgentEvent::AuditLogRotated`] marker is
+//! written as the new generation's first entry. A [`AuditFileSink::from_writer`]
+//! sink has no path to rotate to and never rotates.
 //!
 //! # Durability is best-effort, by explicit founder decision
 //!
@@ -30,17 +46,35 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::IssuerInstanceId;
 
-use crate::record::{AuditClock, SystemWallClock};
 use crate::record::{
-    AuditEventId, AuditRecord, RecordedOperation, RecordedOutcome, RecordedPeer, RecordedRequest,
+    AgentEventRecord, AuditEventId, AuditRecord, LogEntry, RecordedAgentEvent,
+    RecordedEnforcementMode, RecordedOperation, RecordedOutcome, RecordedPeer, RecordedRequest,
 };
+use crate::record::{AuditClock, SystemWallClock};
+
+/// Default rotation threshold: 64 MiB per generation. [`AuditFileSink`]
+/// retains exactly one prior generation (the renamed `.1` file), so this
+/// bounds total on-disk audit storage at ~128 MiB with zero
+/// configuration — AC6's "bounded default."
+const DEFAULT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The on-disk sibling path a rotatable log rotates into: `<path>.1`.
+/// Shared between [`AuditFileSink`] (which writes it) and
+/// [`crate::explain::read_log`] (which reads it) so the naming
+/// convention lives in exactly one place.
+#[must_use]
+pub fn rotated_path(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(".1");
+    PathBuf::from(s)
+}
 
 /// What a caller observed for one request — everything in
 /// [`AuditRecord`] except the id and timestamp, which only
@@ -75,15 +109,41 @@ pub struct AuditFileSink {
     /// but race for the writer in the opposite order, leaving sequence 6
     /// physically before sequence 5 in the file even though callers
     /// (`explain::Selector::Pid`/`Lease`, `render`) rely on file order.
+    /// Rotation happens under this same lock (see [`Self::append`]) so
+    /// there is never a window where a concurrent write could interleave
+    /// with a rotation in progress.
     state: Mutex<SinkState>,
     instance: IssuerInstanceId,
     failed_writes: AtomicU64,
     clock: Arc<dyn AuditClock>,
+    /// The real file path this sink was opened at, or `None` for a
+    /// [`Self::from_writer`] sink. Rotation requires a path to rename
+    /// to/from, so `from_writer`-constructed sinks **never rotate**,
+    /// regardless of how many bytes are written — see
+    /// [`Self::from_writer`]'s own doc comment.
+    path: Option<PathBuf>,
+    max_bytes: u64,
 }
 
 struct SinkState {
     writer: Box<dyn Write + Send>,
     next_sequence: u64,
+    /// Bytes written into the *current* generation so far — seeded from
+    /// the real file's size on [`AuditFileSink::open`] so a reopened sink
+    /// continues counting from where a previous process run left off.
+    /// Always `0` for a `from_writer` sink (irrelevant there, since such
+    /// a sink never rotates).
+    bytes_written: u64,
+    /// The previous rotation's own `rotated_at_sequence`, kept only in
+    /// memory. **Accepted limitation**: this does not survive a process
+    /// restart — if the agent restarts between two rotations, the next
+    /// rotation after restart reports `discarded_through_sequence: None`
+    /// even though an earlier rotation already discarded a generation.
+    /// This under-reports discarded ranges; it never over-reports one,
+    /// so [`crate::explain`]'s retention-floor calculation stays a safe
+    /// (if occasionally conservative) lower bound rather than a false
+    /// claim.
+    last_rotation_sequence: Option<u64>,
 }
 
 impl AuditFileSink {
@@ -106,23 +166,43 @@ impl AuditFileSink {
         let file = options.open(path).map_err(|e| AuditSinkError::Io {
             reason: e.to_string(),
         })?;
-        Ok(Self::from_writer(file, instance))
+        let bytes_written = file
+            .metadata()
+            .map_err(|e| AuditSinkError::Io {
+                reason: e.to_string(),
+            })?
+            .len();
+        let mut sink = Self::from_writer(file, instance);
+        sink.path = Some(path.to_path_buf());
+        sink.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .bytes_written = bytes_written;
+        Ok(sink)
     }
 
     /// Build a sink over an arbitrary [`Write`] — the general
     /// constructor `open` is implemented in terms of. Public because
     /// "write NDJSON audit entries somewhere other than a plain file" is
     /// a legitimate use, not just a test hook.
+    ///
+    /// A sink built this way has no real path to rotate to/from, so it
+    /// **never rotates** — [`Self::append`] never triggers rotation for
+    /// it, regardless of `max_bytes` or how many bytes are written.
     #[must_use]
     pub fn from_writer(writer: impl Write + Send + 'static, instance: IssuerInstanceId) -> Self {
         Self {
             state: Mutex::new(SinkState {
                 writer: Box::new(writer),
                 next_sequence: 0,
+                bytes_written: 0,
+                last_rotation_sequence: None,
             }),
             instance,
             failed_writes: AtomicU64::new(0),
             clock: Arc::new(SystemWallClock),
+            path: None,
+            max_bytes: DEFAULT_MAX_BYTES,
         }
     }
 
@@ -131,6 +211,15 @@ impl AuditFileSink {
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn AuditClock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Override the rotation threshold (default 64 MiB). Has no effect
+    /// on a [`Self::from_writer`] sink, which never rotates regardless
+    /// of this value.
+    #[must_use]
+    pub fn with_max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = max_bytes;
         self
     }
 
@@ -163,31 +252,129 @@ impl AuditFileSink {
     pub fn append(&self, entry: AuditEntry) -> Result<AuditEventId, AuditSinkError> {
         let recorded_at = self.clock.now();
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let sequence = state.next_sequence;
-        state.next_sequence += 1;
-        let event_id = AuditEventId {
-            instance: self.instance.clone(),
-            sequence,
-        };
-        let record = AuditRecord {
-            event_id: event_id.clone(),
+
+        // Decide rotation *before* reserving this entry's own sequence
+        // number — using a probe record built at the sequence this entry
+        // would get if no rotation happens. This ordering matters: if
+        // rotation *does* happen, `maybe_rotate` consumes the next
+        // sequence number for its marker, so the entry must get the
+        // sequence number *after* that, never before it. Reserving the
+        // entry's sequence first (and rotating after) would let a
+        // smaller sequence number end up physically written after a
+        // larger one — breaking the "sequence order == file order"
+        // invariant this sink otherwise guarantees.
+        let probe_sequence = state.next_sequence;
+        let probe = LogEntry::Decision(AuditRecord {
+            event_id: AuditEventId {
+                instance: self.instance.clone(),
+                sequence: probe_sequence,
+            },
             recorded_at,
             operation: entry.operation,
             requested: entry.requested,
             peer: entry.peer,
             outcome: entry.outcome,
             response: entry.response,
-        };
-        let result = Self::write_line(&mut state.writer, &record);
+            mode: RecordedEnforcementMode::Enforce,
+            session: None,
+        });
+
+        let result = self.maybe_rotate(&mut state, &probe).and_then(|()| {
+            let sequence = state.next_sequence;
+            state.next_sequence += 1;
+            let mut record = match probe {
+                LogEntry::Decision(record) => record,
+                LogEntry::Agent(_) => unreachable!("probe is always LogEntry::Decision"),
+            };
+            record.event_id.sequence = sequence;
+            let line = LogEntry::Decision(record);
+            let written = Self::write_line(&mut state.writer, &line)?;
+            state.bytes_written += written as u64;
+            Ok(sequence)
+        });
         drop(state);
         if result.is_err() {
             self.failed_writes.fetch_add(1, Ordering::SeqCst);
         }
-        result.map(|()| event_id)
+        result.map(|sequence| AuditEventId {
+            instance: self.instance.clone(),
+            sequence,
+        })
     }
 
-    fn write_line(writer: &mut dyn Write, record: &AuditRecord) -> Result<(), AuditSinkError> {
-        let mut line = serde_json::to_string(&Versioned::current(record)).map_err(|e| {
+    /// Rotate to a new generation, under the same lock as the write that
+    /// triggered it, if `upcoming` would push the current generation
+    /// past `self.max_bytes`. No-op for a [`Self::from_writer`] sink
+    /// (`self.path.is_none()`), and a no-op while the current generation
+    /// is still empty (`bytes_written == 0`) — the latter guards against
+    /// a single entry larger than `max_bytes` triggering rotation on
+    /// every single append.
+    fn maybe_rotate(
+        &self,
+        state: &mut SinkState,
+        upcoming: &LogEntry,
+    ) -> Result<(), AuditSinkError> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        if state.bytes_written == 0 {
+            return Ok(());
+        }
+        let upcoming_len = encoded_len(upcoming)?;
+        if state.bytes_written + upcoming_len <= self.max_bytes {
+            return Ok(());
+        }
+
+        state.writer.flush().map_err(|e| AuditSinkError::Io {
+            reason: e.to_string(),
+        })?;
+        // Drop the old writer (closing its file descriptor) before
+        // renaming — matches the design's "flush, drop, then rename"
+        // ordering, and keeps this portable to a future Windows
+        // transport where a rename can fail while the source is open.
+        let old_writer = std::mem::replace(&mut state.writer, Box::new(std::io::sink()));
+        drop(old_writer);
+        std::fs::rename(path, rotated_path(path)).map_err(|e| AuditSinkError::Io {
+            reason: e.to_string(),
+        })?;
+
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(path).map_err(|e| AuditSinkError::Io {
+            reason: e.to_string(),
+        })?;
+        state.writer = Box::new(file);
+
+        let marker_sequence = state.next_sequence;
+        state.next_sequence += 1;
+        let discarded_through_sequence = state
+            .last_rotation_sequence
+            .and_then(|prev| prev.checked_sub(1));
+        state.last_rotation_sequence = Some(marker_sequence);
+
+        let marker = LogEntry::Agent(AgentEventRecord {
+            event_id: AuditEventId {
+                instance: self.instance.clone(),
+                sequence: marker_sequence,
+            },
+            recorded_at: self.clock.now(),
+            event: RecordedAgentEvent::AuditLogRotated {
+                rotated_at_sequence: marker_sequence,
+                discarded_through_sequence,
+            },
+        });
+        let marker_len = Self::write_line(&mut state.writer, &marker)?;
+        state.bytes_written = marker_len as u64;
+        Ok(())
+    }
+
+    fn write_line(writer: &mut dyn Write, entry: &LogEntry) -> Result<usize, AuditSinkError> {
+        let mut line = serde_json::to_string(&Versioned::current(entry)).map_err(|e| {
             AuditSinkError::Serialize {
                 reason: e.to_string(),
             }
@@ -198,6 +385,20 @@ impl AuditFileSink {
             .and_then(|()| writer.flush())
             .map_err(|e| AuditSinkError::Io {
                 reason: e.to_string(),
-            })
+            })?;
+        Ok(line.len())
     }
+}
+
+/// The exact number of bytes [`AuditFileSink::write_line`] would write
+/// for `entry` — used only to decide *before* writing whether rotation
+/// is needed, so rotation and the eventual real write agree on size.
+fn encoded_len(entry: &LogEntry) -> Result<u64, AuditSinkError> {
+    let mut line = serde_json::to_string(&Versioned::current(entry)).map_err(|e| {
+        AuditSinkError::Serialize {
+            reason: e.to_string(),
+        }
+    })?;
+    line.push('\n');
+    Ok(line.len() as u64)
 }

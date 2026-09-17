@@ -173,7 +173,10 @@ fn a_sequence_gap_between_two_records_is_reported_as_possibly_lost() {
                     protocol_version: 1,
                 },
             },
+            mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
+            session: None,
         };
+        let entry = eltanin_audit::record::LogEntry::Decision(record);
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -181,7 +184,7 @@ fn a_sequence_gap_between_two_records_is_reported_as_possibly_lost() {
         writeln!(
             file,
             "{}",
-            serde_json::to_string(&Versioned::current(record)).unwrap()
+            serde_json::to_string(&Versioned::current(entry)).unwrap()
         )
         .unwrap();
     }
@@ -227,7 +230,10 @@ fn a_lost_first_write_is_reported_as_possibly_lost_not_never_issued() {
                     protocol_version: 1,
                 },
             },
+            mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
+            session: None,
         };
+        let entry = eltanin_audit::record::LogEntry::Decision(record);
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -236,7 +242,7 @@ fn a_lost_first_write_is_reported_as_possibly_lost_not_never_issued() {
         writeln!(
             file,
             "{}",
-            serde_json::to_string(&Versioned::current(record)).unwrap()
+            serde_json::to_string(&Versioned::current(entry)).unwrap()
         )
         .unwrap();
     }
@@ -299,7 +305,10 @@ fn a_version_mismatched_lines_recovered_event_id_counts_as_present_not_a_gap() {
                     protocol_version: 1,
                 },
             },
+            mode: eltanin_audit::record::RecordedEnforcementMode::Enforce,
+            session: None,
         };
+        let entry = eltanin_audit::record::LogEntry::Decision(record);
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -307,7 +316,7 @@ fn a_version_mismatched_lines_recovered_event_id_counts_as_present_not_a_gap() {
         writeln!(
             file,
             "{}",
-            serde_json::to_string(&Versioned::current(record)).unwrap()
+            serde_json::to_string(&Versioned::current(entry)).unwrap()
         )
         .unwrap();
     }

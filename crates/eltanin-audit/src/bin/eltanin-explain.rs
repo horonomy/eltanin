@@ -76,6 +76,14 @@ fn run() -> Result<bool, String> {
             );
             Ok(false)
         }
+        SelectionResult::RetentionDiscarded => {
+            println!(
+                "no record found for that event id — it was legitimately recorded, but its \
+                 generation has since been rotated away by the audit log's bounded-retention \
+                 policy (see docs/product/SECURITY_MODEL.md)."
+            );
+            Ok(false)
+        }
         SelectionResult::NotFound => {
             println!("no matching record found.");
             Ok(false)

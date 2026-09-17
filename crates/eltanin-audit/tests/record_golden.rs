@@ -1,13 +1,15 @@
-//! Golden JSON coverage for [`AuditRecord`] (F-M1-006's consumer,
-//! F-M1-009, HORO-824). Locks the schema's key surface: a new upstream
-//! field on `ExecutionContext`/`WorkloadIdentity` shows up here as a
-//! diff, not silently.
+//! Golden JSON coverage for [`AuditRecord`] and [`LogEntry`] (F-M1-006's
+//! consumer, F-M1-009/HORO-824; `LogEntry`/`AgentEventRecord` added for
+//! F-M2-006/HORO-796 subtask 1). Locks the schema's key surface: a new
+//! upstream field on `ExecutionContext`/`WorkloadIdentity` shows up here
+//! as a diff, not silently.
 
 use std::time::Duration;
 
 use eltanin_audit::record::{
-    AuditEventId, AuditRecord, RecordedDelegation, RecordedOperation, RecordedOutcome,
-    RecordedPeer, RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
+    AgentEventRecord, AuditEventId, AuditRecord, LogEntry, RecordedAgentEvent, RecordedDelegation,
+    RecordedEnforcementMode, RecordedOperation, RecordedOutcome, RecordedPeer,
+    RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
 };
 use eltanin_core::delegation::ExceededBound;
 use eltanin_core::envelope::Versioned;
@@ -80,15 +82,22 @@ fn a_denied_request_lease_record_round_trips_through_json() {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::IndeterminateEvidence,
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
 
-    let envelope = Versioned::current(record.clone());
+    let entry = LogEntry::Decision(record.clone());
+    let envelope = Versioned::current(entry);
     let json = serde_json::to_string(&envelope).unwrap();
-    let decoded: Versioned<AuditRecord> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.payload, record);
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, LogEntry::Decision(record));
     assert_eq!(
         decoded.version,
         eltanin_core::envelope::DOMAIN_SCHEMA_VERSION
+    );
+    assert!(
+        json.contains("\"record\":\"decision\""),
+        "the only new top-level key over the pre-LogEntry wire shape must be the \"record\" tag: {json}"
     );
 }
 
@@ -131,6 +140,8 @@ fn a_granted_lease_record_exposes_its_lease_id_via_the_helper() {
                 remaining: Duration::from_secs(60),
             },
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
 
     assert_eq!(record.lease_id(), Some(&lease_id));
@@ -171,6 +182,8 @@ fn a_release_records_lease_id_comes_from_the_request_not_the_outcome() {
         response: AgentResponse::LeaseReleased {
             outcome: eltanin_protocol::response::ReleaseOutcome::Released,
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
 
     assert_eq!(record.lease_id(), Some(&lease_id));
@@ -228,12 +241,15 @@ fn a_granted_by_delegation_record_round_trips_and_exposes_its_lease_id() {
                 remaining: Duration::from_secs(60),
             },
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
 
-    let envelope = Versioned::current(record.clone());
+    let entry = LogEntry::Decision(record.clone());
+    let envelope = Versioned::current(entry);
     let json = serde_json::to_string(&envelope).unwrap();
-    let decoded: Versioned<AuditRecord> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.payload, record);
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, LogEntry::Decision(record.clone()));
     assert_eq!(record.lease_id(), Some(&lease_id));
     assert!(json.contains("\"parent_lease\""));
     assert!(json.contains("\"depth\":1"));
@@ -270,12 +286,15 @@ fn a_delegation_refused_record_round_trips_through_json() {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::ApprovalRequired,
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
 
-    let envelope = Versioned::current(record.clone());
+    let entry = LogEntry::Decision(record.clone());
+    let envelope = Versioned::current(entry);
     let json = serde_json::to_string(&envelope).unwrap();
-    let decoded: Versioned<AuditRecord> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.payload, record);
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, LogEntry::Decision(record.clone()));
     assert_eq!(record.lease_id(), None);
 }
 
@@ -310,10 +329,103 @@ fn a_delegation_indeterminate_record_round_trips_through_json() {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::ApprovalRequired,
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
 
-    let envelope = Versioned::current(record.clone());
+    let entry = LogEntry::Decision(record.clone());
+    let envelope = Versioned::current(entry);
     let json = serde_json::to_string(&envelope).unwrap();
-    let decoded: Versioned<AuditRecord> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.payload, record);
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, LogEntry::Decision(record));
+}
+
+/// F-M2-006/HORO-796 subtask 1: `LogEntry::Agent(AgentEventRecord{event:
+/// RecordedAgentEvent::LeaseExpired{..}})` round-trips correctly. Nothing
+/// in this subtask constructs this outside a test — see `AgentEventRecord`'s
+/// own module docs.
+#[test]
+fn a_lease_expired_agent_event_round_trips_through_json() {
+    let lease_id = LeaseId {
+        issuer: IssuerInstanceId::new("agent-pid-1-start-1"),
+        sequence: 11,
+    };
+    let entry = LogEntry::Agent(AgentEventRecord {
+        event_id: AuditEventId {
+            instance: IssuerInstanceId::new("agent-pid-1-start-1"),
+            sequence: 6,
+        },
+        recorded_at: WallClockTime {
+            unix_secs: 1_700_000_100,
+            nanos: 0,
+        },
+        event: RecordedAgentEvent::LeaseExpired {
+            lease_id,
+            resource: resource(),
+            expired_at: MonotonicTime::from_nanos(2_000_000_000),
+            backend: Some(eltanin_core::resource::EnforcementResult::Allowed),
+        },
+    });
+
+    let envelope = Versioned::current(entry.clone());
+    let json = serde_json::to_string(&envelope).unwrap();
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, entry);
+    assert!(json.contains("\"record\":\"agent\""));
+    assert!(json.contains("\"event\":\"lease_expired\""));
+}
+
+/// The other `RecordedAgentEvent` arm this subtask produces (via
+/// `AuditFileSink`'s own rotation logic, exercised end-to-end in
+/// `sink_append.rs`/`retention.rs`) — pinned here at the type/serde
+/// level independent of the sink.
+#[test]
+fn an_audit_log_rotated_agent_event_round_trips_through_json() {
+    let entry = LogEntry::Agent(AgentEventRecord {
+        event_id: AuditEventId {
+            instance: IssuerInstanceId::new("agent-pid-1-start-1"),
+            sequence: 100,
+        },
+        recorded_at: WallClockTime {
+            unix_secs: 1_700_000_200,
+            nanos: 0,
+        },
+        event: RecordedAgentEvent::AuditLogRotated {
+            rotated_at_sequence: 100,
+            discarded_through_sequence: Some(49),
+        },
+    });
+
+    let envelope = Versioned::current(entry.clone());
+    let json = serde_json::to_string(&envelope).unwrap();
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, entry);
+}
+
+/// Reserved for shadow-enforcement mode (HORO-796 subtask 3) — pinned at
+/// the golden-serialization level now so the schema bump in this subtask
+/// covers it.
+#[test]
+fn would_grant_outcome_has_a_stable_golden_shape() {
+    let outcome = RecordedOutcome::WouldGrant {
+        lease_id: LeaseId {
+            issuer: IssuerInstanceId::new("agent-pid-1-start-1"),
+            sequence: 42,
+        },
+        expires_at: MonotonicTime::from_nanos(3_000_000_000),
+    };
+    let json = serde_json::to_value(&outcome).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "outcome": "would_grant",
+            "lease_id": {
+                "issuer": "agent-pid-1-start-1",
+                "sequence": 42
+            },
+            "expires_at": 3_000_000_000u64
+        })
+    );
+    let decoded: RecordedOutcome = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, outcome);
 }

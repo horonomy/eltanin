@@ -287,6 +287,16 @@ pub enum RecordedOutcome {
         lease_id: LeaseId,
         expires_at: MonotonicTime,
     },
+    /// Reserved for shadow-enforcement mode (F-M2-006, HORO-796 subtask
+    /// 3): what *would* have been granted had the agent been enforcing
+    /// rather than observing. Never produced by any code path in this
+    /// subtask — the type exists now so the schema bump (`DOMAIN_SCHEMA_VERSION`
+    /// 5 → 6) covers the whole HORO-796 ticket in one bump, per that
+    /// bump's own rationale.
+    WouldGrant {
+        lease_id: LeaseId,
+        expires_at: MonotonicTime,
+    },
     PolicyDenied {
         decision: RecordedPolicyDecision,
     },
@@ -392,10 +402,21 @@ pub enum RecordedOutcome {
     },
 }
 
+/// Which enforcement posture was active when a record was produced.
+/// `Shadow` is reserved for HORO-796 subtask 3 (shadow-enforcement
+/// mode) — nothing in this subtask ever produces it; every record
+/// constructed today is `Enforce`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordedEnforcementMode {
+    Enforce,
+    Shadow,
+}
+
 /// One audit record: what was asked, who asked (as observed), what
 /// actually happened, and what the client actually saw. Serialized one
-/// per line as `Versioned<AuditRecord>` JSON — see
-/// [`crate::sink::AuditFileSink`].
+/// per line, wrapped in [`LogEntry::Decision`] then `Versioned<LogEntry>`
+/// JSON — see [`crate::sink::AuditFileSink`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditRecord {
     pub event_id: AuditEventId,
@@ -405,6 +426,101 @@ pub struct AuditRecord {
     pub peer: RecordedPeer,
     pub outcome: RecordedOutcome,
     pub response: AgentResponse,
+    /// Which enforcement posture produced this record. Always `Enforce`
+    /// today — populating `Shadow` is HORO-796 subtask 3's job.
+    pub mode: RecordedEnforcementMode,
+    /// The [`SessionId`] active for this request, when one is. Lives at
+    /// the top level (not nested in a grant-specific outcome variant) so
+    /// it can eventually be populated for approval/delegation/risk
+    /// refusals too, not just successful grants — see
+    /// `RecordedOutcome::SessionEstablished`, which already embeds a
+    /// bare `SessionId` the same way; that type is a correlation
+    /// identifier only, "not a capability or a secret" per its own
+    /// module docs, so embedding it here needs no new safety argument.
+    /// Always `None` today — actual population is later HORO-796
+    /// subtask wiring.
+    pub session: Option<SessionId>,
+}
+
+/// One agent-emitted event that is not itself a request/response
+/// decision — e.g. a lease expiring on its own or the audit log
+/// rotating. Shares [`AuditEventId`]'s sequence space with
+/// [`AuditRecord`] (both are minted the same way, by
+/// [`crate::sink::AuditFileSink`]), so a gap in one is a gap in the
+/// other and both are visible to [`crate::explain`]'s gap detection.
+///
+/// Nothing in this subtask constructs a
+/// [`RecordedAgentEvent::LeaseExpired`] outside of tests — emitting it
+/// from the agent on an actual lease expiry is HORO-796 subtask 2's job.
+/// [`RecordedAgentEvent::AuditLogRotated`] *is* produced by this
+/// subtask, by [`crate::sink::AuditFileSink`]'s own rotation logic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentEventRecord {
+    pub event_id: AuditEventId,
+    pub recorded_at: WallClockTime,
+    pub event: RecordedAgentEvent,
+}
+
+/// What kind of agent-emitted event [`AgentEventRecord`] carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "event")]
+pub enum RecordedAgentEvent {
+    /// A lease expired on its own (no `ReleaseLease` request). `backend`
+    /// is `None` when no teardown was attempted because another live
+    /// lease still names the same resource.
+    LeaseExpired {
+        lease_id: LeaseId,
+        resource: ResourceIdentity,
+        expired_at: MonotonicTime,
+        backend: Option<EnforcementResult>,
+    },
+    /// The audit log rotated to a new generation. Always the first entry
+    /// written into the new generation — see
+    /// [`crate::sink::AuditFileSink`]'s rotation docs.
+    AuditLogRotated {
+        /// This marker's own sequence number in the new generation.
+        rotated_at_sequence: u64,
+        /// The *previous* rotation's `rotated_at_sequence - 1` — the
+        /// highest sequence number that generation, now overwritten,
+        /// ever held. `None` on the very first rotation, when nothing
+        /// has been discarded yet.
+        discarded_through_sequence: Option<u64>,
+    },
+}
+
+/// One line of the audit log: either a request/response decision
+/// ([`AuditRecord`]) or an agent-emitted event ([`AgentEventRecord`]).
+/// Internally tagged on `"record"` — for [`LogEntry::Decision`] this
+/// adds exactly one new key (`"record":"decision"`) to the wire shape
+/// [`AuditRecord`] already had; every other field is unchanged. This is
+/// the structural fix that lets [`crate::explain::read_log`] tell a
+/// decision from an agent event without probing the payload's shape.
+// `AuditRecord` (the `Decision` arm) is the overwhelmingly common case —
+// every request/response decision produces one, while `Agent` is rare
+// (only a log rotation or a future lease-expiry event). Boxing the large
+// variant to satisfy clippy's `large_enum_variant` would move a heap
+// allocation onto that hot, common path purely to shrink the size of the
+// rare one — the wrong trade-off here, so this is a deliberate, narrow
+// suppression rather than an oversight.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "record")]
+pub enum LogEntry {
+    Decision(AuditRecord),
+    Agent(AgentEventRecord),
+}
+
+impl LogEntry {
+    /// The [`AuditEventId`] of this entry, regardless of which arm it
+    /// is — both arms carry one, minted the same way by
+    /// [`crate::sink::AuditFileSink`].
+    #[must_use]
+    pub fn event_id(&self) -> &AuditEventId {
+        match self {
+            LogEntry::Decision(record) => &record.event_id,
+            LogEntry::Agent(event) => &event.event_id,
+        }
+    }
 }
 
 impl AuditRecord {
