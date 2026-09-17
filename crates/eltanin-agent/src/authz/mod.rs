@@ -679,9 +679,9 @@ impl AuthorizationHandler {
     fn sweep_expired_leases(&self) {
         let now = self.clock.now();
         let mut guard = state::lock(&self.state);
-        let work = guard.sweep_expired(now);
+        let sweep = guard.sweep_expired(now);
         drop(guard);
-        for (_, resource) in work {
+        for (_, resource) in sweep.teardown {
             let _ = self.backend.revoke(&resource);
         }
     }
