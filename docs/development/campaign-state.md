@@ -140,6 +140,53 @@ there rather than left for a future sync, since a stale "next planned
 action" pointing at already-merged work would have misled the next
 resumed session. Synced again here after HORO-1013 (PR #43) merged.
 
+## MVP 2.0 stream (HORO-773) — started 2026-09-13, independent of E3
+
+Per founder directive: HORO-790/E3 is a release/evidence gate, not a
+reason to freeze independent product development. MVP 1.0 stays
+**In Progress**, not READY — no MVP 2.0 work substitutes for missing E3
+evidence, and this stream does not touch `main`.
+
+**Branch topology**: `next/mvp-2.0` (rolling integration branch, created
+off `main` @ `8f9fd68`, first commit `e8a390a` wires CI to also trigger
+on it — CI previously only ran against `main`). Each MVP 2.0 ticket gets
+its own worktree/branch cut from the latest `next/mvp-2.0`, targets a PR
+back at `next/mvp-2.0` (merge commit, same as `main`'s convention),
+worktree/branch deleted after merge. `next/mvp-2.0` itself only merges
+to `main` at the MVP 2.0 promotion boundary (HORO-797), never
+per-ticket.
+
+**Jira**: Fix Version `Eltanin MVP 2.0 — Trusted Local Protection`
+(id `10197`) created and applied to HORO-773/791/792/793/794/795/796/797
+(none had a real Fix Version object before — only "Intended Fix
+Version" text in each description). Dependency chain reconciled and
+recorded as `Blocks` issue links (none existed before — all 7 stories
+had zero issuelinks): `791→792→793→{794,795}→796→797`. This is a
+logical/product-model ordering, not derived from existing code — none
+of HORO-791..797 has any implementation yet, so there is no source to
+reconcile against beyond what already exists in `eltanin-core`
+(`ComputeLease`, `AuthorizationDecision`, `ResourceCapabilities` from
+MVP 1.0, which HORO-791+ extend rather than replace).
+
+**What can proceed without NVIDIA/Linux hardware** — all of it, by
+design: HORO-791 (Trusted Compute Session) is Linux-flavored in its own
+description (kernel/cgroup-managed membership) but its *model and CLI
+surface* are hardware-independent; the fake/model backend from MVP 1.0
+is the honest evidence class here (labelled `BLOCKED_ON_E3` /
+`UNVERIFIED_ON_BARE_METAL` only for the specific claims that
+mechanically require Linux/NVIDIA enforcement, e.g. session membership
+enforced via real cgroup attachment). HORO-792 (remembered auth),
+HORO-793 (delegation), HORO-794 (step-up), HORO-795 (lease lifecycle),
+HORO-796 (audit/shadow-mode) are all policy/model/audit work layered on
+existing vendor-neutral contracts — none fundamentally requires
+Linux/NVIDIA to be honest about what it proves. Only a future finding
+that a specific design assumption's correctness depends on the
+unresolved HORO-841 result stops that one ticket, not the stream.
+
+**First ticket**: HORO-791 (no inward blocker in the reconciled graph).
+See `docs/adr/` for where its ADR will land once opus-architect design
+is complete.
+
 ## Active worktrees
 
 None.
@@ -152,6 +199,51 @@ final MVP 1.0 READY gate) are blocked pending a bare-metal Linux/NVIDIA
 host — flagged as a MAJOR DECISION (external resource / cost), not yet
 formally raised as its own escalation beyond the note in
 `bootstrap-reconciliation.md` §6.
+
+## E3 hardware-certification checkpoint (2026-09-13) — resume point
+
+**Founder confirmed (2026-09-13): no Linux/NVIDIA machine exists.**
+Founder's development machine is Apple Silicon only. This does not
+change HORO-790's E3 standard — final E3 still requires a physical
+bare-metal Linux/NVIDIA host with a physically attached GPU; VM/
+container/passthrough evidence still never satisfies it — but it does
+mean E3 is now a genuinely external, price-gated blocker, not something
+resolvable from existing assets. Per founder directive, Eltanin
+development does **not** freeze on this: MVP 2.0 work proceeds
+independently on `next/mvp-2.0` (see below) while this lane stays
+paused-but-ready.
+
+**All free/local preparation is complete** (PRs #48, #49, both merged
+to `main`):
+- Stage 1 (`scripts/hardware-preflight-check.sh`, `e3-preflight-device-bpf-probe.sh`,
+  `hardware-evidence-capture.sh`) — functional cgroup v2 device-BPF
+  investigation, no GPU needed, always `E3_PREFLIGHT_ONLY`.
+- Stage 2 (`scripts/e3-bare-metal-oneshot.sh`) — the one-shot
+  provision→run→evidence→cleanup runner, auto-skips whatever
+  HORO-828/829/841/842/843/844 haven't shipped yet, refuses an
+  `E3_PASS_CANDIDATE` verdict unless every suite passed on a confirmed
+  non-virtualized host.
+- Requirements reconciled from source (see `hardware-validation-runbook.md`
+  §2–§5): any NVIDIA GPU on a current driver branch (Pascal/2016+
+  recommended, no compute-capability floor), kernel ≥4.15 (5.15+/6.x
+  LTS recommended), cgroup v2 unified + `BPF_CGROUP_DEVICE`, NVML via
+  dynamic `dlopen` (no CUDA toolkit needed for discovery), root/
+  `CAP_SYS_ADMIN` (or `CAP_BPF`+`CAP_PERFMON`) — exact minimal
+  capability set still explicitly deferred to real-hardware evidence.
+- Priced (not booked) cheapest genuinely-bare-metal hourly options:
+  Vultr Bare Metal (L40S, ~$0.85–1.20/GPU-hr, established single-tenant
+  bare-metal product line), Latitude.sh (L40S, $0.74/GPU-hr, capacity
+  uncertain at research time), Spheron (H100, ~$2.01/hr, fallback). Est.
+  ~$1.50–2.40 for the target ≤2h window — not a firm quote; must be
+  reconfirmed live, and `hardware-preflight-check.sh --json` reporting
+  `evidence_class=E3_PASS_ELIGIBLE` on the provisioned host is the
+  mandatory pre-spend gate regardless of provider.
+
+**To resume this lane**: found/borrowed a Linux+Pascal-or-newer GPU
+machine, or founder approval to book one of the above → run
+`scripts/e3-bare-metal-oneshot.sh` per `hardware-validation-runbook.md`
+§12. No polling; this lane only advances on an explicit founder signal
+(hardware found, or spend approved), never on its own schedule.
 
 ## Feature QA states
 
