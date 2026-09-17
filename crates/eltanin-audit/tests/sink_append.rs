@@ -8,7 +8,9 @@ use eltanin_audit::record::{
     RecordedAgentEvent, RecordedOperation, RecordedOutcome, RecordedRequest,
 };
 use eltanin_audit::sink::{rotated_path, AuditEntry, AuditFileSink};
-use eltanin_core::lease::IssuerInstanceId;
+use eltanin_core::lease::{IssuerInstanceId, LeaseId, MonotonicTime};
+use eltanin_core::resource::{EnforcementResult, ResourceIdentity, ResourceKind, ResourceVendor};
+use eltanin_core::session::SessionId;
 use eltanin_protocol::response::AgentResponse;
 
 mod support;
@@ -219,6 +221,66 @@ fn the_audit_log_rotated_marker_is_the_first_entry_in_the_new_generation() {
         first_line.contains("\"record\":\"agent\"") && first_line.contains("audit_log_rotated"),
         "the first entry in the new generation must be the AuditLogRotated marker: {first_line}"
     );
+}
+
+#[test]
+fn a_lease_expired_agent_event_round_trips_through_the_on_disk_log_sharing_the_sequence_space() {
+    let path = temp_log_path("lease-expired-round-trip");
+    let sink = AuditFileSink::open(&path, IssuerInstanceId::new("i")).unwrap();
+
+    let issuer = IssuerInstanceId::new("i");
+    let lease_id = LeaseId {
+        issuer: issuer.clone(),
+        sequence: 7,
+    };
+    let resource = ResourceIdentity {
+        vendor: ResourceVendor::fake(),
+        kind: ResourceKind::gpu(),
+        local_id: "gpu-0".to_string(),
+    };
+    let expired_at = MonotonicTime::from_nanos(123_456);
+    let session = SessionId {
+        issuer: issuer.clone(),
+        sequence: 3,
+    };
+
+    let a = sink.append(status_entry()).unwrap();
+    let b = sink
+        .append_agent_event(RecordedAgentEvent::LeaseExpired {
+            lease_id: lease_id.clone(),
+            resource: resource.clone(),
+            expired_at,
+            backend: Some(EnforcementResult::Allowed),
+        })
+        .unwrap();
+    let mut with_session = status_entry();
+    with_session.session = Some(session.clone());
+    let c = sink.append(with_session).unwrap();
+
+    assert_eq!(
+        [a.sequence, b.sequence, c.sequence],
+        [0, 1, 2],
+        "AgentEventRecord must share AuditRecord's sequence space with no gaps"
+    );
+
+    let scan = read_log(&path).unwrap();
+    assert_eq!(scan.agent_events.len(), 1);
+    let event = &scan.agent_events[0];
+    assert_eq!(event.event_id.sequence, 1);
+    assert_eq!(
+        event.event,
+        RecordedAgentEvent::LeaseExpired {
+            lease_id,
+            resource,
+            expired_at,
+            backend: Some(EnforcementResult::Allowed),
+        },
+        "the LeaseExpired variant must round-trip through disk with every field intact"
+    );
+
+    assert_eq!(scan.records.len(), 2);
+    assert_eq!(scan.records[0].session, None);
+    assert_eq!(scan.records[1].session, Some(session));
 }
 
 #[test]
