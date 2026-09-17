@@ -195,6 +195,13 @@ pub struct AuthorizationEvent<'a> {
     pub peer: &'a PeerContext,
     pub outcome: &'a AuthorizationOutcome,
     pub response: &'a AgentResponse,
+    /// The [`SessionId`] already resolved for this request, when one was
+    /// available at the point the outcome was produced (HORO-796
+    /// subtask 2). `None` both when no session was active and when the
+    /// request was refused before session resolution ever ran — see
+    /// `crate::authz::AuthorizationHandler::handle_request_lease`'s own
+    /// doc comment on exactly where that resolution happens.
+    pub session: Option<SessionId>,
 }
 
 /// Records [`AuthorizationEvent`]s. Called exactly once per request, at
@@ -202,6 +209,14 @@ pub struct AuthorizationEvent<'a> {
 /// every lock this crate holds internally has already been released.
 pub trait EventSink: Send + Sync {
     fn record(&self, event: &AuthorizationEvent<'_>);
+
+    /// Record an agent-emitted event that is not itself a request/
+    /// response decision — e.g. a lease expiring on its own (HORO-796
+    /// subtask 2). No default no-op implementation is provided
+    /// deliberately: every implementor must decide explicitly whether
+    /// (and how) it persists this, the same discipline `record` already
+    /// follows.
+    fn record_agent_event(&self, event: eltanin_audit::record::RecordedAgentEvent);
 }
 
 /// Discards every event. The default when no richer sink is wired in.
@@ -209,6 +224,8 @@ pub struct NullSink;
 
 impl EventSink for NullSink {
     fn record(&self, _event: &AuthorizationEvent<'_>) {}
+
+    fn record_agent_event(&self, _event: eltanin_audit::record::RecordedAgentEvent) {}
 }
 
 /// Debug-formats each event to stderr — captured by `journald`/systemd
@@ -230,5 +247,9 @@ impl EventSink for StderrSink {
             event.outcome,
             event.response
         );
+    }
+
+    fn record_agent_event(&self, event: eltanin_audit::record::RecordedAgentEvent) {
+        eprintln!("eltanin-agent authz agent event: {event:?}");
     }
 }

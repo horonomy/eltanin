@@ -23,16 +23,45 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use eltanin_agent::authz::event::NullSink;
+use eltanin_agent::authz::event::{AuthorizationEvent, AuthorizationOutcome, EventSink, NullSink};
 use eltanin_agent::authz::session::SessionRequirement;
 use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::handler::RequestHandler;
+use eltanin_audit::record::RecordedAgentEvent;
 use eltanin_core::identity::{Evidence, ExecutionContext};
 use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
+use eltanin_core::session::SessionId;
 use eltanin_protocol::request::{ClientRequest, CreateSessionRequest, LeaseRequest};
 use eltanin_protocol::response::{AgentResponse, DenialReason, TerminationOutcome};
 use support::authz::{allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock};
+use support::temp_approval_store_path;
+
+/// Captures every `(outcome, session)` pair this handler's single
+/// `sink.record` call site produces, in order — HORO-796 subtask 2's
+/// session-threading has no wire-visible effect, so tests for it must
+/// observe this seam.
+#[derive(Default)]
+struct CapturingSessionSink {
+    events: std::sync::Mutex<Vec<(AuthorizationOutcome, Option<SessionId>)>>,
+}
+
+impl EventSink for CapturingSessionSink {
+    fn record(&self, event: &AuthorizationEvent<'_>) {
+        self.events
+            .lock()
+            .unwrap()
+            .push((event.outcome.clone(), event.session.clone()));
+    }
+
+    fn record_agent_event(&self, _event: RecordedAgentEvent) {}
+}
+
+impl CapturingSessionSink {
+    fn last(&self) -> (AuthorizationOutcome, Option<SessionId>) {
+        self.events.lock().unwrap().last().cloned().unwrap()
+    }
+}
 
 #[cfg(not(target_os = "macos"))]
 use eltanin_linux as platform;
@@ -389,4 +418,269 @@ fn ac2_a_foreign_session_process_cannot_join_by_pid_alone() {
         },
         "a process in a different POSIX session must never be admitted as a session member"
     );
+}
+
+/// F-M2-006 (HORO-796 subtask 2): the resolved session id must be
+/// threaded onto the audit record for every gate outcome that has one
+/// available — not just `Granted`. This one test file exercises all
+/// three distinct paths the design calls out (grant, approval-refused,
+/// delegation-refused) plus the two honest-`None` cases, so a reviewer
+/// can see all five side by side.
+mod session_threading {
+    use super::{
+        allow_policy_for_uid, backend_with_resource, create_session, real_self_uid,
+        resource_identity, self_peer_context, temp_approval_store_path, AgentResponse,
+        AuthorizationConfig, AuthorizationHandler, AuthorizationOutcome, CapturingSessionSink,
+        ClientRequest, DenialReason, FixedClock, IssuerInstanceId, LeaseRequest, RequestHandler,
+    };
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn lease_request() -> ClientRequest {
+        ClientRequest::RequestLease(LeaseRequest {
+            resource: resource_identity(),
+            action: eltanin_core::resource::Action::Compute,
+        })
+    }
+
+    fn handler_with_approval(
+        store_path: std::path::PathBuf,
+        sink: Arc<CapturingSessionSink>,
+    ) -> AuthorizationHandler {
+        AuthorizationHandler::new(
+            IssuerInstanceId::new("test-instance"),
+            allow_policy_for_uid(real_self_uid()),
+            backend_with_resource(&[
+                eltanin_core::resource::Capability::DeviceEnforce,
+                eltanin_core::resource::Capability::DeviceRevoke,
+            ]),
+            FixedClock::new(),
+            sink,
+            &AuthorizationConfig::new(Duration::from_secs(60))
+                .unwrap()
+                .with_approval_store(store_path),
+        )
+    }
+
+    fn handler_with_delegation(
+        store_path: std::path::PathBuf,
+        sink: Arc<CapturingSessionSink>,
+    ) -> AuthorizationHandler {
+        let bounds = eltanin_core::delegation::DelegationBounds::new(
+            4,
+            Duration::from_secs(300),
+            Duration::from_secs(1),
+            [eltanin_core::resource::Action::Compute],
+            std::collections::BTreeSet::new(),
+            false,
+            false,
+        )
+        .unwrap();
+        AuthorizationHandler::new(
+            IssuerInstanceId::new("test-instance"),
+            allow_policy_for_uid(real_self_uid()),
+            backend_with_resource(&[
+                eltanin_core::resource::Capability::DeviceEnforce,
+                eltanin_core::resource::Capability::DeviceRevoke,
+            ]),
+            FixedClock::new(),
+            sink,
+            &AuthorizationConfig::new(Duration::from_secs(60))
+                .unwrap()
+                .with_delegation(store_path, bounds),
+        )
+    }
+
+    #[test]
+    fn a_successful_grant_while_a_session_is_active_carries_that_session_id() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let handler = handler_with_approval(
+            temp_approval_store_path("session-thread-grant"),
+            sink.clone(),
+        );
+        let peer = self_peer_context();
+
+        let created = create_session(&handler, &peer);
+        let session_id = match created {
+            AgentResponse::SessionEstablished { session } => session.session_id,
+            other => panic!("expected SessionEstablished, got {other:?}"),
+        };
+
+        // The approval gate would refuse an ordinary lease request here
+        // (no approval was ever recorded), so approve it first — the
+        // point of this test is the grant path's session field, not the
+        // approval gate itself.
+        let _ = handler.handle(
+            &ClientRequest::Approve(eltanin_protocol::request::ApproveRequest {
+                resource: resource_identity(),
+                action: eltanin_core::resource::Action::Compute,
+                disposition: eltanin_core::approval::ApprovalDisposition::Remember,
+            }),
+            &peer,
+        );
+
+        let response = handler.handle(&lease_request(), &peer);
+        assert!(matches!(response, AgentResponse::LeaseGranted { .. }));
+
+        let (outcome, session) = sink.last();
+        assert!(matches!(outcome, AuthorizationOutcome::Granted { .. }));
+        assert_eq!(
+            session,
+            Some(session_id),
+            "a successful grant while a session is active must carry that session's id"
+        );
+    }
+
+    #[test]
+    fn an_approval_refused_request_while_a_session_is_active_carries_that_session_id() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let handler = handler_with_approval(
+            temp_approval_store_path("session-thread-approval-refused"),
+            sink.clone(),
+        );
+        let peer = self_peer_context();
+
+        let created = create_session(&handler, &peer);
+        let session_id = match created {
+            AgentResponse::SessionEstablished { session } => session.session_id,
+            other => panic!("expected SessionEstablished, got {other:?}"),
+        };
+
+        // No approval was ever recorded, so the approval gate refuses
+        // this request — pre-policy, exactly as `crate::authz`'s module
+        // docs describe.
+        let response = handler.handle(&lease_request(), &peer);
+        assert_eq!(
+            response,
+            AgentResponse::LeaseDenied {
+                reason: DenialReason::ApprovalRequired
+            }
+        );
+
+        let (outcome, session) = sink.last();
+        assert!(matches!(outcome, AuthorizationOutcome::ApprovalRequired));
+        assert_eq!(
+            session,
+            Some(session_id),
+            "an approval-refused request must still carry the active session's id — \
+             session resolution runs before the approval gate"
+        );
+    }
+
+    #[test]
+    fn a_delegation_refused_request_while_a_session_is_active_carries_that_session_id() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let handler = handler_with_delegation(
+            temp_approval_store_path("session-thread-delegation-refused"),
+            sink.clone(),
+        );
+        let peer = self_peer_context();
+
+        let created = create_session(&handler, &peer);
+        let session_id = match created {
+            AgentResponse::SessionEstablished { session } => session.session_id,
+            other => panic!("expected SessionEstablished, got {other:?}"),
+        };
+
+        // No approval and no delegation grant exists anywhere, so the
+        // approval gate refuses, delegation is consulted, and — with
+        // zero delegation candidates — is refused too.
+        let response = handler.handle(&lease_request(), &peer);
+        assert_eq!(
+            response,
+            AgentResponse::LeaseDenied {
+                reason: DenialReason::ApprovalRequired
+            }
+        );
+
+        let (outcome, session) = sink.last();
+        assert!(matches!(
+            outcome,
+            AuthorizationOutcome::DelegationRefused { .. }
+        ));
+        assert_eq!(
+            session,
+            Some(session_id),
+            "a delegation-refused request must still carry the active session's id"
+        );
+    }
+
+    #[test]
+    fn a_request_with_no_active_session_carries_no_session_id() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let handler = handler_with_approval(
+            temp_approval_store_path("session-thread-no-session"),
+            sink.clone(),
+        );
+        let peer = self_peer_context();
+
+        // No CreateSession was ever called for this peer.
+        let response = handler.handle(&lease_request(), &peer);
+        assert_eq!(
+            response,
+            AgentResponse::LeaseDenied {
+                reason: DenialReason::ApprovalRequired
+            }
+        );
+
+        let (outcome, session) = sink.last();
+        assert!(matches!(outcome, AuthorizationOutcome::ApprovalRequired));
+        assert_eq!(
+            session, None,
+            "no session was ever established for this peer — None is the honest value"
+        );
+    }
+
+    /// `peer.authorizable()` fails before session resolution ever runs
+    /// (see `AuthorizationHandler::handle_request_lease`'s own doc
+    /// comment) — `None` here is correct, not a gap.
+    #[test]
+    fn a_request_refused_before_session_resolution_carries_no_session_id() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let handler = handler_with_approval(
+            temp_approval_store_path("session-thread-before-resolution"),
+            sink.clone(),
+        );
+        let uid = real_self_uid();
+        let pid = std::process::id();
+        let workload = super::platform::collect_workload_identity(pid);
+        let context = eltanin_core::identity::ExecutionContext {
+            workload,
+            cgroup_path: eltanin_core::identity::Evidence::Unsupported,
+            namespace_hint: eltanin_core::identity::Evidence::Unsupported,
+            container_hint: eltanin_core::identity::Evidence::Unsupported,
+            session_origin: eltanin_core::identity::Evidence::Unsupported,
+        };
+        let peer = eltanin_core::peer::PeerContext::new(
+            eltanin_core::peer::PeerCredential::new(pid, uid, uid),
+            eltanin_core::peer::PeerConsistency::CredentialDivergence {
+                peer_effective_uid: uid,
+                observed_real_uid: eltanin_core::identity::Evidence::Present {
+                    value: uid + 1,
+                    source: eltanin_core::identity::EvidenceSource::KernelObserved,
+                },
+                observed_effective_uid: eltanin_core::identity::Evidence::Present {
+                    value: uid + 1,
+                    source: eltanin_core::identity::EvidenceSource::KernelObserved,
+                },
+            },
+            context,
+        );
+
+        let response = handler.handle(&lease_request(), &peer);
+        assert_eq!(
+            response,
+            AgentResponse::LeaseDenied {
+                reason: DenialReason::IndeterminateEvidence
+            }
+        );
+
+        let (outcome, session) = sink.last();
+        assert!(matches!(outcome, AuthorizationOutcome::PeerNotAuthorizable));
+        assert_eq!(
+            session, None,
+            "a request refused before session resolution ever runs must report None, \
+             not a fabricated value"
+        );
+    }
 }

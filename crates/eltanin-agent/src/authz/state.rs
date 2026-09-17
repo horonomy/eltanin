@@ -13,6 +13,20 @@ use std::sync::{Mutex, PoisonError};
 use eltanin_core::lease::{ComputeLease, LeaseId, LeaseIssuer, MonotonicTime};
 use eltanin_core::resource::ResourceIdentity;
 
+/// The result of one [`LeaseState::sweep_expired`] pass. `expired` and
+/// `teardown` are collected in the same single scan — see that method's
+/// own doc comment for exactly how each is built.
+pub(crate) struct ExpirySweep {
+    /// Every expired lease, one entry each — for audit fidelity (each
+    /// gets its own `LeaseExpired` event, regardless of whether its
+    /// resource also needed backend teardown).
+    pub(crate) expired: Vec<(LeaseId, ResourceIdentity, MonotonicTime)>,
+    /// Deduped resources needing backend teardown — HORO-795's existing
+    /// rule, unchanged: still one entry per resource, still skips a
+    /// resource that still has another live lease.
+    pub(crate) teardown: Vec<(LeaseId, ResourceIdentity)>,
+}
+
 /// Owns one [`LeaseIssuer`] instance and the leases it has issued that
 /// are still outstanding.
 pub(crate) struct LeaseState {
@@ -56,16 +70,17 @@ impl LeaseState {
         self.leases.retain(|_, lease| lease.expires_at() > now);
     }
 
-    /// Remove every lease whose `expires_at <= now`, returning
-    /// `(LeaseId, ResourceIdentity)` for exactly the resources whose
-    /// backend enforcement must actually be torn down — i.e. every
-    /// distinct resource named by a just-expired lease for which no
-    /// other still-live lease remains. `LeaseId` is one representative
-    /// expired lease's id for that resource, carried through for audit
-    /// fidelity; the actual backend call the caller makes with this
-    /// result is keyed on the resource alone (mirroring
-    /// `AuthorizationHandler::handle_release_lease`'s own
-    /// `backend.revoke(&resource)` call).
+    /// Remove every lease whose `expires_at <= now`. Returns both the
+    /// full per-lease expiry list (`expired` — one entry per expired
+    /// lease, for audit fidelity: every expired lease gets its own
+    /// audit event) and the deduped teardown list (`teardown` — HORO-795's
+    /// original, unchanged rule: one entry per distinct resource named by
+    /// a just-expired lease for which no other still-live lease remains).
+    /// `teardown`'s `LeaseId` is one representative expired lease's id
+    /// for that resource, carried through for audit fidelity; the actual
+    /// backend call the caller makes with this result is keyed on the
+    /// resource alone (mirroring `AuthorizationHandler::handle_release_lease`'s
+    /// own `backend.revoke(&resource)` call).
     ///
     /// Bug fix (HORO-795): [`Self::prune`] above (called by
     /// `issue_reserving_capacity` and `AuthorizationHandler::handle_release_lease`)
@@ -81,16 +96,30 @@ impl LeaseState {
     /// a caller that drops this return value silently reproduces exactly
     /// that bug.
     #[must_use]
-    pub(crate) fn sweep_expired(&mut self, now: MonotonicTime) -> Vec<(LeaseId, ResourceIdentity)> {
+    pub(crate) fn sweep_expired(&mut self, now: MonotonicTime) -> ExpirySweep {
         let expired_ids: Vec<LeaseId> = self
             .leases
             .iter()
             .filter(|(_, lease)| lease.expires_at() <= now)
             .map(|(id, _)| id.clone())
             .collect();
-        let expired: Vec<ComputeLease> = expired_ids
+        let expired_leases: Vec<ComputeLease> = expired_ids
             .into_iter()
             .filter_map(|id| self.leases.remove(&id))
+            .collect();
+
+        // For audit fidelity (HORO-796 subtask 2): every expired lease,
+        // one entry each — never deduped by resource, unlike `teardown`
+        // below.
+        let expired: Vec<(LeaseId, ResourceIdentity, MonotonicTime)> = expired_leases
+            .iter()
+            .map(|lease| {
+                (
+                    lease.id().clone(),
+                    lease.origin().request.resource.clone(),
+                    lease.expires_at(),
+                )
+            })
             .collect();
 
         // Every expired lease is already removed from `self.leases`
@@ -99,10 +128,13 @@ impl LeaseState {
         // `any_other_live_lease_for_same_resource` applies, evaluated
         // once per distinct resource rather than once per lease so a
         // resource named by several simultaneously-expired leases is
-        // not handed back (and later revoked) more than once.
+        // not handed back (and later revoked) more than once. Byte-
+        // identical to HORO-795's original dedup rule — `expired` above
+        // is additional information collected in the same pass, not a
+        // second scan.
         let mut seen_resources = std::collections::BTreeSet::new();
-        let mut work = Vec::new();
-        for lease in &expired {
+        let mut teardown = Vec::new();
+        for lease in &expired_leases {
             let resource = lease.origin().request.resource.clone();
             if !seen_resources.insert(resource.clone()) {
                 continue;
@@ -112,10 +144,10 @@ impl LeaseState {
                 .values()
                 .any(|other| other.origin().request.resource == resource);
             if !still_live {
-                work.push((lease.id().clone(), resource));
+                teardown.push((lease.id().clone(), resource));
             }
         }
-        work
+        ExpirySweep { expired, teardown }
     }
 
     pub(crate) fn is_at_capacity(&self) -> bool {

@@ -357,11 +357,23 @@ impl EventSink for AuditEventSink {
             peer: recorded_peer(event.peer),
             outcome: recorded_outcome(event.outcome),
             response: event.response.clone(),
+            session: event.session.clone(),
         };
         if let Err(error) = self.inner.append(entry) {
             // Best-effort, by explicit founder decision (this module's
             // own docs): logged loudly, never fed back into the
             // already-computed response.
+            eprintln!(
+                "eltanin-agent: audit write failed (failed_writes={}): {error}",
+                self.inner.failed_writes()
+            );
+        }
+    }
+
+    fn record_agent_event(&self, event: eltanin_audit::record::RecordedAgentEvent) {
+        if let Err(error) = self.inner.append_agent_event(event) {
+            // Same best-effort discipline as `record` above: logged
+            // loudly, never authoritative.
             eprintln!(
                 "eltanin-agent: audit write failed (failed_writes={}): {error}",
                 self.inner.failed_writes()

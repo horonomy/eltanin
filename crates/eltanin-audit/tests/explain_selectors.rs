@@ -32,6 +32,7 @@ fn status_entry() -> AuditEntry {
                 protocol_version: 1,
             },
         },
+        session: None,
     }
 }
 
@@ -47,6 +48,7 @@ fn denied_entry(pid: u32) -> AuditEntry {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::IndeterminateEvidence,
         },
+        session: None,
     }
 }
 
@@ -373,6 +375,7 @@ fn a_grant_and_its_later_release_correlate_by_lease_id() {
                 remaining: std::time::Duration::from_secs(1),
             },
         },
+        session: None,
     })
     .unwrap();
     sink.append(AuditEntry {
@@ -388,6 +391,7 @@ fn a_grant_and_its_later_release_correlate_by_lease_id() {
         response: AgentResponse::LeaseReleased {
             outcome: eltanin_protocol::response::ReleaseOutcome::Released,
         },
+        session: None,
     })
     .unwrap();
 

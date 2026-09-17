@@ -52,6 +52,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use eltanin_core::envelope::Versioned;
 use eltanin_core::lease::IssuerInstanceId;
+use eltanin_core::session::SessionId;
 
 use crate::record::{
     AgentEventRecord, AuditEventId, AuditRecord, LogEntry, RecordedAgentEvent,
@@ -85,6 +86,12 @@ pub struct AuditEntry {
     pub peer: RecordedPeer,
     pub outcome: RecordedOutcome,
     pub response: eltanin_protocol::response::AgentResponse,
+    /// The [`SessionId`] active for this request, when the caller had
+    /// already resolved one at the point this entry was built — `None`
+    /// both when no session was active and when the request was refused
+    /// before session resolution ever ran (HORO-796 subtask 2). Threaded
+    /// straight onto [`AuditRecord::session`], never recomputed here.
+    pub session: Option<SessionId>,
 }
 
 /// Why [`AuditFileSink::open`] or [`AuditFileSink::append`] failed.
@@ -276,7 +283,7 @@ impl AuditFileSink {
             outcome: entry.outcome,
             response: entry.response,
             mode: RecordedEnforcementMode::Enforce,
-            session: None,
+            session: entry.session,
         });
 
         let result = self.maybe_rotate(&mut state, &probe).and_then(|()| {
@@ -288,6 +295,57 @@ impl AuditFileSink {
             };
             record.event_id.sequence = sequence;
             let line = LogEntry::Decision(record);
+            let written = Self::write_line(&mut state.writer, &line)?;
+            state.bytes_written += written as u64;
+            Ok(sequence)
+        });
+        drop(state);
+        if result.is_err() {
+            self.failed_writes.fetch_add(1, Ordering::SeqCst);
+        }
+        result.map(|sequence| AuditEventId {
+            instance: self.instance.clone(),
+            sequence,
+        })
+    }
+
+    /// Append an agent-emitted event (e.g. a lease expiring on its own —
+    /// HORO-796 subtask 2), sharing this sink's sequence space with
+    /// [`Self::append`] exactly as [`AgentEventRecord`]'s own docs
+    /// require. Mirrors `append`'s "probe, maybe rotate, then reserve"
+    /// ordering precisely — see that method's own doc comment for why
+    /// the sequence must never be reserved before rotation is decided.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AuditSinkError`] if serialization or the write itself
+    /// fails.
+    pub fn append_agent_event(
+        &self,
+        event: RecordedAgentEvent,
+    ) -> Result<AuditEventId, AuditSinkError> {
+        let recorded_at = self.clock.now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+
+        let probe_sequence = state.next_sequence;
+        let probe = LogEntry::Agent(AgentEventRecord {
+            event_id: AuditEventId {
+                instance: self.instance.clone(),
+                sequence: probe_sequence,
+            },
+            recorded_at,
+            event,
+        });
+
+        let result = self.maybe_rotate(&mut state, &probe).and_then(|()| {
+            let sequence = state.next_sequence;
+            state.next_sequence += 1;
+            let mut record = match probe {
+                LogEntry::Agent(record) => record,
+                LogEntry::Decision(_) => unreachable!("probe is always LogEntry::Agent"),
+            };
+            record.event_id.sequence = sequence;
+            let line = LogEntry::Agent(record);
             let written = Self::write_line(&mut state.writer, &line)?;
             state.bytes_written += written as u64;
             Ok(sequence)
