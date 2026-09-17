@@ -89,7 +89,7 @@ Criteria and, where applicable, `NORTH_STAR.md`), not a restatement of
 
 | Feature | Jira Feature ticket | Subtask tickets | PR(s) | Feature Verification Record | QA status |
 |---|---|---|---|---|---|
-| F-M2-001 — Trusted Compute Session | HORO-791 | (implemented directly under the Feature ticket, no subtask decomposition) | #51 | [`F-M2-001.md`](feature-verification/F-M2-001.md) | PASS (decision-layer scope) |
+| F-M2-001 — Trusted Compute Session | HORO-791 | (implemented directly under the Feature ticket, no subtask decomposition) | #51 | [`F-M2-001.md`](feature-verification/F-M2-001.md) | PASS (decision-layer/library scope) / **BLOCKED for real multi-invocation CLI usage** — see record |
 | F-M2-002 — Remembered Authorization Intent | HORO-792 | (implemented directly under the Feature ticket, no subtask decomposition) | #52 | [`F-M2-002.md`](feature-verification/F-M2-002.md) | PASS (decision-layer scope; AC4 partially met) |
 | F-M2-003 — Bounded Compute Delegation | HORO-793 | (implemented directly under the Feature ticket, no subtask decomposition) | #53 | [`F-M2-003.md`](feature-verification/F-M2-003.md) | PASS (decision-layer scope; admission-side only) |
 | F-M2-004 — Risk-Based Step-Up | HORO-794 | (implemented directly under the Feature ticket, no subtask decomposition) | #54 | [`F-M2-004.md`](feature-verification/F-M2-004.md) | PASS (decision-layer scope; classification layer, not a fourth gate) |
