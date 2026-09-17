@@ -16,6 +16,13 @@ workspace = true
 [dependencies]
 eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
 eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
+# `eltanin explain`/`eltanin audit` (F-M2-006, HORO-796 subtask 4) read the
+# audit log directly through this crate's `explain` module — the same
+# reader `crates/eltanin-audit/src/bin/eltanin-explain.rs` already uses.
+# `eltanin-cli` only ever *reads* the log through this dependency; see
+# `eltanin_audit::explain`'s own module docs on why a reader crate must
+# never feed back into authorization.
+eltanin-audit = { path = "../eltanin-audit", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

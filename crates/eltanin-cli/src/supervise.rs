@@ -86,33 +86,70 @@ struct Renewal {
     renew_at: Instant,
 }
 
+/// What `eltanin run`'s initial `RequestLease` actually got back
+/// (F-M2-006, HORO-796 subtask 4) — the input to [`supervise`] that
+/// decides whether this run holds real, enforced authority or is merely
+/// being observed.
+pub enum Authorization {
+    /// `AgentResponse::LeaseGranted` — a real lease is held and must be
+    /// renewed/released exactly as before this type existed.
+    Leased {
+        lease_id: LeaseId,
+        remaining: Duration,
+        grant_observed_at: Instant,
+    },
+    /// `AgentResponse::ShadowObserved` — the agent is running
+    /// [`eltanin_protocol::response::EnforcementMode::Shadow`]. Nothing
+    /// was granted or enforced: there is no lease to renew, no deadline
+    /// to lapse against, and nothing to release. `eltanin run` still
+    /// spawns and supervises the workload (shadow mode never blocks —
+    /// see `eltanin_agent::authz`'s module docs), but purely to observe
+    /// it; `crate::launch::announce_shadow_mode` is responsible for
+    /// telling the human this run is unenforced before ever reaching
+    /// here. `verdict` is carried here (rather than discarded) purely so
+    /// that announcement can quote it — [`supervise`] itself never reads
+    /// it, since every verdict behaves identically once supervision
+    /// starts (shadow mode never blocks, regardless of verdict).
+    Shadow {
+        verdict: eltanin_protocol::response::ShadowVerdict,
+    },
+}
+
 /// Supervise `child` through to exit, maintaining the lease it was
-/// granted under.
+/// granted under (if any — see [`Authorization::Shadow`]).
 ///
 /// `request` is the same `(resource, action)` the initial grant used —
 /// a renewal is a fresh `RequestLease` over it, not an "extend"
 /// operation (MVP 1.0 has no such operation; see
-/// `docs/adr/0003-scoped-expiring-compute-lease.md`).
+/// `docs/adr/0003-scoped-expiring-compute-lease.md`). Unused (`_`) in
+/// shadow mode, since shadow mode never renews.
 #[must_use]
 pub fn supervise(
     client: &AgentClient,
     request: &LeaseRequest,
-    initial_lease_id: LeaseId,
-    initial_remaining: Duration,
-    grant_observed_at: Instant,
+    authorization: Authorization,
     mut child: Child,
     signals: &Receiver<i32>,
 ) -> RunOutcome {
-    let mut renewal = Renewal {
-        lease_id: initial_lease_id,
-        deadline: safe_deadline(grant_observed_at, initial_remaining),
-        renew_at: safe_deadline(grant_observed_at, initial_remaining / 2),
+    let mut renewal = match authorization {
+        Authorization::Leased {
+            lease_id,
+            remaining,
+            grant_observed_at,
+        } => Some(Renewal {
+            lease_id,
+            deadline: safe_deadline(grant_observed_at, remaining),
+            renew_at: safe_deadline(grant_observed_at, remaining / 2),
+        }),
+        Authorization::Shadow { .. } => None,
     };
     let child_pid = child.id();
 
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
-            release(client, &renewal.lease_id);
+            if let Some(renewal) = &renewal {
+                release(client, &renewal.lease_id);
+            }
             return RunOutcome::WorkloadExited(status);
         }
 
@@ -120,14 +157,16 @@ pub fn supervise(
             forward_to_child(child_pid, signal);
         }
 
-        let now = Instant::now();
-        if now >= renewal.deadline {
-            let suppressed = terminate_for_lapsed_authorization(&mut child);
-            release(client, &renewal.lease_id);
-            return RunOutcome::AuthorizationLapsed { suppressed };
-        }
-        if now >= renewal.renew_at {
-            renew(client, request, &mut renewal);
+        if let Some(active) = &mut renewal {
+            let now = Instant::now();
+            if now >= active.deadline {
+                let suppressed = terminate_for_lapsed_authorization(&mut child);
+                release(client, &active.lease_id);
+                return RunOutcome::AuthorizationLapsed { suppressed };
+            }
+            if now >= active.renew_at {
+                renew(client, request, active);
+            }
         }
 
         std::thread::sleep(POLL_INTERVAL);

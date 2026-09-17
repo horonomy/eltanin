@@ -24,6 +24,7 @@ fn all_failures() -> Vec<LaunchFailure> {
         LaunchFailure::Denied(DenialReason::IndeterminateEvidence),
         LaunchFailure::GovernedContextFailed("permission denied".to_string()),
         LaunchFailure::AuthorizationLapsed,
+        LaunchFailure::AuditLogUnavailable("permission denied".to_string()),
     ]
 }
 
@@ -85,6 +86,19 @@ fn a_lease_granted_response_classifies_to_no_failure() {
             },
             remaining: std::time::Duration::from_secs(1),
         },
+    };
+    assert_eq!(classify_response(&response), None);
+}
+
+#[test]
+fn a_shadow_observed_response_classifies_to_no_failure() {
+    // F-M2-006, HORO-796 subtask 4: ShadowObserved is a real response to
+    // the RequestLease eltanin run sends — `crate::launch::run` handles
+    // it explicitly (see that module), so classify_response must treat
+    // it exactly like LeaseGranted: not a failure. This replaces the
+    // subtask-3-era placeholder that classified it as an internal error.
+    let response = AgentResponse::ShadowObserved {
+        verdict: eltanin_protocol::response::ShadowVerdict::WouldDeny,
     };
     assert_eq!(classify_response(&response), None);
 }

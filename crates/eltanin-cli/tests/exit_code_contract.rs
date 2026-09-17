@@ -11,6 +11,7 @@ const ALL: &[ExitCode] = &[
     ExitCode::AuthorizationLapsed,
     ExitCode::Denied,
     ExitCode::ProfileUnresolved,
+    ExitCode::AuditUnavailable,
 ];
 
 #[test]
@@ -22,6 +23,7 @@ fn every_exit_code_matches_the_documented_table() {
     assert_eq!(ExitCode::AuthorizationLapsed.code(), 76);
     assert_eq!(ExitCode::Denied.code(), 77);
     assert_eq!(ExitCode::ProfileUnresolved.code(), 78);
+    assert_eq!(ExitCode::AuditUnavailable.code(), 71);
 }
 
 #[test]

@@ -6,9 +6,12 @@ use std::process::ExitCode as ProcessExitCode;
 
 use eltanin_cli::approve::{self, ApproveCliOutcome};
 use eltanin_cli::args::{parse, Invocation};
+use eltanin_cli::audit::{self, AuditCliOutcome};
+use eltanin_cli::explain::{self, ExplainCliOutcome};
 use eltanin_cli::failure::LaunchFailure;
 use eltanin_cli::launch::{self, LaunchOutcome};
 use eltanin_cli::session::{self, SessionCliOutcome};
+use eltanin_cli::status::{self, StatusCliOutcome};
 
 fn main() -> ProcessExitCode {
     let argv = std::env::args_os().skip(1);
@@ -35,6 +38,27 @@ fn main() -> ProcessExitCode {
                 ProcessExitCode::SUCCESS
             }
             ApproveCliOutcome::Failure(failure) => report(&failure),
+        },
+        Invocation::Explain(invocation) => match explain::run(&invocation) {
+            ExplainCliOutcome::Ok(message) => {
+                println!("{message}");
+                ProcessExitCode::SUCCESS
+            }
+            ExplainCliOutcome::Failure(failure) => report(&failure),
+        },
+        Invocation::Audit(invocation) => match audit::run(&invocation) {
+            AuditCliOutcome::Ok(message) => {
+                println!("{message}");
+                ProcessExitCode::SUCCESS
+            }
+            AuditCliOutcome::Failure(failure) => report(&failure),
+        },
+        Invocation::Status(_) => match status::run() {
+            StatusCliOutcome::Ok(message) => {
+                println!("eltanin: {message}");
+                ProcessExitCode::SUCCESS
+            }
+            StatusCliOutcome::Failure(failure) => report(&failure),
         },
     }
 }

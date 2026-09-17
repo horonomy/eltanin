@@ -29,6 +29,9 @@ pub enum LaunchFailure {
     Denied(DenialReason),
     GovernedContextFailed(String),
     AuthorizationLapsed,
+    /// `eltanin explain`/`eltanin audit` (F-M2-006, HORO-796 subtask 4):
+    /// see [`crate::exit::ExitCode::AuditUnavailable`].
+    AuditLogUnavailable(String),
 }
 
 impl LaunchFailure {
@@ -42,6 +45,7 @@ impl LaunchFailure {
             Self::Denied(_) => ExitCode::Denied,
             Self::GovernedContextFailed(_) => ExitCode::GovernedContextFailed,
             Self::AuthorizationLapsed => ExitCode::AuthorizationLapsed,
+            Self::AuditLogUnavailable(_) => ExitCode::AuditUnavailable,
         }
     }
 
@@ -64,6 +68,9 @@ impl LaunchFailure {
             }
             Self::AuthorizationLapsed => {
                 "authorization lapsed mid-run; the workload was terminated".to_string()
+            }
+            Self::AuditLogUnavailable(detail) => {
+                format!("could not read the audit log: {detail}")
             }
         }
     }
@@ -104,6 +111,11 @@ impl LaunchFailure {
             Self::AuthorizationLapsed => {
                 "request a fresh lease and re-run the workload".to_string()
             }
+            Self::AuditLogUnavailable(_) => {
+                "check ELTANIN_AUDIT_LOG (or --log) points at a readable eltanin-agentd audit \
+                 log file"
+                    .to_string()
+            }
         }
     }
 }
@@ -111,16 +123,17 @@ impl LaunchFailure {
 /// Classify a non-grant `AgentResponse` into a [`LaunchFailure`].
 /// `AgentResponse::LeaseGranted` has no failure to classify — call sites
 /// only reach this after already handling the grant path.
-// The `ShadowObserved` arm below is deliberately kept separate from the
-// "genuinely unreachable" group above even though both currently return
-// the same value — see that arm's own comment on why they are not the
-// same case and must not be silently merged just because clippy can't
-// see the difference in a `_` value.
+///
+/// `AgentResponse::ShadowObserved` (F-M2-006, HORO-796 subtask 3/4) is
+/// also not a failure: it is `eltanin run`'s shadow-mode counterpart to
+/// `LeaseGranted` — a real response to the `RequestLease` this crate's
+/// call sites send, just never enforced. `crate::launch::run` matches it
+/// explicitly, before this function is ever consulted, so this function
+/// only needs to say "not a failure" here, exactly like `LeaseGranted`.
 #[must_use]
-#[allow(clippy::match_same_arms)]
 pub fn classify_response(response: &AgentResponse) -> Option<LaunchFailure> {
     match response {
-        AgentResponse::LeaseGranted { .. } => None,
+        AgentResponse::LeaseGranted { .. } | AgentResponse::ShadowObserved { .. } => None,
         AgentResponse::LeaseDenied { reason } => Some(LaunchFailure::Denied(*reason)),
         AgentResponse::Error { code } => Some(LaunchFailure::AgentError(*code)),
         // eltanin run never sends ReleaseLease/AgentStatus/session
@@ -136,17 +149,6 @@ pub fn classify_response(response: &AgentResponse) -> Option<LaunchFailure> {
         | AgentResponse::ApprovalRecorded { .. }
         | AgentResponse::ApprovalList { .. }
         | AgentResponse::ApprovalForgotten { .. } => {
-            Some(LaunchFailure::AgentError(ErrorCode::Internal))
-        }
-        // F-M2-006/HORO-796 subtask 3: `ShadowObserved` *is* a real
-        // response to the `RequestLease` this crate's call sites send —
-        // unlike the group above, it is not wire-unreachable here. This
-        // crate does not yet interpret it (real `eltanin run` shadow-mode
-        // support is HORO-796 subtask 4's job); classifying it as an
-        // internal agent error for now is a deliberate placeholder, kept
-        // in its own arm so it is never silently merged into the
-        // "genuinely unreachable" group above.
-        AgentResponse::ShadowObserved { .. } => {
             Some(LaunchFailure::AgentError(ErrorCode::Internal))
         }
     }

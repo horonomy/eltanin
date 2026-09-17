@@ -32,6 +32,13 @@ pub enum ExitCode {
     Denied,
     /// `--profile` could not be resolved to a `(resource, action)` pair.
     ProfileUnresolved,
+    /// `eltanin explain`/`eltanin audit` (F-M2-006, HORO-796 subtask 4):
+    /// the audit log path could not be resolved (neither `--log` nor
+    /// `ELTANIN_AUDIT_LOG` given) or could not be read (permission
+    /// denied, malformed path). Distinct from "no log recorded yet",
+    /// which is a clean, successful, informational message — see
+    /// `crate::explain::read_scan`.
+    AuditUnavailable,
 }
 
 impl ExitCode {
@@ -57,6 +64,7 @@ impl ExitCode {
             Self::AuthorizationLapsed => 76,
             Self::Denied => 77,
             Self::ProfileUnresolved => 78,
+            Self::AuditUnavailable => 71,
         }
     }
 }
