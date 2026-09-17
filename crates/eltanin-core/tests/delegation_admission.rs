@@ -794,3 +794,62 @@ fn delegation_bounds_new_rejects_zero_min_remaining() {
     .unwrap_err();
     assert_eq!(error, DelegationBoundsError::NonPositiveMinRemaining);
 }
+
+/// S4 (HORO-797 adversarial matrix) — `PINS_LIMITATION`: a uid transition
+/// occurring strictly *inside* the requester→holder ancestry span is
+/// structurally invisible to `delegated_admission`. `ProcessAncestor`
+/// (`crates/eltanin-core/src/identity.rs`) carries only `pid`, `start`,
+/// and `executable_path` — there is no `uid` field to compare at all.
+///
+/// ADR 0011 disclosure 3: "The requester→holder ancestry span is
+/// expected same-uid but NOT verified — `ProcessAncestor` carries no
+/// `uid` field... A uid transition inside the span (between the
+/// requester and the grant holder) is invisible to `delegated_admission`'s
+/// check 4 (trust-transition scan)."
+///
+/// This test pins that even a span ancestor representing a
+/// privilege-escalation tool (e.g. `sudo`) — which in a real attack
+/// could mean the requester's ancestry crossed a uid boundary on its way
+/// up to the holder — has no way to affect this admission on uid
+/// grounds: only the requester's own uid (checked at step 3) and the
+/// holder's own uid (fixed at mint time) are ever compared. Admission
+/// proceeds to `Admitted` exactly as if every hop in the span had
+/// stayed at the same uid, because the type carrying ancestry evidence
+/// cannot represent a uid in the first place.
+#[test]
+fn uid_transition_inside_ancestry_span_is_invisible_to_admission() {
+    let holder = workload(100, present_start(10), 1000);
+    let lease = issue_lease(&holder, Duration::from_secs(60));
+    let bounds = default_bounds();
+    let grant = mint_grant(&lease, &bounds, &holder, 1000, 0);
+
+    // The intermediate hop at pid 50 conceptually represents a process
+    // that ran under a different (elevated) uid between the requester
+    // and the holder — but `ProcessAncestor` has no `uid` field to
+    // encode that fact, so nothing here can ever surface it.
+    let requester = context_with_ancestry(
+        1000,
+        vec![
+            ancestor(50, present_start(5), kernel_path("/usr/bin/sudo")),
+            ancestor(100, present_start(10), kernel_path("/usr/bin/eltanin-run")),
+        ],
+    );
+    let verdict = delegated_admission(
+        &grant,
+        &bounds,
+        &requester,
+        &absent_session_key(),
+        &holder,
+        &ComputeRequest {
+            resource: resource(),
+            action: Action::Compute,
+        },
+        MonotonicTime::from_nanos(1),
+    );
+    assert!(
+        matches!(verdict, DelegationVerdict::Admitted { .. }),
+        "a uid transition inside the ancestry span must have no observable effect on \
+         admission — ProcessAncestor has no uid field to compare (ADR 0011 disclosure 3), \
+         got {verdict:?}"
+    );
+}
