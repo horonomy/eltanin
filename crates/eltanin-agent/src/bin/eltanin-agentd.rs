@@ -28,6 +28,7 @@ use eltanin_backend::fake::FakeBackend;
 use eltanin_core::resource::{
     AcceleratorMemory, Capability, ProtectedResource, ResourceCapabilities,
 };
+use eltanin_protocol::response::EnforcementMode;
 
 /// Required environment variables have no default: each names a
 /// security-relevant choice (socket mode, lease ttl) or a value this
@@ -53,8 +54,29 @@ fn run() -> Result<(), String> {
     let ttl_secs: u64 = ttl_str
         .parse()
         .map_err(|e| format!("ELTANIN_AGENT_LEASE_TTL_SECS {ttl_str:?} is not a valid u64: {e}"))?;
+    // ELTANIN_AGENT_MODE is optional — its absence is not a startup
+    // error, unlike the required vars above, since `Enforce` is a safe,
+    // fully-backward-compatible default (F-M2-006, HORO-796 subtask 3).
+    // Case-sensitive, mirroring this binary's other enum-shaped env vars
+    // (there are none yet to actually mirror the casing convention of,
+    // so lowercase is chosen to match the wire's own `snake_case`
+    // rendering of `EnforcementMode`).
+    let enforcement_mode = match env::var("ELTANIN_AGENT_MODE") {
+        Ok(value) => match value.as_str() {
+            "enforce" => EnforcementMode::Enforce,
+            "shadow" => EnforcementMode::Shadow,
+            other => {
+                return Err(format!(
+                    "ELTANIN_AGENT_MODE {other:?} is not valid — expected \"enforce\" or \"shadow\""
+                ))
+            }
+        },
+        Err(_) => EnforcementMode::Enforce,
+    };
+
     let authz_config = AuthorizationConfig::new(Duration::from_secs(ttl_secs))
-        .map_err(|e| format!("invalid lease ttl: {e}"))?;
+        .map_err(|e| format!("invalid lease ttl: {e}"))?
+        .with_enforcement_mode(enforcement_mode);
 
     // Fails closed by design (runtime.rs's own docs) rather than
     // degrading to a weaker instance id when this process's own start
