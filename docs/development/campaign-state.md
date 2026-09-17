@@ -454,3 +454,65 @@ the founder providing bare-metal Linux/NVIDIA hardware access (see
 raise that provisioning decision to the founder directly (pointing at
 `docs/development/hardware-validation-runbook.md`) rather than looking
 for further hardware-free Apple Silicon work — there is none left.
+
+## MVP 2.0 stream (HORO-773) — all six Features merged, HORO-797 in progress
+
+Per founder directive, HORO-790/E3 being unresolved does not freeze
+independent product development: MVP 2.0 proceeds on `next/mvp-2.0`
+(created off `main` @ `8f9fd68`) while MVP 1.0's E3 lane above stays
+paused-but-ready. `next/mvp-2.0` only merges to `main` at the MVP 2.0
+promotion boundary (HORO-797), never per-ticket; each ticket cuts its
+own worktree/branch from the latest `next/mvp-2.0`, targets a PR back at
+`next/mvp-2.0` (merge commit), worktree/branch deleted after merge —
+same convention `main` uses.
+
+**All six Features are merged as of this writing**: F-M2-001 Trusted
+Compute Session (HORO-791, ADR 0009, PR #51); F-M2-002 Remembered
+Authorization Intent (HORO-792, ADR 0010, PR #52); F-M2-003 Bounded
+Compute Delegation (HORO-793, ADR 0011, PR #53); F-M2-004 Risk-Based
+Step-Up (HORO-794, ADR 0012, PR #54); F-M2-005 Compute Lease Lifecycle
+Hardening (HORO-795, ADR 0013, PR #55); F-M2-006 Audit Durability +
+Shadow Enforcement Mode (HORO-796, ADR 0014, 5 subtasks, PRs #56/#57/
+#60/#61/#62). Dependency chain (Jira `Blocks` links):
+`791→792→793→{794,795}→796→797`. `DOMAIN_SCHEMA_VERSION` progressed
+1→2→3→4→5→6 across this chain (one bump per Feature except F-M2-005,
+which made none); every bump invalidates every pre-existing durable
+`Approval`, by design (ADR 0010's `recall()` schema-version check).
+
+**Every MVP 2.0 Feature is a pre-policy admission gate, additive and
+default-off** — `PolicySet::evaluate` is unmodified by any of the six
+ADRs. Session, approval, delegation, and revocation-requirement config
+are library-reachable (constructible via `AuthorizationConfig`, and
+exercised by every integration test the MVP 2.0 test plan cites) but
+**not yet operator-configurable via `eltanin-agentd`** — that binary's
+only MVP 2.0-era environment variable is `ELTANIN_AGENT_MODE`
+(enforce/shadow, F-M2-006). Closing that gap (an "agentd config
+exposure" ticket) has not merged into `next/mvp-2.0` as of this writing.
+
+**HORO-797 (MVP 2.0 READY release-readiness gate) is in progress.** Its
+12-scenario adversarial matrix has landed (PR #63,
+`mvp-2.0/HORO-797/adversarial_matrix_tests`, merge commit `f459066`):
+S3–S8/S12 newly covered, S1/S2/S9/S10 already covered by pre-existing
+tests, S11 (inherited/already-open device handle behavior) BLOCKED_ON_E3
+— see [`docs/qa/test-plans/mvp-2.0.md`](../qa/test-plans/mvp-2.0.md) for
+the full indexed matrix. Remaining HORO-797 work: the versioned MVP 2.0
+test plan and F-M2-001..006 Feature Verification Records (this PR), the
+Developer Dogfood Scenario (prompt/false-block/latency metrics, not yet
+run), and the MVP 2.0 Release Quality Report.
+
+**Known gap**: `origin/main` carries two commits (PR #58 CodeQL setup,
+PR #59 CI `GITHUB_TOKEN` permission hardening, both HORO-1270) that
+landed on `main` after `next/mvp-2.0` branched and have not been
+forward-merged — `next/mvp-2.0`'s CI does not yet run CodeQL and has not
+yet had its default token scope restricted. A forward-merge from `main`
+closes this; it is not new implementation work.
+
+A fresh session resuming MVP 2.0 work should: (1) check Jira/`git
+worktree list` for HORO-797's current subtask before starting, (2) not
+re-litigate F-M2-001..006 — they are Done and QA-verified (see the
+Feature Verification Records under `docs/qa/feature-verification/`),
+(3) treat the agentd operator-configuration gap and the `main` forward-
+merge gap above as real, named, closeable-now gaps rather than
+oversights, and (4) continue to keep this MVP 2.0 stream and the E3
+Linux/NVIDIA hardware blocker above as two independent threads — neither
+substitutes for the other.

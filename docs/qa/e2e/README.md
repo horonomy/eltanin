@@ -54,10 +54,21 @@ documentation can't silently drift apart.
 | F-M1-009 — Local Audit & Explain Evidence | `E2E-F-M1-008-controlled-launch-v1` — `deny_journey_is_explainable_via_the_audit_log` writes a real audit record and reads it back with the real `eltanin-explain` binary. Also `B-M1-APPLE-v1` on Apple Silicon (both ALLOW and DENY legs). |
 | F-M1-010 — Apple Silicon Real-Accelerator Functional Validation | `B-M1-APPLE-v1` — this scenario's own subject; the full discover → capability-inspect → ALLOW+lease → real Metal compute → DENY-non-start → audit-correlate → repeat-for-determinism journey is exercised directly on physical Apple Silicon. |
 
-`qa_governance_sync.rs` mechanically checks that every `F-M1-00N` in
-[`docs/qa/README.md`](../README.md)'s Feature inventory appears
-somewhere in this table with a scenario ID, `N/A`, or `BLOCKED` — never
-a silently missing row.
+| F-M2-001 — Trusted Compute Session | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. The session-establishment/multi-lease journey is currently proven only at Track A (`crates/eltanin-agent/tests/authz_session.rs`). |
+| F-M2-002 — Remembered Authorization Intent | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
+| F-M2-003 — Bounded Compute Delegation | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
+| F-M2-004 — Risk-Based Step-Up | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
+| F-M2-005 — Compute Lease Lifecycle Hardening | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
+| F-M2-006 — Audit Durability + Shadow Enforcement Mode | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. `eltanin explain`/`eltanin audit`/`eltanin status` and the shadow-mode `eltanin run` leg are currently proven only at Track A (`crates/eltanin-cli/tests/{shadow_run_lifecycle,status_binary,explain_audit_binary}.rs`). |
+
+`qa_governance_sync.rs` mechanically checks that every `F-M1-00N`/
+`F-M2-00N` in [`docs/qa/README.md`](../README.md)'s Feature inventory
+appears somewhere in this table with a scenario ID, `N/A`, or `BLOCKED`
+— never a silently missing row. HORO-797's own Track B scenario (a
+required part of its own release-readiness gate) is a separate,
+concurrent HORO-797 subtask not yet merged as of this table's writing —
+these `N/A` rows are an honest current-state statement, not a permanent
+design decision that MVP 2.0 Features have no Track B story.
 
 ## North Star assertion honesty
 

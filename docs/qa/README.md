@@ -85,6 +85,17 @@ Criteria and, where applicable, `NORTH_STAR.md`), not a restatement of
 | F-M1-009 — Local Audit & Explain Evidence | HORO-824 | (implemented directly under the Feature ticket, no subtask decomposition) | #20 | [`F-M1-009.md`](feature-verification/F-M1-009.md) | PASS |
 | F-M1-010 — Apple Silicon Real-Accelerator Functional Validation | HORO-1010 | HORO-1011, HORO-1012, HORO-1013, HORO-1014, HORO-1015 | #39, #41, #42, #43, #45 | [`F-M1-010.md`](feature-verification/F-M1-010.md) | PASS (E2 functional-evidence scope — see "Known limitations": device-level enforcement/revoke stay Unsupported; this does not replace F-M1-007's E3 gate) |
 
+## Feature inventory — MVP 2.0
+
+| Feature | Jira Feature ticket | Subtask tickets | PR(s) | Feature Verification Record | QA status |
+|---|---|---|---|---|---|
+| F-M2-001 — Trusted Compute Session | HORO-791 | (implemented directly under the Feature ticket, no subtask decomposition) | #51 | [`F-M2-001.md`](feature-verification/F-M2-001.md) | PASS (decision-layer scope) |
+| F-M2-002 — Remembered Authorization Intent | HORO-792 | (implemented directly under the Feature ticket, no subtask decomposition) | #52 | [`F-M2-002.md`](feature-verification/F-M2-002.md) | PASS (decision-layer scope; AC4 partially met) |
+| F-M2-003 — Bounded Compute Delegation | HORO-793 | (implemented directly under the Feature ticket, no subtask decomposition) | #53 | [`F-M2-003.md`](feature-verification/F-M2-003.md) | PASS (decision-layer scope; admission-side only) |
+| F-M2-004 — Risk-Based Step-Up | HORO-794 | (implemented directly under the Feature ticket, no subtask decomposition) | #54 | [`F-M2-004.md`](feature-verification/F-M2-004.md) | PASS (decision-layer scope; classification layer, not a fourth gate) |
+| F-M2-005 — Compute Lease Lifecycle Hardening | HORO-795 | (implemented directly under the Feature ticket, no subtask decomposition) | #55 | [`F-M2-005.md`](feature-verification/F-M2-005.md) | PASS (decision-layer scope; two fail-open bugs found and fixed) |
+| F-M2-006 — Audit Durability + Shadow Enforcement Mode | HORO-796 | (5 internally-tracked subtasks, no separate Jira subtask tickets — `HORO-796` itself has `subtasks: []`) | #56, #57, #60, #61, #62 | [`F-M2-006.md`](feature-verification/F-M2-006.md) | PASS (decision-layer scope; shadow mode is explicitly not a security control) |
+
 This table is a cross-reference into
 [`docs/development/campaign-state.md`](../development/campaign-state.md)'s
 "Completed" and "Feature QA states" sections, which remain the
