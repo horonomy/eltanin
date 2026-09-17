@@ -447,6 +447,68 @@ fn descendant_admitted_silently_and_audit_records_granted_by_delegation() {
     }
 }
 
+/// S6 (HORO-797 adversarial matrix) — `PINS_LIMITATION`: a within-bounds
+/// (correct resource, correct action, within `max_depth`) direct
+/// (depth-1) descendant with an unexpected/different executable than
+/// whatever spawned the parent is STILL admitted — even when that exact
+/// executable path is separately configured as an untrusted
+/// `transition_marker`.
+///
+/// ADR 0011 disclosure 5: "Trust-transition detection is path-only —
+/// `ProcessAncestor` has no digest field, so an interpreter's actual
+/// script identity stays invisible to `DelegationBounds::transition_markers`."
+/// Combined with `delegated_admission`'s own documented check-4 scope
+/// (`ancestry[0..holder_index]`, strictly between requester and holder,
+/// exclusive of the holder): for a depth-1 descendant the holder is at
+/// index 0, so that span is empty. No transition marker — however
+/// configured — can ever match the descendant's own identity, only an
+/// intermediate hop further up the chain. A malicious or unexpected
+/// direct child of an already-trusted tool is therefore admitted
+/// identically to a benign one.
+#[test]
+fn s6_a_depth_one_descendant_with_an_unexpected_executable_is_still_admitted() {
+    let uid = real_self_uid();
+    let parent = self_peer_context();
+    let backend = backend_with_resource(&[Capability::DeviceEnforce]);
+    let sink = Arc::new(CapturingSink::default());
+    // Configure the descendant's own executable path as an untrusted
+    // transition marker — if trust-transition detection inspected the
+    // descendant's own identity, this configuration would refuse it.
+    let bounds = DelegationBounds::new(
+        4,
+        Duration::from_secs(300),
+        Duration::from_secs(1),
+        [Action::Compute],
+        std::collections::BTreeSet::from(["/usr/bin/eltanin-test-descendant".to_string()]),
+        false,
+        false,
+    )
+    .unwrap();
+    let handler = handler_with_delegation(
+        allow_policy_for_uid(uid),
+        backend,
+        temp_approval_store_path("delegation-unexpected-child"),
+        bounds,
+        sink.clone(),
+    );
+
+    establish_parent_grant(&handler, &parent);
+
+    // An unexpected/different executable identity than whatever spawned
+    // the parent — distinct digest from the ordinary trusted-child case
+    // above.
+    let descendant = descendant_of(&parent, uid, "sha256:UNEXPECTED-different-binary", 99);
+    let response = handler.handle(&lease_request(), &descendant);
+
+    assert!(
+        matches!(response, AgentResponse::LeaseGranted { .. }),
+        "a within-bounds but unexpected/different direct child must still be admitted — \
+         ADR 0011 disclosure 5: trust-transition detection is path-only and only scans \
+         ancestry strictly between requester and holder, never the descendant's own \
+         identity, got {response:?}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // AC: a child cannot expand resource/action/duration beyond delegator
 // allowance (deny-overrides / policy-still-applies variants).
