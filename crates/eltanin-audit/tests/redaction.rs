@@ -11,8 +11,8 @@
 //! newline does not break one-record-per-line framing.
 
 use eltanin_audit::record::{
-    AuditEventId, AuditRecord, RecordedOperation, RecordedOutcome, RecordedPeer,
-    RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
+    AuditEventId, AuditRecord, RecordedEnforcementMode, RecordedOperation, RecordedOutcome,
+    RecordedPeer, RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
 };
 use eltanin_core::envelope::Versioned;
 use eltanin_core::identity::{Evidence, EvidenceSource, ExecutionContext, WorkloadIdentity};
@@ -52,6 +52,8 @@ fn base_record(observed: ExecutionContext) -> AuditRecord {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::IndeterminateEvidence,
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     }
 }
 

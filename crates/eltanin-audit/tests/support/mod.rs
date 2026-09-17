@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 use eltanin_audit::record::{
-    AuditClock, RecordedPeer, RecordedPeerConsistency, RecordedPeerCredential, WallClockTime,
+    AuditClock, RecordedOperation, RecordedOutcome, RecordedPeer, RecordedPeerConsistency,
+    RecordedPeerCredential, RecordedRequest, WallClockTime,
 };
+use eltanin_audit::sink::AuditEntry;
 use eltanin_core::identity::{Evidence, ExecutionContext, WorkloadIdentity};
 
 fn private_base_dir() -> PathBuf {
@@ -74,4 +76,22 @@ impl AuditClock for FixedClock {
 
 pub fn fixed_clock() -> Arc<dyn AuditClock> {
     Arc::new(FixedClock(Mutex::new(0)))
+}
+
+/// A minimal, always-succeeds `AgentStatus` entry — used across several
+/// test files (`sink_append.rs`, `retention.rs`) purely to fill the log
+/// with a predictable, fixed-size line for rotation testing. Always uses
+/// `peer(4242)`.
+pub fn status_entry() -> AuditEntry {
+    AuditEntry {
+        operation: RecordedOperation::AgentStatus,
+        requested: RecordedRequest::AgentStatus,
+        peer: peer(4242),
+        outcome: RecordedOutcome::StatusReported,
+        response: eltanin_protocol::response::AgentResponse::Status {
+            status: eltanin_protocol::response::AgentStatusView {
+                protocol_version: 1,
+            },
+        },
+    }
 }

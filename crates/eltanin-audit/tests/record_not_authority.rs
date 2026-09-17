@@ -13,7 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use eltanin_audit::record::{
-    AuditEventId, AuditRecord, RecordedOperation, RecordedOutcome, RecordedPeer,
+    AgentEventRecord, AuditEventId, AuditRecord, LogEntry, RecordedAgentEvent,
+    RecordedEnforcementMode, RecordedOperation, RecordedOutcome, RecordedPeer,
     RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
 };
 use eltanin_core::envelope::Versioned;
@@ -35,6 +36,10 @@ const FORBIDDEN_DIRECT_EMBED: &[&str] = &[
     ": DelegationGrant",
 ];
 
+/// Scans every file under `src/`, so `AgentEventRecord`/`RecordedAgentEvent`
+/// (F-M2-006/HORO-796 subtask 1) are already covered by this same test
+/// without any change to `FORBIDDEN_DIRECT_EMBED` — the scan doesn't care
+/// which type in `src/` embeds a forbidden term, only whether one does.
 #[test]
 fn record_schema_never_directly_embeds_an_authority_bearing_type() {
     let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -122,6 +127,8 @@ fn a_hand_edited_log_line_deserializes_to_a_record_and_nothing_else() {
         response: AgentResponse::LeaseDenied {
             reason: DenialReason::IndeterminateEvidence,
         },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
     };
     let json = serde_json::to_string(&Versioned::current(forged)).unwrap();
     let decoded: Versioned<AuditRecord> = serde_json::from_str(&json).unwrap();
@@ -129,6 +136,33 @@ fn a_hand_edited_log_line_deserializes_to_a_record_and_nothing_else() {
     // the fact that this is the only type annotation that compiles here.
     let record: AuditRecord = decoded.payload;
     drop(record);
+}
+
+/// Same argument as the test above, for the `LogEntry`/`AgentEventRecord`
+/// types added by F-M2-006/HORO-796 subtask 1: a forged
+/// `AuditLogRotated` line decodes only to plain data (a `u64` and an
+/// `Option<u64>`), never to anything that could reconstruct a lease,
+/// policy decision, or other authority-bearing value.
+#[test]
+fn a_hand_edited_agent_event_log_line_deserializes_to_plain_data_and_nothing_else() {
+    let forged = LogEntry::Agent(AgentEventRecord {
+        event_id: AuditEventId {
+            instance: IssuerInstanceId::new("attacker-supplied-instance"),
+            sequence: 100,
+        },
+        recorded_at: WallClockTime {
+            unix_secs: 0,
+            nanos: 0,
+        },
+        event: RecordedAgentEvent::AuditLogRotated {
+            rotated_at_sequence: 100,
+            discarded_through_sequence: Some(50),
+        },
+    });
+    let json = serde_json::to_string(&Versioned::current(forged)).unwrap();
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    let entry: LogEntry = decoded.payload;
+    drop(entry);
 }
 
 #[test]

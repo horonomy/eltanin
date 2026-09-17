@@ -51,7 +51,20 @@ use serde::{Deserialize, Serialize};
 /// embeds the old `schema_version` in its recorded `PolicyProvenance`,
 /// so this bump alone makes every one of them fail `recall`'s
 /// security-posture dimension and require re-approval.
-pub const DOMAIN_SCHEMA_VERSION: u16 = 5;
+/// Bumped to `6` for HORO-796/F-M2-006 subtask 1 (this bump covers the
+/// *whole* HORO-796 ticket's cumulative wire-shape changes across all 5
+/// subtasks, not just this one — see that ticket's own plan for why): by
+/// the same criterion, `eltanin-audit`'s on-disk log line gains a new
+/// outer tag (`LogEntry`, internally tagged on `"record"`, no
+/// `#[serde(other)]` catch-all) distinguishing a decision record from an
+/// agent-emitted event, `AuditRecord` gains two new top-level fields
+/// (`mode`, `session`), and `RecordedOutcome` gains one new variant
+/// (`WouldGrant`, reserved for a later subtask's shadow-enforcement
+/// mode). Same side effect as every prior bump: every pre-existing
+/// durable `Approval` embeds the old `schema_version` in its recorded
+/// `PolicyProvenance`, so this bump alone makes every one of them fail
+/// `recall`'s security-posture dimension and require re-approval.
+pub const DOMAIN_SCHEMA_VERSION: u16 = 6;
 
 /// Wraps a domain payload with an explicit schema version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
