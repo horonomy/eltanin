@@ -545,10 +545,18 @@ and mechanically unable to leak a vendor/platform concern; enforced by
 `crates/eltanin-audit/tests/architecture_no_vendor_leak.rs`.
 
 **Schema (`eltanin_audit::record`)**: `AuditRecord{event_id, recorded_at,
-operation, requested, peer, outcome, response}`, wrapped in
-`Versioned<T>` (the same envelope from F-M1-001) for forward-compatible
-reads. `AuditEventId{instance: IssuerInstanceId, sequence: u64}` is minted
-only by the sink — never caller-forgeable. Every authority-bearing
+operation, requested, peer, outcome, response, mode, session}`, wrapped
+in `Versioned<T>` (the same envelope from F-M1-001) for
+forward-compatible reads. `mode: RecordedEnforcementMode` and
+`session: Option<SessionId>` were added by F-M2-006/HORO-796 subtask 1
+— see "Audit durability, rotation, and shadow enforcement mode" below.
+`LogEntry` (also new in that subtask) internally tags each line as
+either `Decision(AuditRecord)` or `Agent(AgentEventRecord)`, the latter
+for an agent-emitted event that is not itself a request/response
+decision (a lease expiring on its own, or the log rotating).
+`AuditEventId{instance: IssuerInstanceId, sequence: u64}` is minted
+only by the sink — never caller-forgeable, and shared across both
+`LogEntry` arms so a gap in one is a gap in the other. Every authority-bearing
 `eltanin-core`/`eltanin-agent` type consumed here
 (`PolicyDecision`/`DecisionReason`, `ComputeLease`-derived outcomes,
 `AuthorizationOutcome`, `PeerConsistency`) is `Serialize`-only or has no
@@ -563,7 +571,17 @@ or `PolicyDecision` from a `Recorded*` value.
 opened at file mode `0600` (Unix). `append()` reserves the next sequence
 number unconditionally *before* attempting the write, so a failed write
 still advances the sequence space — the structural basis for gap
-detection below — and is never reused. Best-effort durability is an
+detection below — and is never reused. A path-backed sink rotates to a
+new generation once the active file would exceed `with_max_bytes`'s
+threshold (64 MiB default, F-M2-006/HORO-796 subtask 1): the current
+file is renamed to `<path>.1` — overwriting and discarding whatever
+`.1` held before, the one retained prior generation, bounding total
+on-disk storage at ~128 MiB with zero configuration (AC6) — a fresh
+file is opened at `<path>`, and a
+`RecordedAgentEvent::AuditLogRotated{rotated_at_sequence,
+discarded_through_sequence}` marker is written as the new generation's
+first entry. A `from_writer` sink has no path to rotate to and never
+rotates. Best-effort durability is an
 explicit founder decision (D-A): a write failure is reported to the
 caller and counted (`failed_writes()`), never fed back into the
 already-computed `AgentResponse`; see
@@ -594,7 +612,13 @@ generic malformation). `LogScan::gaps` finds, per issuer instance, every
 sequence number strictly between the lowest and highest observed that
 never appeared as a record — the honest signal that a write may have
 failed there. `Selector::{Event, Lease, Pid}` + `select()` resolve to
-`Found`/`NotFound`/`PossiblyLost`; a `Lease` selector is how a grant
+`SelectionResult::{Found, NotFound, PossiblyLost, RetentionDiscarded}` —
+the last, added by F-M2-006/HORO-796 subtask 1, is distinct from both
+`NotFound` (never observed at all) and `PossiblyLost` (a sequence gap
+suggests a failed write): it means the record was legitimately written
+but has since rotated out of the sink's bounded retention window, and
+is reported as such rather than conflated with either other case. A
+`Lease` selector is how a grant
 record and its later release record correlate (both name the same
 `LeaseId`, one as the outcome, one as the request — see
 `AuditRecord::lease_id()`). The reader never runs inside `eltanin-agent`
@@ -1135,6 +1159,102 @@ policy-revision tracking; renewal stays audit-invisible as a distinct
 event, reconstructible only by correlation; lease expiry itself still
 emits no dedicated audit event, named as an explicit HORO-796 forward
 obligation.
+
+## Audit durability, rotation, and shadow enforcement mode (F-M2-006, HORO-796) — `eltanin-audit`, `eltanin-agent::authz`, `eltanin-protocol`, `eltanin-cli`
+
+MVP 2.0's sixth Feature. Closes both forward obligations HORO-795/ADR
+0013 named (lease-expiry audit silence, unbounded audit-log growth) and
+adds a dry-run/observability enforcement posture. `PolicySet::evaluate`
+and `LeaseIssuer::issue`/`revoke` are unchanged. See
+[ADR 0014](../adr/0014-lease-lifecycle-audit-durability-and-shadow-mode.md)
+for the full design record, rejected alternatives, and honest
+disclosures.
+
+**`DOMAIN_SCHEMA_VERSION` bumps from 5 to 6** — one bump (made in
+subtask 1) covering every wire-shape change across this ticket's five
+subtasks: `LogEntry` tagging, `AuditRecord.{mode, session}`,
+`RecordedOutcome::WouldGrant`, `RecordedAgentEvent`,
+`AgentResponse::ShadowObserved`, `AgentStatusView.enforcement_mode`.
+Confirmed still exactly `6` in `crates/eltanin-core/src/envelope.rs` as
+of this documentation subtask — no later subtask bumped it again.
+
+**`AuditRecord` gains `mode: RecordedEnforcementMode` and `session:
+Option<SessionId>`** — see "Local audit & explain evidence" above for
+the updated schema and rotation details. `RecordedEnforcementMode
+{Enforce, Shadow}` mirrors `eltanin_protocol::response::EnforcementMode`
+one crate boundary over, the same dependency-direction reasoning every
+other `Recorded*` mirror in this crate already follows.
+
+**`RecordedAgentEvent::{LeaseExpired, AuditLogRotated}`** — carried by
+the new `AgentEventRecord{event_id, recorded_at, event}`, the `Agent`
+arm of `LogEntry`. `LeaseExpired{lease_id, resource, expired_at,
+backend}` is emitted once per lease by
+`AuthorizationHandler::sweep_expired_leases` (existing HORO-795
+plumbing, unchanged), `backend` carrying the real
+`Option<EnforcementResult>` from that lease's own backend teardown
+attempt — closing HORO-795's "lease expiry is audit-silent" forward
+obligation. `AuditLogRotated{rotated_at_sequence,
+discarded_through_sequence}` is emitted by `AuditFileSink` itself as
+the first entry of a newly rotated generation.
+
+**`EnforcementMode::{Enforce, Shadow}`** (`eltanin_protocol::response`,
+default `Enforce`) configures `AuthorizationConfig` via
+`with_enforcement_mode` and is held directly by `AuthorizationHandler`
+(no separate agent-internal copy, unlike `SessionRequirement`/
+`ApprovalRequirement`/`RevocationRequirement`, because this
+configuration must already cross the wire via `AgentStatusView`).
+`handle_request_lease` is split into `request_lease_verdict` (every
+gate and the one `PolicySet::evaluate` call — identical regardless of
+mode) plus `enforce_and_finalize` (`Enforce`'s tail: calls
+`backend.enforce()`, inserts the lease on success) and
+`shadow_would_grant`/`shadow_project_refusal` (`Shadow`'s tail: on an
+admit, mints the lease via the same `LeaseIssuer::issue` call then
+immediately reverses it — `issuer_mut().revoke()` +
+`release_reservation()` — never touching `backend.enforce()`/
+`backend.revoke()`; on a refusal, projects the identical
+`AuthorizationOutcome` through `ShadowVerdict`). Exactly one function
+decides (`request_lease_verdict`); shadow mode is a different tail, not
+a different decision engine.
+
+**`ShadowVerdict::{WouldAllow, WouldDeny, WouldStepUp}`** and
+**`AgentResponse::ShadowObserved{verdict}`** — the client-facing shape
+for a `RequestLease` answered under `Shadow` mode, replacing both
+`LeaseGranted` and `LeaseDenied`. As lossy as `DenialReason` by design:
+the specific gate/policy reason stays in `RecordedOutcome`
+(`WouldGrant` on an admit) and never crosses the wire.
+`AgentStatusView.enforcement_mode` (also new) lets `eltanin status`
+report which posture is active without inferring it from side effects.
+
+**Differential mode-equivalence coverage (`authz_shadow.rs`)** proves
+byte-identical `AuthorizationOutcome` across `Enforce`/`Shadow` for
+every refusal bucket it can construct via mutation testing — **with one
+disclosed, structural gap**: `RecordedOutcome::DelegationIndeterminate`
+is not covered, because it is reachable only via a candidate already
+admitted into `delegation_admission`'s loop, i.e. only after a real
+`DelegationGrant` already exists, and shadow mode structurally never
+mints one (minting is `enforce_and_finalize`'s own real-enforcement-path
+side effect). Left as an honest gap, not papered over with a same-mode
+setup that would test something other than equivalence.
+
+**CLI surface (`eltanin-cli`, subtask 4)**: `eltanin explain
+(--event|--lease|--pid) <v> [--chain]`, `eltanin audit [--limit N]`, and
+`eltanin status` fold `eltanin-explain`'s prior standalone-binary
+functionality into the real `eltanin` CLI and surface
+`enforcement_mode`/`RetentionDiscarded` to an operator; `eltanin run`
+gained a shadow-mode leg (`crate::supervise::Authorization::{Leased,
+Shadow}`) that spawns and supervises the workload without ever blocking
+in `Shadow` mode, printing a stderr banner naming the verdict. See
+`docs/product/CLI_CONTRACT.md` for the full contract. A pre-existing bug
+where `ShadowObserved` was misclassified as a failure in
+`crate::failure::classify_response` was fixed in the same subtask.
+
+**Named limitation, disclosed, not hidden**: shadow enforcement mode is
+not a security control. It observes what would happen under `Enforce`
+mode's identical decision engine but enforces nothing — a deployment
+running `Shadow` mode grants zero actual protection, regardless of what
+verdicts it reports. See `docs/product/SECURITY_MODEL.md`'s dedicated
+section for the full statement of this and the audit-retention
+trade-off.
 
 ## Not yet implemented
 

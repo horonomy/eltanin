@@ -336,6 +336,14 @@ eltanin status
   `eltanin run`'s own shadow-mode banner uses (see the launch state
   machine's shadow-mode paragraph above), so an operator sees one
   consistent phrase for this concept everywhere it appears.
+- `enforcement_mode` is set once, at agent-daemon startup, via the
+  `ELTANIN_AGENT_MODE` environment variable read by `eltanin-agentd`
+  (`"enforce"` or `"shadow"`; absent defaults to `enforce`, and any
+  other value is a startup-time configuration error — not a value
+  `eltanin status`/`eltanin run` can change at runtime). There is no
+  `eltanin run --shadow` flag or equivalent client-side switch: shadow
+  mode is exclusively an agent-deployment decision, never something a
+  client can request or opt out of per invocation.
 - Takes no arguments. No new exit codes — an unreachable agent still
   exits 69, an `Error{code}` response still exits 70, exactly like every
   other subcommand's use of `crate::client::AgentClient`.

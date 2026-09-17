@@ -20,6 +20,7 @@ links back.
 | [0011](0011-bounded-compute-delegation.md) | Bounded Compute Delegation across agents, tools, and descendant workloads | Accepted |
 | [0012](0012-risk-based-step-up.md) | Risk-Based Step-Up on Compute Trust-Boundary Changes | Accepted |
 | [0013](0013-compute-lease-lifecycle-hardening.md) | Compute Lease Lifecycle Hardening — Renewal, Revocation, Expiry, Offline Failure | Accepted |
+| [0014](0014-lease-lifecycle-audit-durability-and-shadow-mode.md) | Lease-Lifecycle Audit Durability, Bounded Retention, and Shadow Enforcement Mode | Accepted |
 
 See [`docs/product/NORTH_STAR.md`](../product/NORTH_STAR.md) for the
 locked invariants these decisions implement, and
