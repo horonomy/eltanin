@@ -1,0 +1,46 @@
+name: CodeQL
+
+# Advanced setup rather than GitHub's default setup because default setup
+# cannot cover this repository's only real language: PATCH
+# /repos/{owner}/{repo}/code-scanning/default-setup rejects `rust` with HTTP
+# 422 ("must be one of: actions, c-cpp, csharp, go, java-kotlin,
+# javascript-typescript, python, ruby, swift"), which would leave the whole
+# crate workspace unscanned. Standard GitHub-hosted runners only; code
+# scanning is free for public repositories.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, matching the cadence GitHub's default setup uses.
+    - cron: "27 4 * * 1"
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `none` build mode: Rust is extracted without compiling, and
+        # `actions` analyses the workflow files themselves.
+        language: [actions, rust]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
