@@ -776,6 +776,18 @@ impl AuthorizationHandler {
                 status: AgentStatusView {
                     protocol_version: eltanin_core::envelope::DOMAIN_SCHEMA_VERSION,
                     enforcement_mode: self.enforcement_mode,
+                    session_required: matches!(
+                        self.session_requirement,
+                        SessionRequirement::Required
+                    ),
+                    approval_required: matches!(
+                        self.approval_requirement,
+                        ApprovalRequirement::Required
+                    ),
+                    revocation_required: matches!(
+                        self.revocation_requirement,
+                        RevocationRequirement::Required
+                    ),
                 },
             },
         )

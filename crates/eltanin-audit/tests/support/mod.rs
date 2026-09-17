@@ -92,6 +92,9 @@ pub fn status_entry() -> AuditEntry {
             status: eltanin_protocol::response::AgentStatusView {
                 protocol_version: 1,
                 enforcement_mode: eltanin_protocol::response::EnforcementMode::Enforce,
+                session_required: false,
+                approval_required: false,
+                revocation_required: false,
             },
         },
         mode: RecordedEnforcementMode::Enforce,

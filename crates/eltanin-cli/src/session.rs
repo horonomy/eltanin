@@ -103,10 +103,43 @@ fn start(profiles: &[ProfileName], ttl: Duration) -> SessionCliOutcome {
     };
     match classify(response) {
         Ok(AgentResponse::SessionEstablished { session }) => {
-            SessionCliOutcome::Ok(format!("established {}", describe_session(&session)))
+            let established = format!("established {}", describe_session(&session));
+            SessionCliOutcome::Ok(match session_required(&client) {
+                // D1b (HORO-797 prep): a session that succeeds while the
+                // agent does not actually require one has zero
+                // enforcement effect — `RequestLease` behaves identically
+                // whether or not this session exists (see
+                // `authz_session.rs`'s
+                // `a_session_established_when_not_required_still_permits_leases_unchanged`).
+                // Disclosing that plainly here mirrors `eltanin status`'s
+                // own "state an unenforced/weak posture loudly, not
+                // silently" discipline for shadow mode, rather than
+                // letting this command print a success message that
+                // implies a gate now exists when it does not.
+                Some(false) => format!(
+                    "{established}\nwarning: this agent does not require a Trusted Compute \
+                     Session — this session has no enforcement effect; run `eltanin status` for \
+                     the agent's full gate configuration"
+                ),
+                Some(true) | None => established,
+            })
         }
         Ok(_) => SessionCliOutcome::Failure(LaunchFailure::AgentError(ErrorCode::Internal)),
         Err(failure) => SessionCliOutcome::Failure(failure),
+    }
+}
+
+/// Best-effort check of whether the agent actually requires a session,
+/// for the disclosure above. `None` (agent unreachable for this second
+/// call, or it answered with something other than `Status`) means "don't
+/// know" — this must never turn a real `SessionEstablished` success into
+/// a `SessionCliOutcome::Failure`, since the session itself was already
+/// genuinely established; the disclosure is best-effort context, not a
+/// second gate on this command's own success.
+fn session_required(client: &AgentClient) -> Option<bool> {
+    match client.exchange(ClientRequest::AgentStatus {}) {
+        Ok(AgentResponse::Status { status }) => Some(status.session_required),
+        _ => None,
     }
 }
 

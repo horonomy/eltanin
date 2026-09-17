@@ -23,6 +23,9 @@ fn status_reports_enforce_mode() {
         status: AgentStatusView {
             protocol_version: 6,
             enforcement_mode: EnforcementMode::Enforce,
+            session_required: false,
+            approval_required: false,
+            revocation_required: false,
         },
     });
 
@@ -39,6 +42,9 @@ fn status_reports_shadow_mode_with_an_unenforced_warning() {
         status: AgentStatusView {
             protocol_version: 6,
             enforcement_mode: EnforcementMode::Shadow,
+            session_required: false,
+            approval_required: false,
+            revocation_required: false,
         },
     });
 
@@ -47,6 +53,46 @@ fn status_reports_shadow_mode_with_an_unenforced_warning() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("shadow"), "got: {stdout}");
     assert!(stdout.contains("UNENFORCED/OBSERVED-ONLY"), "got: {stdout}");
+}
+
+#[test]
+fn status_discloses_every_gate_not_required_by_default() {
+    let agent = FakeAgent::start(|_| AgentResponse::Status {
+        status: AgentStatusView {
+            protocol_version: 6,
+            enforcement_mode: EnforcementMode::Enforce,
+            session_required: false,
+            approval_required: false,
+            revocation_required: false,
+        },
+    });
+
+    let output = eltanin_status(&agent);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("session required: NO"), "got: {stdout}");
+    assert!(stdout.contains("approval required: NO"), "got: {stdout}");
+    assert!(stdout.contains("revocation required: NO"), "got: {stdout}");
+}
+
+#[test]
+fn status_discloses_every_gate_when_required() {
+    let agent = FakeAgent::start(|_| AgentResponse::Status {
+        status: AgentStatusView {
+            protocol_version: 6,
+            enforcement_mode: EnforcementMode::Enforce,
+            session_required: true,
+            approval_required: true,
+            revocation_required: true,
+        },
+    });
+
+    let output = eltanin_status(&agent);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("session required: yes"), "got: {stdout}");
+    assert!(stdout.contains("approval required: yes"), "got: {stdout}");
+    assert!(stdout.contains("revocation required: yes"), "got: {stdout}");
 }
 
 #[test]

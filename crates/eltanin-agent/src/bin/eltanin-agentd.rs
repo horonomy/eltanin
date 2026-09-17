@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use eltanin_agent::authz::audit::AuditEventSink;
 use eltanin_agent::authz::event::{EventSink, StderrSink};
-use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
+use eltanin_agent::authz::session::SessionRequirement;
+use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler, RevocationRequirement};
 use eltanin_agent::config::{AgentConfig, DEFAULT_SOCKET_PATH};
 use eltanin_agent::peer::OsPeerContextSource;
 use eltanin_agent::runtime::{issuer_instance_id, AgentClock};
@@ -36,6 +37,84 @@ use eltanin_protocol::response::EnforcementMode;
 /// default" stance as [`AgentConfig::new`]'s `socket_mode` parameter.
 fn required_var(name: &str) -> Result<String, String> {
     env::var(name).map_err(|_| format!("required environment variable {name} is not set"))
+}
+
+/// Parse a boolean-shaped gate-enablement env var. Absent means disabled
+/// (the same "no gate active unless a deployment opts in" default every
+/// `AuthorizationConfig` requirement already has — HORO-797 prep). Unlike
+/// `ELTANIN_AGENT_MODE`'s enum-shaped values, `"1"`/`"true"` is this
+/// binary's first boolean-shaped env var, so there is no existing
+/// convention to mirror; any other set value is a startup-time
+/// configuration error, exactly like `ELTANIN_AGENT_MODE`'s own handling
+/// of an unrecognized value, rather than silently treated as false.
+fn required_flag(name: &str) -> Result<bool, String> {
+    match env::var(name) {
+        Ok(value) => match value.as_str() {
+            "1" | "true" => Ok(true),
+            other => Err(format!(
+                "{name} {other:?} is not valid — expected \"1\" or \"true\" to enable, or leave \
+                 unset to disable"
+            )),
+        },
+        Err(_) => Ok(false),
+    }
+}
+
+/// Apply the session/approval/revocation gate env vars (HORO-797 prep)
+/// on top of `config`'s already-set lease ttl and enforcement mode. Split
+/// out of `run` purely to keep that function under `clippy::too_many_lines`
+/// — every one of these gates is operator-opt-in, `NotRequired`/disabled
+/// by default, mirroring `AuthorizationConfig::new`'s own blast-radius
+/// discipline for every requirement it defaults, so none of this changes
+/// behavior for a deployment that never sets these env vars.
+fn configure_gates(mut config: AuthorizationConfig) -> Result<AuthorizationConfig, String> {
+    let session_required = required_flag("ELTANIN_AGENT_SESSION_REQUIRED")?;
+    let revocation_required = required_flag("ELTANIN_AGENT_REVOCATION_REQUIRED")?;
+    let approval_required = required_flag("ELTANIN_AGENT_APPROVAL_REQUIRED")?;
+    let approval_store = env::var_os("ELTANIN_AGENT_APPROVAL_STORE");
+
+    if session_required {
+        config = config.with_session_requirement(SessionRequirement::Required);
+    }
+
+    if revocation_required {
+        config = config.with_revocation_requirement(RevocationRequirement::Required);
+    }
+
+    // `AuthorizationConfig::with_approval_store` is the only way to set
+    // `ApprovalRequirement::Required` — there is deliberately no way to
+    // require approvals without also naming a durable store path (see
+    // that method's own doc), so this binary enforces the same pairing
+    // at the env-var boundary rather than silently ignoring one half of
+    // a half-specified configuration.
+    match (approval_required, approval_store) {
+        (true, None) => {
+            return Err(
+                "ELTANIN_AGENT_APPROVAL_REQUIRED is set but ELTANIN_AGENT_APPROVAL_STORE is not \
+                 — a durable approval store path is required to enable this gate"
+                    .to_string(),
+            )
+        }
+        (false, Some(_)) => {
+            return Err(
+                "ELTANIN_AGENT_APPROVAL_STORE is set but ELTANIN_AGENT_APPROVAL_REQUIRED is not \
+                 — approvals cannot be enabled without requiring them"
+                    .to_string(),
+            )
+        }
+        (true, Some(path)) => {
+            let path = path.into_string().map_err(|raw| {
+                format!(
+                    "ELTANIN_AGENT_APPROVAL_STORE is set but not valid UTF-8: {}",
+                    raw.to_string_lossy()
+                )
+            })?;
+            config = config.with_approval_store(PathBuf::from(path));
+        }
+        (false, None) => {}
+    }
+
+    Ok(config)
 }
 
 fn run() -> Result<(), String> {
@@ -77,6 +156,7 @@ fn run() -> Result<(), String> {
     let authz_config = AuthorizationConfig::new(Duration::from_secs(ttl_secs))
         .map_err(|e| format!("invalid lease ttl: {e}"))?
         .with_enforcement_mode(enforcement_mode);
+    let authz_config = configure_gates(authz_config)?;
 
     // Fails closed by design (runtime.rs's own docs) rather than
     // degrading to a weaker instance id when this process's own start
