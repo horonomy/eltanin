@@ -1,11 +1,11 @@
 {
-  "version": 5,
+  "version": 6,
   "payload": {
     "request_id": 3,
     "body": {
       "result": "status",
       "status": {
-        "protocol_version": 5
+        "protocol_version": 6
       }
     }
   }
