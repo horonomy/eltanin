@@ -28,12 +28,15 @@ use eltanin_agent::authz::session::SessionRequirement;
 use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::handler::RequestHandler;
 use eltanin_audit::record::RecordedAgentEvent;
+use eltanin_core::approval::ApprovalDisposition;
 use eltanin_core::identity::{Evidence, ExecutionContext};
 use eltanin_core::lease::IssuerInstanceId;
 use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_core::session::SessionId;
-use eltanin_protocol::request::{ClientRequest, CreateSessionRequest, LeaseRequest};
-use eltanin_protocol::response::{AgentResponse, DenialReason, TerminationOutcome};
+use eltanin_protocol::request::{
+    ApproveRequest, ClientRequest, CreateSessionRequest, LeaseRequest, ReleaseRequest,
+};
+use eltanin_protocol::response::{AgentResponse, DenialReason, ReleaseOutcome, TerminationOutcome};
 use support::authz::{allow_policy_for_uid, backend_with_resource, resource_identity, FixedClock};
 use support::temp_approval_store_path;
 
@@ -139,6 +142,14 @@ fn lease_request() -> ClientRequest {
     ClientRequest::RequestLease(LeaseRequest {
         resource: resource_identity(),
         action: eltanin_core::resource::Action::Compute,
+    })
+}
+
+fn approve_request(disposition: ApprovalDisposition) -> ClientRequest {
+    ClientRequest::Approve(ApproveRequest {
+        resource: resource_identity(),
+        action: eltanin_core::resource::Action::Compute,
+        disposition,
     })
 }
 
@@ -417,6 +428,209 @@ fn ac2_a_foreign_session_process_cannot_join_by_pid_alone() {
             reason: DenialReason::NoTrustedSession
         },
         "a process in a different POSIX session must never be admitted as a session member"
+    );
+}
+
+/// S3 (HORO-797 adversarial matrix) — `PINS_LIMITATION`: a same-uid,
+/// same-POSIX-session but otherwise **unrelated** process is admitted as
+/// a session member with no further defense at this layer. This is not
+/// a bug in `membership()` — it is exactly what ADR 0009's headline
+/// trade-off discloses: "intent is proven once per terminal, and
+/// thereafter inherited by everything spawned in that terminal, with no
+/// further act of intent... A `postinstall` script run in the same shell
+/// after `eltanin session start` is a session member exactly as much as
+/// the interactive command the user actually intended to authorize."
+/// ADR 0010 disclosure 2 states the same boundary from the approval
+/// side: "Not a boundary against the same user's other processes."
+///
+/// Unlike `ac2_a_foreign_session_process_cannot_join_by_pid_alone` above
+/// (which proves a *different*-session process is correctly refused),
+/// this test spawns a real child that never calls `setsid()` — it
+/// inherits this test process's own POSIX session exactly as a
+/// `postinstall` script inherits its parent shell's session — and proves
+/// `membership()` admits it, because nothing about `membership()`'s
+/// contract (session-key equality plus anchor-leader liveness) ever
+/// asked "is this the same process that established the session."
+#[test]
+fn s3_a_same_session_unrelated_process_is_admitted_with_no_further_defense() {
+    let handler = handler_with(SessionRequirement::Required);
+    let owner_peer = self_peer_context();
+    let established = create_session(&handler, &owner_peer);
+    assert!(matches!(
+        established,
+        AgentResponse::SessionEstablished { .. }
+    ));
+
+    // A real child of this test process that never calls `setsid()` —
+    // it inherits this process's own POSIX session by ordinary fork/exec
+    // semantics, exactly as any ordinary command run in the same
+    // terminal would. It is otherwise wholly unrelated to the session
+    // owner's actual intended workload.
+    let mut child = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("spawn /bin/cat as an unrelated same-session child");
+    let unrelated_pid = child.id();
+
+    // Confirm the child is actually kernel-observable before building
+    // its peer context — a false `NoTrustedSession` from a spawn/collect
+    // race would look like the limitation not existing, rather than the
+    // flaky harness issue it would actually be.
+    match platform::collect_workload_identity(unrelated_pid).process_start {
+        Evidence::Present { .. } => {}
+        other => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "expected the spawned child's process_start to be kernel-observed before \
+                    proceeding, got {other:?}"
+            );
+        }
+    }
+
+    let unrelated_peer = peer_context_for_pid(unrelated_pid, real_self_uid());
+    let response = handler.handle(&lease_request(), &unrelated_peer);
+
+    // Clean up before asserting, so a failed assertion doesn't leak a
+    // blocked process.
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(
+        matches!(response, AgentResponse::LeaseGranted { .. }),
+        "a same-uid, same-session, otherwise-unrelated process must be admitted as a session \
+         member — this is ADR 0009's disclosed postinstall-script trade-off combined with \
+         ADR 0010 disclosure 2 ('not a boundary against the same user's other processes'), \
+         not a bug — got {response:?}"
+    );
+}
+
+/// S12 (HORO-797 adversarial matrix) — `PROVES_DEFENSE` (design-honesty
+/// cross-check): a single scenario exercising the asymmetry that a
+/// durable `Remember` approval survives an agent restart while a
+/// Trusted Compute Session and the leases issued under it do not.
+/// Reads, in one restart scenario, exactly the four properties already
+/// separately proven by `remember_admits_a_restarted_workload_without_reprompting`
+/// (`authz_approval.rs`), `ac4_a_fresh_agent_instance_never_honors_a_prior_instances_session`
+/// (above), `lease_from_a_prior_issuer_instance_is_rejected_as_foreign`
+/// (`eltanin-core/tests/lease_restart.rs`), and
+/// `a_lease_from_a_prior_agent_instance_does_not_survive_a_restart`
+/// (`eltanin-agent/tests/authz_lifecycle.rs`) — proving here that the
+/// asymmetry is a real, intentional design property, not accidental
+/// drift between four independently-written tests.
+///
+/// ADR 0010's "`Approval` is the deliberate exception to the
+/// Serialize-only rule ADR 0009 established": a durable `Approval` must
+/// survive an agent restart ("that is the entire point"), while
+/// `TrustedSession`/`ComputeLease` are `Serialize`-only by design and
+/// hold no path back from disk at all — an agent restart is a fresh
+/// `SessionAuthority`/`LeaseIssuer` with an empty in-memory store, per
+/// `ac4_a_fresh_agent_instance_never_honors_a_prior_instances_session`'s
+/// own comment.
+#[test]
+fn s12_a_durable_approval_survives_restart_while_the_session_and_its_lease_do_not() {
+    let uid = real_self_uid();
+    let store_path = temp_approval_store_path("s12-restart-asymmetry");
+
+    let before_restart = AuthorizationHandler::new(
+        IssuerInstanceId::new("instance-before"),
+        allow_policy_for_uid(uid),
+        backend_with_resource(&[
+            eltanin_core::resource::Capability::DeviceEnforce,
+            eltanin_core::resource::Capability::DeviceRevoke,
+        ]),
+        FixedClock::new(),
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(60))
+            .unwrap()
+            .with_approval_store(store_path.clone())
+            .with_session_requirement(SessionRequirement::Required),
+    );
+    let peer = self_peer_context();
+
+    let recorded = before_restart.handle(&approve_request(ApprovalDisposition::Remember), &peer);
+    assert!(
+        matches!(recorded, AgentResponse::ApprovalRecorded { .. }),
+        "expected ApprovalRecorded, got {recorded:?}"
+    );
+
+    let established = create_session(&before_restart, &peer);
+    assert!(matches!(
+        established,
+        AgentResponse::SessionEstablished { .. }
+    ));
+
+    let granted = before_restart.handle(&lease_request(), &peer);
+    let AgentResponse::LeaseGranted { lease } = granted else {
+        panic!("expected a granted lease before restart, got {granted:?}");
+    };
+    assert_eq!(
+        lease.lease_id.issuer,
+        IssuerInstanceId::new("instance-before")
+    );
+
+    // "Restart" = a fresh `AuthorizationHandler` — fresh `SessionAuthority`
+    // and `LeaseIssuer` instances, empty in-memory stores — reusing only
+    // the same on-disk approval store path, exactly as a real agent
+    // restart would.
+    let after_restart = AuthorizationHandler::new(
+        IssuerInstanceId::new("instance-after"),
+        allow_policy_for_uid(uid),
+        backend_with_resource(&[
+            eltanin_core::resource::Capability::DeviceEnforce,
+            eltanin_core::resource::Capability::DeviceRevoke,
+        ]),
+        FixedClock::new(),
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(60))
+            .unwrap()
+            .with_approval_store(store_path)
+            .with_session_requirement(SessionRequirement::Required),
+    );
+
+    // Half 1: the session does NOT survive — the exact same peer, with
+    // no session re-established under the new instance, is denied
+    // `NoTrustedSession` even though its durable approval would match.
+    let response = after_restart.handle(&lease_request(), &peer);
+    assert_eq!(
+        response,
+        AgentResponse::LeaseDenied {
+            reason: DenialReason::NoTrustedSession
+        },
+        "a Trusted Compute Session must never survive an agent restart"
+    );
+
+    // Half 2: the pre-restart lease does NOT survive — releasing it
+    // against the new instance is Refused, never Released.
+    let release = after_restart.handle(
+        &ClientRequest::ReleaseLease(ReleaseRequest {
+            lease_id: lease.lease_id,
+        }),
+        &peer,
+    );
+    assert_eq!(
+        release,
+        AgentResponse::LeaseReleased {
+            outcome: ReleaseOutcome::Refused
+        },
+        "a lease minted by a prior agent instance must never resolve against a new one"
+    );
+
+    // Half 3: the durable approval DOES survive — a freshly established
+    // session (the human re-proving intent post-restart, as ADR 0009
+    // expects) plus the SAME approval recorded before restart admits a
+    // fresh lease with zero new `eltanin approve` calls.
+    let established_after = create_session(&after_restart, &peer);
+    assert!(matches!(
+        established_after,
+        AgentResponse::SessionEstablished { .. }
+    ));
+    let response = after_restart.handle(&lease_request(), &peer);
+    assert!(
+        matches!(response, AgentResponse::LeaseGranted { .. }),
+        "a durable Remember approval must survive an agent restart with zero new approve \
+         calls, once the (freshly re-established) session gate is satisfied — got {response:?}"
     );
 }
 
