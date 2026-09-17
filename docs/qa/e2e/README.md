@@ -32,6 +32,7 @@ already exercises it end to end.
 |---|---|---|---|---|
 | `E2E-F-M1-008-controlled-launch-v1` | HORO-847 | [`crates/eltanin-cli/tests/canonical_e2e.rs`](../../../crates/eltanin-cli/tests/canonical_e2e.rs) | [`F-M1-008-controlled-launch.md`](F-M1-008-controlled-launch.md) | F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-008, F-M1-009 |
 | `B-M1-APPLE-v1` | HORO-1015 | [`crates/eltanin-cli/tests/apple_metal_canonical_e2e.rs`](../../../crates/eltanin-cli/tests/apple_metal_canonical_e2e.rs) | [`B-M1-APPLE.md`](B-M1-APPLE.md) | F-M1-003, F-M1-004, F-M1-005, F-M1-006, F-M1-009, F-M1-010 |
+| `B-M2-DEVFLOW-v1` | HORO-797 | [`crates/eltanin-cli/tests/mvp2_dev_flow_e2e.rs`](../../../crates/eltanin-cli/tests/mvp2_dev_flow_e2e.rs) | [`B-M2-DEVFLOW.md`](B-M2-DEVFLOW.md) | F-M2-002, F-M2-005, F-M2-006 |
 
 `crates/eltanin-cli/tests/qa_governance_sync.rs` mechanically checks
 that every Feature ID in `canonical_e2e.rs`'s `pub const COVERS` list
@@ -54,12 +55,12 @@ documentation can't silently drift apart.
 | F-M1-009 — Local Audit & Explain Evidence | `E2E-F-M1-008-controlled-launch-v1` — `deny_journey_is_explainable_via_the_audit_log` writes a real audit record and reads it back with the real `eltanin-explain` binary. Also `B-M1-APPLE-v1` on Apple Silicon (both ALLOW and DENY legs). |
 | F-M1-010 — Apple Silicon Real-Accelerator Functional Validation | `B-M1-APPLE-v1` — this scenario's own subject; the full discover → capability-inspect → ALLOW+lease → real Metal compute → DENY-non-start → audit-correlate → repeat-for-determinism journey is exercised directly on physical Apple Silicon. |
 
-| F-M2-001 — Trusted Compute Session | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. The session-establishment/multi-lease journey is currently proven only at Track A (`crates/eltanin-agent/tests/authz_session.rs`). |
-| F-M2-002 — Remembered Authorization Intent | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
-| F-M2-003 — Bounded Compute Delegation | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
-| F-M2-004 — Risk-Based Step-Up | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
-| F-M2-005 — Compute Lease Lifecycle Hardening | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. |
-| F-M2-006 — Audit Durability + Shadow Enforcement Mode | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. `eltanin explain`/`eltanin audit`/`eltanin status` and the shadow-mode `eltanin run` leg are currently proven only at Track A (`crates/eltanin-cli/tests/{shadow_run_lifecycle,status_binary,explain_audit_binary}.rs`). |
+| F-M2-001 — Trusted Compute Session | BLOCKED — a real product gap found while building `B-M2-DEVFLOW-v1` (HORO-797): `eltanin session start`'s session anchor dies with that short-lived process, so no later `eltanin` invocation ever sees the session it established (confirmed live: the very next `eltanin session list` reports no active session). This is not "no scenario written yet" — an implementation exists and is demonstrably non-functional over the real CLI. See [`B-M2-DEVFLOW.md`](B-M2-DEVFLOW.md)'s "A real product gap" section. The session-establishment/multi-lease journey remains proven only at Track A (`crates/eltanin-agent/tests/authz_session.rs`), whose `self_peer_context()` helper does not exhibit this gap since it never lets the anchor leader process die mid-test. |
+| F-M2-002 — Remembered Authorization Intent | `B-M2-DEVFLOW-v1` — a real remembered approval backs three independent `eltanin run` invocations with zero further prompts, and a changed launcher identity is denied then recovers on re-approval. |
+| F-M2-003 — Bounded Compute Delegation | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. `eltanin-agentd`'s `configure_gates` has no environment-variable surface for delegation as of HORO-797 prep — it remains library-only, not reachable from the real binary. |
+| F-M2-004 — Risk-Based Step-Up | N/A — no MVP 2.0 Track B scenario exists yet; see HORO-797. Same library-only gap as F-M2-003. |
+| F-M2-005 — Compute Lease Lifecycle Hardening | `B-M2-DEVFLOW-v1` — `ELTANIN_AGENT_REVOCATION_REQUIRED=1` is real operator-set configuration for the whole scenario; every lease its `eltanin run` invocations obtain is issued under that gate. |
+| F-M2-006 — Audit Durability + Shadow Enforcement Mode | `B-M2-DEVFLOW-v1` — a real denial is correlated via the real `eltanin explain --pid`/`eltanin audit` subcommands against a real on-disk audit log, and `eltanin status` discloses the agent's real gate configuration. The shadow-mode `eltanin run` leg specifically remains proven only at Track A (`crates/eltanin-cli/tests/shadow_run_lifecycle.rs`). |
 
 `qa_governance_sync.rs` mechanically checks that every `F-M1-00N`/
 `F-M2-00N` in [`docs/qa/README.md`](../README.md)'s Feature inventory
