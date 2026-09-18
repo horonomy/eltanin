@@ -85,6 +85,8 @@ impl RequestHandler for StatusOnlyHandler {
                     session_required: false,
                     approval_required: false,
                     revocation_required: false,
+                    delegation_configured: false,
+                    step_up_configured: false,
                 },
             },
             ClientRequest::RequestLease(_)

@@ -789,6 +789,8 @@ impl AuthorizationHandler {
                         self.revocation_requirement,
                         RevocationRequirement::Required
                     ),
+                    delegation_configured: self.delegation.is_some(),
+                    step_up_configured: self.step_up.is_some(),
                 },
             },
         )
