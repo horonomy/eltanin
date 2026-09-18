@@ -29,10 +29,14 @@ use eltanin_agent::authz::{AuthorizationConfig, AuthorizationHandler};
 use eltanin_agent::handler::RequestHandler;
 use eltanin_audit::record::RecordedAgentEvent;
 use eltanin_core::approval::ApprovalDisposition;
-use eltanin_core::identity::{Evidence, ExecutionContext};
-use eltanin_core::lease::IssuerInstanceId;
+use eltanin_core::identity::{Evidence, EvidenceSource, ExecutionContext};
+use eltanin_core::lease::{IssuerInstanceId, MonotonicTime};
 use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
-use eltanin_core::session::SessionId;
+use eltanin_core::session::{
+    membership, HostId, IntentProof, LeaderCorroboration, LocalSessionAnchor, MembershipVerdict,
+    NotMemberReason, SessionAssurance, SessionAuthority, SessionId, SessionKey, SessionNonce,
+    SessionScope,
+};
 use eltanin_protocol::request::{
     ApproveRequest, ClientRequest, CreateSessionRequest, LeaseRequest, ReleaseRequest,
 };
@@ -503,6 +507,187 @@ fn s3_a_same_session_unrelated_process_is_admitted_with_no_further_defense() {
          member — this is ADR 0009's disclosed postinstall-script trade-off combined with \
          ADR 0010 disclosure 2 ('not a boundary against the same user's other processes'), \
          not a bug — got {response:?}"
+    );
+}
+
+/// HORO-1278 ground-truth regression: a session established while the
+/// *establishing peer's own process* is real and then genuinely killed
+/// must still be honored by a later request in the same POSIX session.
+/// Before HORO-1278's fix, `handle_create_session` anchored the session
+/// to the connecting peer's own identity (`observed.workload.clone()`)
+/// rather than to the session's own sid leader — so a session
+/// established by a short-lived process (exactly the shape of `eltanin
+/// session start`) could never be recognized again once that process
+/// exited. `self_peer_context()` alone (used by every other test in
+/// this file) can never catch this bug, because it is the *same* live
+/// test-process object for the whole test — the establishing peer never
+/// actually dies. This test uses the real-child-spawn pattern already
+/// established by `s3_a_same_session_unrelated_process_is_admitted_with_no_further_defense`
+/// above to make the establishing peer a genuinely separate process that
+/// is killed and waited on before the later request is made.
+#[test]
+fn horo1278_a_session_survives_the_establishing_peer_process_exiting() {
+    let handler = handler_with(SessionRequirement::Required);
+
+    // A real child of this test process that never calls `setsid()` — it
+    // inherits this process's own POSIX session, exactly as `eltanin
+    // session start` inherits the interactive shell's session. This
+    // process — not `self_peer_context()` — is the one that calls
+    // `CreateSession`.
+    let mut establishing_child = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("spawn /bin/cat as the establishing peer");
+    let establishing_pid = establishing_child.id();
+
+    match platform::collect_workload_identity(establishing_pid).process_start {
+        Evidence::Present { .. } => {}
+        other => {
+            let _ = establishing_child.kill();
+            let _ = establishing_child.wait();
+            panic!(
+                "expected the establishing child's process_start to be kernel-observed before \
+                 proceeding, got {other:?}"
+            );
+        }
+    }
+
+    let establishing_peer = peer_context_for_pid(establishing_pid, real_self_uid());
+    let established = create_session(&handler, &establishing_peer);
+    assert!(
+        matches!(established, AgentResponse::SessionEstablished { .. }),
+        "expected SessionEstablished, got {established:?}"
+    );
+
+    // Kill the establishing peer and genuinely wait for it to exit —
+    // this is the crux of the regression: the process this session was
+    // established "through" is now truly dead, exactly as `eltanin
+    // session start` always is by the time any later invocation runs.
+    let _ = establishing_child.kill();
+    let _ = establishing_child.wait();
+
+    // A later request from a *different*, still-live process in the
+    // same POSIX session (this test process itself) must still be
+    // honored.
+    let response = handler.handle(&lease_request(), &self_peer_context());
+    assert!(
+        matches!(response, AgentResponse::LeaseGranted { .. }),
+        "a session must survive its establishing peer process exiting — got {response:?}"
+    );
+}
+
+/// Bug fix (HORO-1278): `TrustedSession::owner_uid` was stored at
+/// establishment time but never actually compared by `membership` —
+/// closed by extending `membership`'s combined signature to check it.
+/// Simulates a different observed uid in the same POSIX session by
+/// overriding the freshly collected `WorkloadIdentity.uid` evidence
+/// directly (same technique `a_request_refused_before_session_resolution_carries_no_session_id`
+/// above already uses to simulate divergent evidence without requiring
+/// real multi-user infrastructure in a test process).
+#[test]
+fn horo1278_a_different_uid_in_the_same_posix_session_is_refused() {
+    let handler = handler_with(SessionRequirement::Required);
+    let owner_peer = self_peer_context();
+    let established = create_session(&handler, &owner_peer);
+    assert!(matches!(
+        established,
+        AgentResponse::SessionEstablished { .. }
+    ));
+
+    let pid = std::process::id();
+    let mut workload = platform::collect_workload_identity(pid);
+    workload.uid = Evidence::Present {
+        value: real_self_uid() + 1,
+        source: EvidenceSource::KernelObserved,
+    };
+    let context = ExecutionContext {
+        workload,
+        cgroup_path: Evidence::Unsupported,
+        namespace_hint: Evidence::Unsupported,
+        container_hint: Evidence::Unsupported,
+        session_origin: Evidence::Unsupported,
+    };
+    let spoofed_uid_peer = PeerContext::new(
+        PeerCredential::new(pid, real_self_uid(), real_self_uid()),
+        PeerConsistency::Consistent,
+        context,
+    );
+
+    let response = handler.handle(&lease_request(), &spoofed_uid_peer);
+    assert_eq!(
+        response,
+        AgentResponse::LeaseDenied {
+            reason: DenialReason::NoTrustedSession
+        },
+        "a different observed uid in the same POSIX session must be refused, not silently \
+         admitted — the wire response collapses `NotMemberReason::OwnerUidMismatch` into the \
+         same NoTrustedSession denial every other NotMember reason gets"
+    );
+}
+
+/// Bug fix (HORO-1278): expiry must be structural inside `membership`
+/// itself, never dependent on `SessionState::reap` having already run
+/// under the same lock. Calls `eltanin_core::session::membership`
+/// directly against a session built with the real platform collector's
+/// own `WorkloadIdentity`/`HostId` shapes — no `AuthorizationHandler`,
+/// no `SessionState`, and therefore no `reap` call anywhere in this
+/// test.
+#[test]
+fn horo1278_an_expired_session_is_refused_by_membership_itself() {
+    let mut authority = SessionAuthority::new(
+        IssuerInstanceId::new("test-instance"),
+        Duration::from_secs(3600),
+    );
+    let pid = std::process::id();
+    let uid = real_self_uid();
+    let leader_identity = platform::collect_workload_identity(pid);
+    let session = authority
+        .establish(
+            uid,
+            LocalSessionAnchor {
+                key: SessionKey(4242),
+                leader: LeaderCorroboration::Recorded(leader_identity.clone()),
+            },
+            SessionScope::new([resource_identity()]).unwrap(),
+            IntentProof::LocalPeerPresence,
+            SessionAssurance::LocalKernelSession,
+            HostId("test-host".to_string()),
+            SessionNonce::from_bytes([0u8; 32]),
+            MonotonicTime::from_nanos(0),
+            Duration::from_secs(60),
+        )
+        .unwrap();
+
+    let peer_uid = Evidence::Present {
+        value: uid,
+        source: EvidenceSource::KernelObserved,
+    };
+    let peer_key = Evidence::Present {
+        value: SessionKey(4242),
+        source: EvidenceSource::KernelObserved,
+    };
+    let observed_host = Evidence::Present {
+        value: HostId("test-host".to_string()),
+        source: EvidenceSource::KernelObserved,
+    };
+    let at_expiry =
+        MonotonicTime::from_nanos(u64::try_from(Duration::from_secs(60).as_nanos()).unwrap());
+
+    assert_eq!(
+        membership(
+            &session,
+            &peer_uid,
+            &peer_key,
+            &observed_host,
+            &leader_identity,
+            at_expiry,
+        ),
+        MembershipVerdict::NotMember {
+            reason: NotMemberReason::Expired {
+                expired_at: session.expires_at()
+            }
+        }
     );
 }
 
