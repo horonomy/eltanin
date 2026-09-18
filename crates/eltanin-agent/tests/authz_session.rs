@@ -976,7 +976,8 @@ mod session_threading {
         allow_policy_for_uid, backend_with_resource, create_session, real_self_uid,
         resource_identity, self_peer_context, temp_approval_store_path, AgentResponse,
         AuthorizationConfig, AuthorizationHandler, AuthorizationOutcome, CapturingSessionSink,
-        ClientRequest, DenialReason, FixedClock, IssuerInstanceId, LeaseRequest, RequestHandler,
+        ClientRequest, DenialReason, FixedClock, IssuerInstanceId, LeaseRequest, MembershipVerdict,
+        NotMemberReason, RequestHandler, SessionRequirement,
     };
     use std::sync::Arc;
     use std::time::Duration;
@@ -1227,5 +1228,170 @@ mod session_threading {
             "a request refused before session resolution ever runs must report None, \
              not a fabricated value"
         );
+    }
+
+    fn handler_with_session_required(
+        sink: Arc<CapturingSessionSink>,
+        clock: Arc<FixedClock>,
+    ) -> AuthorizationHandler {
+        AuthorizationHandler::new(
+            IssuerInstanceId::new("test-instance"),
+            allow_policy_for_uid(real_self_uid()),
+            backend_with_resource(&[
+                eltanin_core::resource::Capability::DeviceEnforce,
+                eltanin_core::resource::Capability::DeviceRevoke,
+            ]),
+            clock as Arc<dyn eltanin_agent::authz::Clock>,
+            sink,
+            &AuthorizationConfig::new(Duration::from_secs(60))
+                .unwrap()
+                .with_session_requirement(SessionRequirement::Required),
+        )
+    }
+
+    /// HORO-1278: an audit-observability regression test proving an
+    /// expired session's refusal reaches the audit log with real
+    /// fidelity, specifically `NotMemberReason::Expired`, not a generic
+    /// `SessionRequired`/`Indeterminate`.
+    ///
+    /// This is non-trivial precisely because
+    /// `AuthorizationHandler::membership_for_peer` calls
+    /// `SessionState::reap` (which itself calls
+    /// `SessionAuthority::validate`, reporting `Expired` and evicting the
+    /// session) *before* `find_by_key` ever runs — so by the time
+    /// `membership()` would be called, the expired session is already
+    /// gone from the store, and `find_by_key` finds nothing. Without
+    /// `membership_for_peer` recovering the evicting `SessionValidity`
+    /// for a reaped session whose key matches this peer's own key (see
+    /// `recorded_reason_for_reaped_validity`), this would report the
+    /// same generic `Indeterminate { reason: "no session found..." }`
+    /// every other never-established-a-session case reports —
+    /// indistinguishable from a peer that never called `CreateSession`
+    /// at all. This test pins that recovery.
+    #[test]
+    fn session_required_reports_the_expired_reason_to_the_audit_log() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let clock = FixedClock::new();
+        let handler = handler_with_session_required(sink.clone(), clock.clone());
+        let peer = self_peer_context();
+
+        let established = create_session(&handler, &peer);
+        assert!(matches!(
+            established,
+            AgentResponse::SessionEstablished { .. }
+        ));
+
+        // The session created by `create_session` has a 30s ttl —
+        // advance the shared clock well past it, with no explicit
+        // `TerminateSession` anywhere in this test.
+        clock.advance(Duration::from_secs(31));
+
+        let response = handler.handle(&lease_request(), &peer);
+        assert_eq!(
+            response,
+            AgentResponse::LeaseDenied {
+                reason: DenialReason::NoTrustedSession
+            },
+            "the wire response stays the single, coarse NoTrustedSession denial"
+        );
+
+        let (outcome, _session) = sink.last();
+        match outcome {
+            AuthorizationOutcome::SessionRequired { verdict } => {
+                assert!(
+                    matches!(
+                        verdict,
+                        MembershipVerdict::NotMember {
+                            reason: NotMemberReason::Expired { .. }
+                        }
+                    ),
+                    "expected an Expired NotMemberReason on the audit-facing outcome, got \
+                     {verdict:?}"
+                );
+            }
+            other => panic!("expected AuthorizationOutcome::SessionRequired, got {other:?}"),
+        }
+    }
+
+    // Note (HORO-1278): `NotMemberReason::HostMismatch`/`AnchorRecycled`
+    // are covered only at the conversion level, in
+    // `eltanin-agent::authz::audit`'s own unit tests
+    // (`recorded_session_refusal_covers_every_not_member_reason`) and
+    // `eltanin-audit`'s golden tests, not end-to-end through a real
+    // `AuthorizationHandler` here. `membership_for_peer`'s reaped-session
+    // recovery (`recorded_reason_for_reaped_validity`) uses the exact
+    // same code path for every `SessionValidity` variant regardless of
+    // which one fires, so the expiry test above already exercises that
+    // recovery mechanism itself — what's missing for `HostMismatch`/
+    // `AnchorRecycled` specifically is only a way to make
+    // `SessionAuthority::validate` actually report them from this test
+    // file: every peer here is a real pid observed through the real
+    // platform collector (see the module docs), and there is no
+    // injectable seam to fake "the host changed since establishment" or
+    // "a different live process now occupies this sid" without either a
+    // second real host or a genuine PID-reuse race, neither of which a
+    // portable test can construct deterministically.
+
+    /// HORO-1278: same audit-observability regression as above, for
+    /// `NotMemberReason::OwnerUidMismatch` — the scenario is exactly
+    /// `horo1278_a_different_uid_in_the_same_posix_session_is_refused`'s
+    /// (a spoofed observed uid in the same POSIX session), with a
+    /// capturing sink added so the audit-facing outcome can be asserted
+    /// too, not just the wire response.
+    #[test]
+    fn session_required_reports_the_owner_uid_mismatch_reason_to_the_audit_log() {
+        let sink = Arc::new(CapturingSessionSink::default());
+        let handler = handler_with_session_required(sink.clone(), FixedClock::new());
+        let owner_peer = self_peer_context();
+
+        let established = create_session(&handler, &owner_peer);
+        assert!(matches!(
+            established,
+            AgentResponse::SessionEstablished { .. }
+        ));
+
+        let pid = std::process::id();
+        let mut workload = super::platform::collect_workload_identity(pid);
+        workload.uid = eltanin_core::identity::Evidence::Present {
+            value: real_self_uid() + 1,
+            source: eltanin_core::identity::EvidenceSource::KernelObserved,
+        };
+        let context = eltanin_core::identity::ExecutionContext {
+            workload,
+            cgroup_path: eltanin_core::identity::Evidence::Unsupported,
+            namespace_hint: eltanin_core::identity::Evidence::Unsupported,
+            container_hint: eltanin_core::identity::Evidence::Unsupported,
+            session_origin: eltanin_core::identity::Evidence::Unsupported,
+        };
+        let spoofed_uid_peer = eltanin_core::peer::PeerContext::new(
+            eltanin_core::peer::PeerCredential::new(pid, real_self_uid(), real_self_uid()),
+            eltanin_core::peer::PeerConsistency::Consistent,
+            context,
+        );
+
+        let response = handler.handle(&lease_request(), &spoofed_uid_peer);
+        assert_eq!(
+            response,
+            AgentResponse::LeaseDenied {
+                reason: DenialReason::NoTrustedSession
+            }
+        );
+
+        let (outcome, _session) = sink.last();
+        match outcome {
+            AuthorizationOutcome::SessionRequired { verdict } => {
+                assert!(
+                    matches!(
+                        verdict,
+                        MembershipVerdict::NotMember {
+                            reason: NotMemberReason::OwnerUidMismatch
+                        }
+                    ),
+                    "expected an OwnerUidMismatch NotMemberReason on the audit-facing outcome, \
+                     got {verdict:?}"
+                );
+            }
+            other => panic!("expected AuthorizationOutcome::SessionRequired, got {other:?}"),
+        }
     }
 }

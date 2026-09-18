@@ -108,7 +108,7 @@ struct GateEnv<'a> {
 /// without this test file depending on that crate's DTOs directly.
 fn write_gate_config(dir: &Path, body: &str) -> PathBuf {
     let path = dir.join("gate-config.json");
-    let contents = format!(r#"{{"version": 6, "payload": {body}}}"#);
+    let contents = format!(r#"{{"version": 7, "payload": {body}}}"#);
     fs::write(&path, contents).expect("write gate config fixture");
     path
 }

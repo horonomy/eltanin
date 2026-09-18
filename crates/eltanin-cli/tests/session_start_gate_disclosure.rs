@@ -45,7 +45,7 @@ fn session_established() -> AgentResponse {
 fn status_with(session_required: bool) -> AgentResponse {
     AgentResponse::Status {
         status: AgentStatusView {
-            protocol_version: 6,
+            protocol_version: 7,
             enforcement_mode: EnforcementMode::Enforce,
             session_required,
             approval_required: false,

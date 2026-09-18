@@ -423,7 +423,7 @@ only by a library caller as well.
 
   ```json
   {
-    "version": 6,
+    "version": 7,
     "payload": {
       "delegation": {
         "max_depth": 2,

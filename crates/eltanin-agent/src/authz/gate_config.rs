@@ -275,7 +275,7 @@ mod tests {
         let path = dir.join("gate-config.json");
         std::fs::write(
             &path,
-            r#"{"version": 6, "payload": {"delegation": null, "step_up": null}}"#,
+            r#"{"version": 7, "payload": {"delegation": null, "step_up": null}}"#,
         )
         .expect("write fixture");
         let err = load_gate_config(&path).expect_err("empty document must be rejected");

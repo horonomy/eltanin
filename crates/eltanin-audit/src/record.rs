@@ -245,6 +245,56 @@ pub enum RecordedLeaseValidity {
     Expired { expired_at: MonotonicTime },
 }
 
+/// Mirror of `eltanin_core::session::NotMemberReason`/
+/// `MembershipVerdict::Indeterminate`, flattened to one enum (HORO-1278)
+/// — `RecordedOutcome::SessionRequired` is only ever constructed from a
+/// `MembershipVerdict` that is already known not to be `Member` (see
+/// `eltanin_agent::authz::mod`'s pre-policy session-admission gate), so
+/// there is no `Member` case to mirror here. `Indeterminate` covers
+/// every case `membership()` could not confirm at all — including "no
+/// session exists for this peer's key," which is not a distinct
+/// `NotMemberReason` variant in `eltanin-core` but a `MembershipVerdict::
+/// Indeterminate` produced by `membership_for_peer` itself when no
+/// candidate session is found for the peer's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Tagged on `"kind"`, not `"reason"` — the `Indeterminate` variant below
+// has its own field named `reason`, and serde rejects a variant field
+// name colliding with the enum's own internal tag key (same discipline
+// `RecordedOutcome::SessionTerminated` already follows for the same
+// structural reason, see that variant's own comment).
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum RecordedSessionRefusal {
+    /// The peer's freshly collected session key does not equal the
+    /// session's anchor key. Mirrors `NotMemberReason::KeyMismatch`
+    /// faithfully, but is structurally unreachable via
+    /// `eltanin_agent::authz::AuthorizationHandler` today: its
+    /// `SessionState` looks a session up by exactly this key
+    /// (`find_by_key`, keyed by `SessionState::insert`'s own
+    /// `session.anchor().key`), so any candidate `membership()` is ever
+    /// called against already has a matching key by construction. Kept
+    /// for the same reason every other `Recorded*` mirror in this crate
+    /// is kept complete rather than pared to "what one caller happens to
+    /// produce today" — `membership()` is a public `eltanin-core`
+    /// function another caller could reach differently.
+    KeyMismatch,
+    /// The peer's freshly collected uid does not equal the session's
+    /// recorded owner uid.
+    OwnerUidMismatch,
+    /// A freshly observed host does not equal the session's recorded
+    /// host.
+    HostMismatch,
+    /// The session's TTL has elapsed.
+    Expired { expired_at: MonotonicTime },
+    /// The session's anchor sid is now observably occupied by a
+    /// different, live process than the one recorded at establishment
+    /// time.
+    AnchorRecycled,
+    /// Membership could not be confirmed at all — self-asserted or
+    /// missing/unsupported evidence, or no session found for the peer's
+    /// key in the first place.
+    Indeterminate { reason: String },
+}
+
 /// Mirror of `eltanin_agent::authz::session::SessionAdmissionError`
 /// (which itself wraps `eltanin_core::session::SessionError` and
 /// `eltanin_core::session::EmptyScope`, neither of which has serde
@@ -324,7 +374,15 @@ pub enum RecordedOutcome {
     },
     ReleaseUnknownLease,
     StatusReported,
-    SessionRequired,
+    /// The pre-policy session-admission gate refused a `RequestLease`
+    /// (F-M2-001, HORO-791). `refusal` carries the actual
+    /// `NotMemberReason`/`MembershipVerdict::Indeterminate` that produced
+    /// this refusal (HORO-1278) — the client-facing wire response stays
+    /// the single, deliberately coarse `DenialReason::NoTrustedSession`
+    /// for every case; this field is audit-only fidelity on top of that.
+    SessionRequired {
+        refusal: RecordedSessionRefusal,
+    },
     SessionEstablished {
         session_id: SessionId,
         expires_at: MonotonicTime,

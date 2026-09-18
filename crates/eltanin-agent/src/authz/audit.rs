@@ -28,12 +28,13 @@ use eltanin_audit::record::{
     RecordedLeaseError, RecordedLeaseValidity, RecordedOperation, RecordedOutcome, RecordedPeer,
     RecordedPeerConsistency, RecordedPeerCredential, RecordedPolicyDecision,
     RecordedPolicyProvenance, RecordedRequest, RecordedSessionAdmissionError,
+    RecordedSessionRefusal,
 };
 use eltanin_audit::sink::{AuditEntry, AuditFileSink, AuditSinkError};
 use eltanin_core::lease::{IssuerInstanceId, LeaseError, LeaseValidity};
 use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_core::policy::{DecisionReason, PolicyDecision, PolicyProvenance};
-use eltanin_core::session::{EmptyScope, SessionError};
+use eltanin_core::session::{EmptyScope, MembershipVerdict, NotMemberReason, SessionError};
 use eltanin_protocol::request::ClientRequest;
 use eltanin_protocol::response::EnforcementMode;
 
@@ -98,6 +99,40 @@ fn recorded_session_admission_error(
                 RecordedSessionAdmissionError::TtlExceedsMaximum { requested, maximum }
             }
             SessionError::ExpiryOverflow => RecordedSessionAdmissionError::ExpiryOverflow,
+        },
+    }
+}
+
+/// Convert the `membership()` verdict carried by
+/// `AuthorizationOutcome::SessionRequired` (HORO-1278) into its
+/// audit-facing mirror. `verdict` is always `NotMember`/`Indeterminate`
+/// at this call site — `SessionRequired` is only ever constructed after
+/// `membership()`/`membership_for_peer` has already ruled out `Member`
+/// (see `crate::authz::AuthorizationHandler::request_lease_verdict`) —
+/// but this function never panics on a `Member` verdict regardless: an
+/// audit-conversion function must never crash the request path over a
+/// value it merely renders, so an (unreachable in practice) `Member` is
+/// still rendered, honestly, as `Indeterminate` naming the contradiction,
+/// rather than unwrapping/panicking on an internal invariant a future
+/// refactor could otherwise silently break.
+fn recorded_session_refusal(verdict: &MembershipVerdict) -> RecordedSessionRefusal {
+    match verdict.clone() {
+        MembershipVerdict::NotMember { reason } => match reason {
+            NotMemberReason::KeyMismatch => RecordedSessionRefusal::KeyMismatch,
+            NotMemberReason::OwnerUidMismatch => RecordedSessionRefusal::OwnerUidMismatch,
+            NotMemberReason::HostMismatch => RecordedSessionRefusal::HostMismatch,
+            NotMemberReason::Expired { expired_at } => {
+                RecordedSessionRefusal::Expired { expired_at }
+            }
+            NotMemberReason::AnchorRecycled => RecordedSessionRefusal::AnchorRecycled,
+        },
+        MembershipVerdict::Indeterminate { reason } => {
+            RecordedSessionRefusal::Indeterminate { reason }
+        }
+        MembershipVerdict::Member => RecordedSessionRefusal::Indeterminate {
+            reason: "internal invariant violated: SessionRequired was constructed from a \
+                     Member verdict"
+                .to_string(),
         },
     }
 }
@@ -246,7 +281,9 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
         },
         AuthorizationOutcome::ReleaseUnknownLease => RecordedOutcome::ReleaseUnknownLease,
         AuthorizationOutcome::StatusReported => RecordedOutcome::StatusReported,
-        AuthorizationOutcome::SessionRequired => RecordedOutcome::SessionRequired,
+        AuthorizationOutcome::SessionRequired { verdict } => RecordedOutcome::SessionRequired {
+            refusal: recorded_session_refusal(&verdict),
+        },
         AuthorizationOutcome::SessionEstablished {
             session_id,
             expires_at,
@@ -395,5 +432,81 @@ impl EventSink for AuditEventSink {
                 self.inner.failed_writes()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eltanin_core::lease::MonotonicTime;
+
+    /// Every `NotMemberReason` variant `eltanin-core::session` can
+    /// actually produce must convert to its own distinct
+    /// `RecordedSessionRefusal` variant (HORO-1278) — a regression test
+    /// for exactly the fidelity gap this ticket closes: before this
+    /// change, every one of these collapsed to the same unit
+    /// `RecordedOutcome::SessionRequired`.
+    #[test]
+    fn recorded_session_refusal_covers_every_not_member_reason() {
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::KeyMismatch
+            }),
+            RecordedSessionRefusal::KeyMismatch
+        );
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::OwnerUidMismatch
+            }),
+            RecordedSessionRefusal::OwnerUidMismatch
+        );
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::HostMismatch
+            }),
+            RecordedSessionRefusal::HostMismatch
+        );
+        let expired_at = MonotonicTime::from_nanos(60_000_000_000);
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::Expired { expired_at }
+            }),
+            RecordedSessionRefusal::Expired { expired_at }
+        );
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::AnchorRecycled
+            }),
+            RecordedSessionRefusal::AnchorRecycled
+        );
+    }
+
+    /// `MembershipVerdict::Indeterminate` — including the "no session
+    /// found for this peer's key" case `membership_for_peer` produces
+    /// when `find_by_key` finds no candidate at all — must convert to
+    /// `RecordedSessionRefusal::Indeterminate` carrying the same reason
+    /// string, never silently dropped or collapsed into a `NotMember`
+    /// variant it doesn't actually match.
+    #[test]
+    fn recorded_session_refusal_carries_indeterminate_reason_through() {
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::Indeterminate {
+                reason: "no session found for this peer's session key".to_string()
+            }),
+            RecordedSessionRefusal::Indeterminate {
+                reason: "no session found for this peer's session key".to_string()
+            }
+        );
+    }
+
+    /// Defensive fallback: `recorded_session_refusal` must never panic,
+    /// even on a `Member` verdict it should structurally never receive at
+    /// its one real call site (see that function's own doc comment).
+    #[test]
+    fn recorded_session_refusal_never_panics_on_a_member_verdict() {
+        assert!(matches!(
+            recorded_session_refusal(&MembershipVerdict::Member),
+            RecordedSessionRefusal::Indeterminate { .. }
+        ));
     }
 }
