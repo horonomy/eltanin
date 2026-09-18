@@ -72,6 +72,7 @@ fn configure_gates(mut config: AuthorizationConfig) -> Result<AuthorizationConfi
     let revocation_required = required_flag("ELTANIN_AGENT_REVOCATION_REQUIRED")?;
     let approval_required = required_flag("ELTANIN_AGENT_APPROVAL_REQUIRED")?;
     let approval_store = env::var_os("ELTANIN_AGENT_APPROVAL_STORE");
+    let gate_config_path = env::var_os("ELTANIN_AGENT_GATE_CONFIG");
 
     if session_required {
         config = config.with_session_requirement(SessionRequirement::Required);
@@ -86,8 +87,12 @@ fn configure_gates(mut config: AuthorizationConfig) -> Result<AuthorizationConfi
     // require approvals without also naming a durable store path (see
     // that method's own doc), so this binary enforces the same pairing
     // at the env-var boundary rather than silently ignoring one half of
-    // a half-specified configuration.
-    match (approval_required, approval_store) {
+    // a half-specified configuration. `resolved_approval_store` is kept
+    // (rather than discarded once `with_approval_store` is called) so
+    // the delegation/step-up gate-config wiring below can reuse the
+    // operator's own store path — never a store path from the
+    // gate-config file itself, which deliberately has no such field.
+    let resolved_approval_store: Option<PathBuf> = match (approval_required, approval_store) {
         (true, None) => {
             return Err(
                 "ELTANIN_AGENT_APPROVAL_REQUIRED is set but ELTANIN_AGENT_APPROVAL_STORE is not \
@@ -109,9 +114,53 @@ fn configure_gates(mut config: AuthorizationConfig) -> Result<AuthorizationConfi
                     raw.to_string_lossy()
                 )
             })?;
-            config = config.with_approval_store(PathBuf::from(path));
+            let path = PathBuf::from(path);
+            config = config.with_approval_store(path.clone());
+            Some(path)
         }
-        (false, None) => {}
+        (false, None) => None,
+    };
+
+    // `ELTANIN_AGENT_GATE_CONFIG` (HORO-1278) exposes the bounded
+    // compute delegation (F-M2-003) and risk-based step-up (F-M2-004)
+    // gates, both fully implemented and Track-A-tested but previously
+    // reachable only by a caller embedding `eltanin-agent` as a
+    // library. Both `AuthorizationConfig::with_delegation`/
+    // `with_step_up` also flip `approval_requirement`/
+    // `approval_store_path` as a side effect — resolved here from the
+    // operator's own `ELTANIN_AGENT_APPROVAL_REQUIRED`/
+    // `ELTANIN_AGENT_APPROVAL_STORE` pair, never from the gate-config
+    // file — so an operator who names a gate-config file without also
+    // requiring approvals must be refused, not silently opted into an
+    // approval gate they never asked for.
+    if let Some(gate_config_path) = gate_config_path {
+        let Some(approval_store) = resolved_approval_store else {
+            return Err(
+                "ELTANIN_AGENT_GATE_CONFIG is set but ELTANIN_AGENT_APPROVAL_REQUIRED and \
+                 ELTANIN_AGENT_APPROVAL_STORE are not — delegation/step-up cannot be enabled \
+                 without also requiring approvals with a durable store path"
+                    .to_string(),
+            );
+        };
+        let gate_config_path = gate_config_path.into_string().map_err(|raw| {
+            format!(
+                "ELTANIN_AGENT_GATE_CONFIG is set but not valid UTF-8: {}",
+                raw.to_string_lossy()
+            )
+        })?;
+        let gate_config_path = PathBuf::from(gate_config_path);
+        let gate_config = authz::gate_config::load_gate_config(&gate_config_path).map_err(|e| {
+            format!(
+                "failed to load gate config {}: {e}",
+                gate_config_path.display()
+            )
+        })?;
+        if let Some(delegation) = gate_config.delegation {
+            config = config.with_delegation(approval_store.clone(), delegation);
+        }
+        if let Some(step_up) = gate_config.step_up {
+            config = config.with_step_up(approval_store.clone(), step_up);
+        }
     }
 
     Ok(config)
