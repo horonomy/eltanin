@@ -23,7 +23,7 @@ use eltanin_core::lease::{LeaseError, LeaseId, LeaseValidity, MonotonicTime, Rev
 use eltanin_core::peer::PeerContext;
 use eltanin_core::policy::PolicyDecision;
 use eltanin_core::resource::{Action, EnforcementResult, ResourceIdentity};
-use eltanin_core::session::{SessionId, SessionTerminationOutcome};
+use eltanin_core::session::{MembershipVerdict, SessionId, SessionTerminationOutcome};
 
 use eltanin_backend::contract::BackendError;
 use eltanin_protocol::request::ClientRequest;
@@ -94,8 +94,18 @@ pub enum AuthorizationOutcome {
     /// `session_requirement` is `Required` and the peer verified as no
     /// session's member. Reported *before* policy is ever consulted —
     /// see `crate::authz`'s module docs on why this must never be
-    /// conflated with a `PolicyDenied` outcome.
-    SessionRequired,
+    /// conflated with a `PolicyDenied` outcome. `verdict` is the actual
+    /// `membership()` result that produced this refusal (HORO-1278) —
+    /// always `NotMember`/`Indeterminate`, never `Member`, since this
+    /// variant is only ever constructed when membership already failed
+    /// — carried through in full so the audit trail can distinguish
+    /// *why* (key/uid/host mismatch, expiry, anchor recycling, or
+    /// indeterminate evidence), not just *that*, without collapsing any
+    /// of that detail onto the deliberately lossy wire response (see
+    /// `eltanin-protocol::response`'s `NoTrustedSession` doc).
+    SessionRequired {
+        verdict: MembershipVerdict,
+    },
     SessionEstablished {
         session_id: SessionId,
         expires_at: MonotonicTime,

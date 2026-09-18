@@ -1283,7 +1283,9 @@ impl AuthorizationHandler {
             && !matches!(verdict, MembershipVerdict::Member)
         {
             return Err((
-                AuthorizationOutcome::SessionRequired,
+                AuthorizationOutcome::SessionRequired {
+                    verdict: verdict.clone(),
+                },
                 AgentResponse::LeaseDenied {
                     reason: DenialReason::NoTrustedSession,
                 },
@@ -1490,7 +1492,7 @@ impl AuthorizationHandler {
         let verdict = match &outcome {
             AuthorizationOutcome::StepUpRequired { .. } => Some(ShadowVerdict::WouldStepUp),
             AuthorizationOutcome::PeerNotAuthorizable
-            | AuthorizationOutcome::SessionRequired
+            | AuthorizationOutcome::SessionRequired { .. }
             | AuthorizationOutcome::ApprovalRequired
             | AuthorizationOutcome::ApprovalDenied
             | AuthorizationOutcome::DelegationRefused { .. }

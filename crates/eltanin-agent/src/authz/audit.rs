@@ -28,12 +28,13 @@ use eltanin_audit::record::{
     RecordedLeaseError, RecordedLeaseValidity, RecordedOperation, RecordedOutcome, RecordedPeer,
     RecordedPeerConsistency, RecordedPeerCredential, RecordedPolicyDecision,
     RecordedPolicyProvenance, RecordedRequest, RecordedSessionAdmissionError,
+    RecordedSessionRefusal,
 };
 use eltanin_audit::sink::{AuditEntry, AuditFileSink, AuditSinkError};
 use eltanin_core::lease::{IssuerInstanceId, LeaseError, LeaseValidity};
 use eltanin_core::peer::{PeerConsistency, PeerContext, PeerCredential};
 use eltanin_core::policy::{DecisionReason, PolicyDecision, PolicyProvenance};
-use eltanin_core::session::{EmptyScope, SessionError};
+use eltanin_core::session::{EmptyScope, MembershipVerdict, NotMemberReason, SessionError};
 use eltanin_protocol::request::ClientRequest;
 use eltanin_protocol::response::EnforcementMode;
 
@@ -98,6 +99,40 @@ fn recorded_session_admission_error(
                 RecordedSessionAdmissionError::TtlExceedsMaximum { requested, maximum }
             }
             SessionError::ExpiryOverflow => RecordedSessionAdmissionError::ExpiryOverflow,
+        },
+    }
+}
+
+/// Convert the `membership()` verdict carried by
+/// `AuthorizationOutcome::SessionRequired` (HORO-1278) into its
+/// audit-facing mirror. `verdict` is always `NotMember`/`Indeterminate`
+/// at this call site — `SessionRequired` is only ever constructed after
+/// `membership()`/`membership_for_peer` has already ruled out `Member`
+/// (see `crate::authz::AuthorizationHandler::request_lease_verdict`) —
+/// but this function never panics on a `Member` verdict regardless: an
+/// audit-conversion function must never crash the request path over a
+/// value it merely renders, so an (unreachable in practice) `Member` is
+/// still rendered, honestly, as `Indeterminate` naming the contradiction,
+/// rather than unwrapping/panicking on an internal invariant a future
+/// refactor could otherwise silently break.
+fn recorded_session_refusal(verdict: &MembershipVerdict) -> RecordedSessionRefusal {
+    match verdict.clone() {
+        MembershipVerdict::NotMember { reason } => match reason {
+            NotMemberReason::KeyMismatch => RecordedSessionRefusal::KeyMismatch,
+            NotMemberReason::OwnerUidMismatch => RecordedSessionRefusal::OwnerUidMismatch,
+            NotMemberReason::HostMismatch => RecordedSessionRefusal::HostMismatch,
+            NotMemberReason::Expired { expired_at } => {
+                RecordedSessionRefusal::Expired { expired_at }
+            }
+            NotMemberReason::AnchorRecycled => RecordedSessionRefusal::AnchorRecycled,
+        },
+        MembershipVerdict::Indeterminate { reason } => {
+            RecordedSessionRefusal::Indeterminate { reason }
+        }
+        MembershipVerdict::Member => RecordedSessionRefusal::Indeterminate {
+            reason: "internal invariant violated: SessionRequired was constructed from a \
+                     Member verdict"
+                .to_string(),
         },
     }
 }
@@ -246,7 +281,9 @@ fn recorded_outcome(outcome: &AuthorizationOutcome) -> RecordedOutcome {
         },
         AuthorizationOutcome::ReleaseUnknownLease => RecordedOutcome::ReleaseUnknownLease,
         AuthorizationOutcome::StatusReported => RecordedOutcome::StatusReported,
-        AuthorizationOutcome::SessionRequired => RecordedOutcome::SessionRequired,
+        AuthorizationOutcome::SessionRequired { verdict } => RecordedOutcome::SessionRequired {
+            refusal: recorded_session_refusal(&verdict),
+        },
         AuthorizationOutcome::SessionEstablished {
             session_id,
             expires_at,

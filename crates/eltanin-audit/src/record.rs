@@ -364,7 +364,15 @@ pub enum RecordedOutcome {
     },
     ReleaseUnknownLease,
     StatusReported,
-    SessionRequired,
+    /// The pre-policy session-admission gate refused a `RequestLease`
+    /// (F-M2-001, HORO-791). `refusal` carries the actual
+    /// `NotMemberReason`/`MembershipVerdict::Indeterminate` that produced
+    /// this refusal (HORO-1278) — the client-facing wire response stays
+    /// the single, deliberately coarse `DenialReason::NoTrustedSession`
+    /// for every case; this field is audit-only fidelity on top of that.
+    SessionRequired {
+        refusal: RecordedSessionRefusal,
+    },
     SessionEstablished {
         session_id: SessionId,
         expires_at: MonotonicTime,

@@ -262,7 +262,7 @@ fn session_required_is_identical_across_modes() {
     assert_outcomes_equal(&dual, "SessionRequired");
     assert!(matches!(
         dual.enforce_outcome,
-        AuthorizationOutcome::SessionRequired
+        AuthorizationOutcome::SessionRequired { .. }
     ));
     assert_eq!(
         dual.shadow_response,
