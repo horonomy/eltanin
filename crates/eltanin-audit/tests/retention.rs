@@ -11,19 +11,20 @@ use eltanin_core::lease::IssuerInstanceId;
 mod support;
 use support::{peer, status_entry};
 
-/// One serialized `status_entry()` line is 964 bytes (HORO-797 prep grew
-/// `AgentStatusView` by three more fields — `session_required`/
-/// `approval_required`/`revocation_required` — on top of HORO-796
-/// subtask 3's `enforcement_mode`) and its `AuditLogRotated` marker line
-/// is 237 bytes. `3000` is chosen so both this file's append sequences
-/// rotate at the exact counts their own comments describe: the first
-/// generation fits 3 decision lines (3 × 964 = 2892 ≤ 3000) but not a
-/// 4th (4 × 964 = 3856 > 3000), so a 4-append sequence rotates exactly
-/// once, on the 4th append; a second generation then holds one marker
-/// plus two more decision lines (237 + 2 × 964 = 2165 ≤ 3000) but not a
-/// 3rd (2165 + 964 = 3129 > 3000), so a 6-append sequence rotates a
-/// second time, on the 6th append.
-const MAX_BYTES: u64 = 3000;
+/// One serialized `status_entry()` line is 1021 bytes (HORO-1278 grew
+/// `AgentStatusView` by two more fields — `delegation_configured`/
+/// `step_up_configured` — on top of HORO-797 prep's three, which were on
+/// top of HORO-796 subtask 3's `enforcement_mode`) and its
+/// `AuditLogRotated` marker line is 237 bytes. `3200` is chosen so both
+/// this file's append sequences rotate at the exact counts their own
+/// comments describe: the first generation fits 3 decision lines
+/// (3 × 1021 = 3063 ≤ 3200) but not a 4th (4 × 1021 = 4084 > 3200), so a
+/// 4-append sequence rotates exactly once, on the 4th append; a second
+/// generation then holds one marker plus two more decision lines
+/// (237 + 2 × 1021 = 2279 ≤ 3200) but not a 3rd (2279 + 1021 = 3300 >
+/// 3200), so a 6-append sequence rotates a second time, on the 6th
+/// append.
+const MAX_BYTES: u64 = 3200;
 
 #[test]
 fn read_log_spans_both_generations_in_write_order_after_one_rotation() {
