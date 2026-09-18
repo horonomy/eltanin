@@ -447,6 +447,12 @@ fn ac2_a_foreign_session_process_cannot_join_by_pid_alone() {
 /// ADR 0010 disclosure 2 states the same boundary from the approval
 /// side: "Not a boundary against the same user's other processes."
 ///
+/// HORO-1278's session-anchor redesign does not close this gap: its new
+/// uid/host checks in `membership()` only reject a *different* uid (or
+/// host) than the session owner's, and this scenario is specifically the
+/// *same* uid — so this test is expected to keep passing unmodified after
+/// that redesign, and it does.
+///
 /// Unlike `ac2_a_foreign_session_process_cannot_join_by_pid_alone` above
 /// (which proves a *different*-session process is correctly refused),
 /// this test spawns a real child that never calls `setsid()` — it
@@ -688,6 +694,146 @@ fn horo1278_an_expired_session_is_refused_by_membership_itself() {
                 expired_at: session.expires_at()
             }
         }
+    );
+}
+
+/// S8c (HORO-797 adversarial matrix, HORO-1278 redesign) — `PINS_TRADEOFF`,
+/// not a regression: a same-session process that never calls `setsid()`
+/// (S8's "detached persistent daemon" — reached here by a real second
+/// child that inherits this test process's own POSIX session exactly
+/// like `s3_a_same_session_unrelated_process_is_admitted_with_no_further_defense`/
+/// `horo1278_a_session_survives_the_establishing_peer_process_exiting`
+/// above, standing in for a double-fork-without-`setsid()` daemon, which
+/// has the identical property that actually matters here — same sid,
+/// established leader now genuinely dead) is admitted for the FULL
+/// session TTL, bounded only by session expiry, never by the
+/// establishing leader process's own lifetime.
+///
+/// This is disclosed and deliberate, not a bug: `SessionAuthority::validate`'s
+/// own doc states plainly that "what now bounds a `TrustedSession`'s
+/// lifetime... is TTL/expiry alone, not leader liveness. This is not a
+/// regression; it is exactly the founder's 'explicit TTL/expiry'
+/// requirement (HORO-1278), made structural rather than incidental."
+/// Before HORO-1278, ANY same-session detached process was killed the
+/// moment the session leader (the CLI process) exited — that was the
+/// bug's own accidental "protection," not a real security boundary. The
+/// distinguishing fact this test pins is TTL-*bounded* admission
+/// (correct, proven by this test's second half) versus
+/// permanent/indefinite admission with no expiry (which would be wrong
+/// and is NOT what this test asserts) — a future reader must not mistake
+/// this test's first-half "admitted after leader death" assertion for the
+/// bug HORO-1278 fixed.
+#[test]
+fn s8c_a_same_session_detached_process_is_bounded_by_ttl_not_by_terminal_lifetime() {
+    let clock = FixedClock::new();
+    let handler = AuthorizationHandler::new(
+        IssuerInstanceId::new("test-instance"),
+        allow_policy_for_uid(real_self_uid()),
+        backend_with_resource(&[
+            eltanin_core::resource::Capability::DeviceEnforce,
+            eltanin_core::resource::Capability::DeviceRevoke,
+        ]),
+        Arc::clone(&clock) as Arc<dyn eltanin_agent::authz::Clock>,
+        Arc::new(NullSink),
+        &AuthorizationConfig::new(Duration::from_secs(60))
+            .unwrap()
+            .with_session_requirement(SessionRequirement::Required),
+    );
+
+    // The "CLI"/leader process — a real child, never calling `setsid()`,
+    // that establishes the session and then genuinely exits, exactly like
+    // `horo1278_a_session_survives_the_establishing_peer_process_exiting`
+    // above.
+    let mut establishing_child = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("spawn /bin/cat as the establishing peer");
+    let establishing_pid = establishing_child.id();
+    match platform::collect_workload_identity(establishing_pid).process_start {
+        Evidence::Present { .. } => {}
+        other => {
+            let _ = establishing_child.kill();
+            let _ = establishing_child.wait();
+            panic!(
+                "expected the establishing child's process_start to be kernel-observed before \
+                 proceeding, got {other:?}"
+            );
+        }
+    }
+    let establishing_peer = peer_context_for_pid(establishing_pid, real_self_uid());
+    let established = create_session(&handler, &establishing_peer);
+    assert!(
+        matches!(established, AgentResponse::SessionEstablished { .. }),
+        "expected SessionEstablished, got {established:?}"
+    );
+
+    // The "detached persistent daemon" — a second real child, ALSO never
+    // calling `setsid()`, so it stays in the SAME POSIX session as the
+    // (about-to-die) leader by ordinary fork/exec inheritance, exactly
+    // the shape a double-fork-without-`setsid()` daemon leaves behind.
+    let mut detached_child = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("spawn /bin/cat as the same-session detached daemon");
+    let detached_pid = detached_child.id();
+    match platform::collect_workload_identity(detached_pid).process_start {
+        Evidence::Present { .. } => {}
+        other => {
+            let _ = establishing_child.kill();
+            let _ = establishing_child.wait();
+            let _ = detached_child.kill();
+            let _ = detached_child.wait();
+            panic!(
+                "expected the detached child's process_start to be kernel-observed before \
+                 proceeding, got {other:?}"
+            );
+        }
+    }
+    let detached_peer = peer_context_for_pid(detached_pid, real_self_uid());
+
+    // Kill and genuinely wait for the leader to exit — the session's
+    // anchor leader is now truly dead, well within the session's TTL.
+    let _ = establishing_child.kill();
+    let _ = establishing_child.wait();
+
+    let admitted = handler.handle(&lease_request(), &detached_peer);
+    assert!(
+        matches!(admitted, AgentResponse::LeaseGranted { .. }),
+        "immediately after the leader's death, well within the session TTL, the same-session \
+         detached daemon must be admitted — leader death alone must never kill the session, \
+         got {admitted:?}"
+    );
+    if let AgentResponse::LeaseGranted { lease } = admitted {
+        handler.handle(
+            &ClientRequest::ReleaseLease(ReleaseRequest {
+                lease_id: lease.lease_id,
+            }),
+            &detached_peer,
+        );
+    }
+
+    // Advance the clock past the session's own TTL (`create_session`
+    // above requests 30s) — no real sleep, deterministic.
+    clock.advance(Duration::from_secs(31));
+
+    let denied = handler.handle(&lease_request(), &detached_peer);
+
+    let _ = detached_child.kill();
+    let _ = detached_child.wait();
+
+    assert_eq!(
+        denied,
+        AgentResponse::LeaseDenied {
+            reason: DenialReason::NoTrustedSession
+        },
+        "past the session's own TTL, the same-session detached daemon must be denied — \
+         `NotMemberReason::Expired`/`SessionValidity::Expired` collapses at the wire into \
+         `DenialReason::NoTrustedSession`, exactly like every other NotMember reason (see \
+         `horo1278_a_different_uid_in_the_same_posix_session_is_refused` above) — proving TTL, \
+         not the terminal/leader's lifetime, is what actually bounds this admission. got \
+         {denied:?}"
     );
 }
 
