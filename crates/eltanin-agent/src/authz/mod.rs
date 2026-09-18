@@ -84,8 +84,8 @@ use eltanin_core::policy::{DecisionReason, PolicyDocument, PolicyError, PolicySe
 use eltanin_core::provenance::ProvenanceRecord;
 use eltanin_core::resource::{Capability, ComputeRequest, EnforcementResult};
 use eltanin_core::session::{
-    membership, IntentProof, LocalSessionAnchor, MembershipVerdict, SessionAssurance,
-    SessionAuthority, SessionId, SessionScope,
+    membership, HostId, IntentProof, LeaderCorroboration, LocalSessionAnchor, MembershipVerdict,
+    SessionAssurance, SessionAuthority, SessionId, SessionScope,
 };
 use eltanin_protocol::request::{
     provenance_for, ApproveRequest, ClientRequest, CreateSessionRequest, ForgetApprovalRequest,
@@ -815,18 +815,25 @@ impl AuthorizationHandler {
         Evidence<eltanin_core::session::SessionKey>,
     ) {
         let now = self.clock.now();
+        let host = session::collect_host_id();
         let mut sessions = session_state::lock(&self.sessions);
-        let reaped = sessions.reap(now, session::collect_workload_identity);
+        let reaped = sessions.reap(now, &host, session::collect_workload_identity);
 
         let pid = peer.observed().workload.pid;
         let peer_key = session::collect_session_key(pid);
+        let peer_uid = &peer.observed().workload.uid;
         let matched_and_verdict = match &peer_key {
             Evidence::Present { value, .. } => sessions.find_by_key(*value),
             Evidence::Missing { .. } | Evidence::Unsupported => None,
         }
         .map(|candidate| {
-            let leader = session::collect_workload_identity(candidate.anchor().leader.pid);
-            let verdict = membership(candidate, &peer_key, &leader);
+            // Re-observe whichever process currently occupies the
+            // session's own sid (HORO-1278) — never a `leader.pid` field,
+            // which no longer exists now that `leader` is a
+            // `LeaderCorroboration`, not a bare `WorkloadIdentity`.
+            let sid_pid = u32::try_from(candidate.anchor().key.0).unwrap_or(u32::MAX);
+            let leader = session::collect_workload_identity(sid_pid);
+            let verdict = membership(candidate, peer_uid, &peer_key, &host, &leader, now);
             let matched =
                 matches!(verdict, MembershipVerdict::Member).then(|| candidate.id().clone());
             (matched, verdict)
@@ -1896,19 +1903,54 @@ impl AuthorizationHandler {
                 Err(response) => return response,
             };
 
-        let anchor = LocalSessionAnchor {
-            key,
-            leader: observed.workload.clone(),
+        // Anchor to the session's own sid (HORO-1278), never to the
+        // connecting peer itself: the `CreateSession` request's own
+        // process (`eltanin session start`) is short-lived by design —
+        // it establishes the session and exits — so anchoring `leader`
+        // to *its* identity is exactly the bug this ticket exists to
+        // fix. POSIX defines a session id as the pid of that session's
+        // leader, so `key.0` names the pid whose identity should
+        // actually be recorded: independently re-collected here, never
+        // taken from `observed` (the connecting peer may or may not be
+        // that leader itself — e.g. a `postinstall` script run in the
+        // same shell is not, and must not be recorded as if it were).
+        let leader_pid = u32::try_from(key.0).unwrap_or(u32::MAX);
+        let leader_identity = session::collect_workload_identity(leader_pid);
+        let leader = match &leader_identity.process_start {
+            Evidence::Present {
+                source: EvidenceSource::SelfAsserted,
+                ..
+            }
+            | Evidence::Missing { .. }
+            | Evidence::Unsupported => LeaderCorroboration::Unobserved,
+            Evidence::Present { .. } => LeaderCorroboration::Recorded(leader_identity),
         };
+        let anchor = LocalSessionAnchor { key, leader };
+        let host = session::collect_host_id();
+        // `uname(2)` cannot fail for an ordinary call — `Missing` only
+        // arises from a non-UTF-8 nodename (see `collect_host_id`'s own
+        // doc), an edge case with no honest "real hostname" to record.
+        // A session must still be establishable in that case (host
+        // mismatch is reject-only evidence for *later* comparisons, not
+        // a reason to refuse establishment itself), so this records an
+        // explicit sentinel rather than fabricating a plausible-looking
+        // value.
+        let host_id = match &host {
+            Evidence::Present { value, .. } => value.clone(),
+            Evidence::Missing { .. } | Evidence::Unsupported => HostId("unknown-host".to_string()),
+        };
+        let nonce = session::generate_session_nonce();
         let now = self.clock.now();
         let mut sessions = session_state::lock(&self.sessions);
-        let reaped = sessions.reap(now, session::collect_workload_identity);
+        let reaped = sessions.reap(now, &host, session::collect_workload_identity);
         let established = sessions.authority_mut().establish(
             owner_uid,
             anchor,
             scope,
             IntentProof::LocalPeerPresence,
             SessionAssurance::LocalKernelSession,
+            host_id,
+            nonce,
             now,
             request.ttl,
         );

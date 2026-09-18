@@ -18,8 +18,8 @@
 //! observable kernel state for a given pid, with no side effects to
 //! stub and no meaningful non-determinism to control in a test.
 
-use eltanin_core::identity::{Evidence, WorkloadIdentity};
-use eltanin_core::session::{EmptyScope, SessionError, SessionKey};
+use eltanin_core::identity::{Evidence, EvidenceSource, WorkloadIdentity};
+use eltanin_core::session::{EmptyScope, HostId, SessionError, SessionKey, SessionNonce};
 
 #[cfg(not(target_os = "macos"))]
 use eltanin_linux as platform;
@@ -40,6 +40,61 @@ pub(crate) fn collect_session_key(pid: u32) -> Evidence<SessionKey> {
 #[must_use]
 pub(crate) fn collect_workload_identity(pid: u32) -> WorkloadIdentity {
     platform::collect_workload_identity(pid)
+}
+
+/// Collect this host's locally-resolved identity (HORO-1278), via
+/// `rustix::system::uname`'s nodename — never network-resolved. See
+/// [`HostId`]'s own doc for what this does and does not defend against:
+/// a hostname is mutable by the host's own owner and is not a security
+/// boundary against a local attacker; its only job is cross-host session
+/// reuse rejection for the (currently inert, since session state is
+/// agent-in-memory, single-host) case where session state might someday
+/// be shared/persisted across hosts.
+///
+/// `uname(2)` itself cannot fail for an ordinary call — the only failure
+/// mode this function can report is a non-UTF-8 nodename, which is
+/// reported as [`Evidence::Missing`] rather than lossily converted,
+/// matching this module's platform collectors' "never a default value"
+/// discipline.
+#[must_use]
+pub(crate) fn collect_host_id() -> Evidence<HostId> {
+    let uname = rustix::system::uname();
+    match uname.nodename().to_str() {
+        Ok(nodename) => Evidence::Present {
+            value: HostId(nodename.to_string()),
+            source: EvidenceSource::KernelObserved,
+        },
+        Err(_) => Evidence::Missing {
+            reason: "hostname is not valid UTF-8".to_string(),
+        },
+    }
+}
+
+/// Generate a fresh [`SessionNonce`] by reading 32 bytes from the OS
+/// CSPRNG (`/dev/urandom`), for
+/// `eltanin_core::session::SessionAuthority::establish` to bind onto a
+/// newly established `eltanin_core::session::TrustedSession`.
+/// Lives here, not in `eltanin-core`, deliberately: that crate reads no
+/// non-deterministic external state itself (mirroring its own
+/// `MonotonicTime` being injected, never read from a clock inside it) —
+/// this is the one call site that performs the actual I/O, exactly the
+/// same division of responsibility `crate::runtime::AgentClock` already
+/// establishes for time.
+///
+/// This value does no security work today (see [`SessionNonce`]'s own
+/// doc) — reading `/dev/urandom` failing is therefore not treated as
+/// fatal to session establishment; a failure falls back to an
+/// all-zero nonce rather than aborting `CreateSession` over an inert
+/// extension seam.
+#[must_use]
+pub(crate) fn generate_session_nonce() -> SessionNonce {
+    use std::io::Read;
+    let mut bytes = [0u8; 32];
+    let read = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes));
+    if read.is_err() {
+        bytes = [0u8; 32];
+    }
+    SessionNonce::from_bytes(bytes)
 }
 
 /// Agent deployment configuration: whether `RequestLease` requires an

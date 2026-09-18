@@ -25,25 +25,42 @@
 //! leak — this comment is here because that is an easy thing for a
 //! future reader to misread.
 //!
-//! **Correction (HORO-795):** the claim above — "`membership` would
-//! independently reject it" — is true for anchor-liveness (a dead
-//! anchor leader) but was previously overstated for time-based expiry:
-//! [`eltanin_core::session::membership`] takes no `now` parameter and
-//! never checks `expires_at` on its own. The actual safety property is
-//! that [`crate::authz::AuthorizationHandler::membership_for_peer`]
-//! calls [`SessionState::reap`] immediately before the session lookup, *under
-//! the same lock* — that ordering is load-bearing, not incidental. An
-//! expired session is never itself admitted because it is reaped away
-//! before `membership` ever sees it, not because `membership` would
-//! have rejected it on expiry grounds if it had.
+//! **Correction (HORO-795), superseded by HORO-1278's structural fix
+//! below:** the claim above — "`membership` would independently reject
+//! it" — was true for anchor-liveness (a dead anchor leader) but had
+//! been overstated for time-based expiry: at the time,
+//! [`eltanin_core::session::membership`] took no `now` parameter and
+//! never checked `expires_at` on its own, so the actual safety property
+//! was that [`crate::authz::AuthorizationHandler::membership_for_peer`]
+//! called [`SessionState::reap`] immediately before the session lookup,
+//! *under the same lock* — that ordering was load-bearing, not
+//! incidental.
+//!
+//! **HORO-1278 closes that caveat**: `membership` now takes `now`
+//! directly and checks `expires_at` structurally, inside the one
+//! combined signature, on every call — so an expired session is denied
+//! by `membership` itself even if a caller somehow reached it without
+//! reaping first. The ordering above is no longer load-bearing for
+//! expiry (though `reap` still runs first here, as ever, purely to bound
+//! memory — see below). HORO-1278 also makes leader corroboration
+//! reject-only (see [`eltanin_core::session::LeaderCorroboration`]'s
+//! doc): a session's anchor leader simply being unobservable (the
+//! establishing CLI process having already exited — the expected,
+//! common case this whole ticket exists to fix) is no longer treated as
+//! "anchor gone" by [`eltanin_core::session::SessionAuthority::validate`]
+//! either, so `reap` (which calls `validate`) no longer deletes a
+//! session merely because its establishing process is no longer alive —
+//! only TTL/expiry and an explicit `TerminateSession` bound a session's
+//! lifetime now, exactly as the founder's "explicit TTL/expiry"
+//! requirement specifies.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, PoisonError};
 
-use eltanin_core::identity::WorkloadIdentity;
+use eltanin_core::identity::{Evidence, WorkloadIdentity};
 use eltanin_core::lease::{LeaseId, MonotonicTime};
 use eltanin_core::session::{
-    SessionAuthority, SessionId, SessionKey, SessionValidity, TrustedSession,
+    HostId, SessionAuthority, SessionId, SessionKey, SessionValidity, TrustedSession,
 };
 
 /// Owns one [`SessionAuthority`] instance and the sessions it has
@@ -119,29 +136,40 @@ impl SessionState {
     }
 
     /// Drop every stored session whose [`SessionAuthority::validate`]
-    /// (re-observing its anchor leader via `observe_leader`) is not
-    /// [`SessionValidity::Valid`]. Returns each reaped session's id and
-    /// its associated lease ids, for the caller to revoke at the
+    /// (re-observing the sid's current occupant via `observe_leader`) is
+    /// not [`SessionValidity::Valid`]. Returns each reaped session's id
+    /// and its associated lease ids, for the caller to revoke at the
     /// backend/lease-state layer — this module owns no
     /// `ComputeBackend`/`LeaseState` reference itself, staying a pure
     /// session store. `#[must_use]` (HORO-795 bug fix): both call sites
     /// in `authz/mod.rs` used to discard this return value entirely, so
-    /// a session that died by EXPIRY or ANCHOR-LEADER DEATH (as opposed
-    /// to an explicit `TerminateSession`, whose own cascade already
+    /// a session that died by EXPIRY or ANCHOR-RECYCLING (as opposed to
+    /// an explicit `TerminateSession`, whose own cascade already
     /// consumed this correctly) never had its leases revoked at the
     /// backend layer at all.
+    ///
+    /// `observe_leader` is keyed off the session's own sid
+    /// (`anchor().key.0`, HORO-1278) — **not** a `leader.pid` field, which
+    /// no longer exists now that [`eltanin_core::session::LocalSessionAnchor::leader`]
+    /// is a [`eltanin_core::session::LeaderCorroboration`] rather than a
+    /// bare `WorkloadIdentity`. This re-observes whichever process
+    /// currently occupies the recorded sid, exactly the identity
+    /// `validate`'s reject-only leader-corroboration check needs to
+    /// detect sid recycling — see that method's own doc.
     #[must_use]
     pub(crate) fn reap(
         &mut self,
         now: MonotonicTime,
+        host: &Evidence<HostId>,
         mut observe_leader: impl FnMut(u32) -> WorkloadIdentity,
     ) -> Vec<(SessionId, BTreeSet<LeaseId>)> {
         let stale: Vec<SessionId> = self
             .sessions
             .values()
             .filter_map(|session| {
-                let leader = observe_leader(session.anchor().leader.pid);
-                match self.authority.validate(session, &leader, now) {
+                let sid_pid = u32::try_from(session.anchor().key.0).unwrap_or(u32::MAX);
+                let leader = observe_leader(sid_pid);
+                match self.authority.validate(session, host, &leader, now) {
                     SessionValidity::Valid { .. } => None,
                     _ => Some(session.id().clone()),
                 }
