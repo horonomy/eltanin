@@ -64,7 +64,18 @@ use serde::{Deserialize, Serialize};
 /// durable `Approval` embeds the old `schema_version` in its recorded
 /// `PolicyProvenance`, so this bump alone makes every one of them fail
 /// `recall`'s security-posture dimension and require re-approval.
-pub const DOMAIN_SCHEMA_VERSION: u16 = 6;
+/// Bumped to `7` for HORO-1278, by the same criterion: `eltanin-audit`'s
+/// `RecordedOutcome` — internally tagged with no `#[serde(other)]`
+/// catch-all — changes `SessionRequired` from a unit variant to a
+/// struct variant carrying a new `refusal: RecordedSessionRefusal`
+/// field, giving the audit trail refusal-reason fidelity matching the
+/// rich internal `NotMemberReason`/`MembershipVerdict` distinctions
+/// `eltanin-core::session` already makes. Same side effect as every
+/// prior bump: every pre-existing durable `Approval` embeds the old
+/// `schema_version` in its recorded `PolicyProvenance`, so this bump
+/// alone makes every one of them fail `recall`'s security-posture
+/// dimension and require re-approval.
+pub const DOMAIN_SCHEMA_VERSION: u16 = 7;
 
 /// Wraps a domain payload with an explicit schema version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

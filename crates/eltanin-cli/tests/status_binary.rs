@@ -21,7 +21,7 @@ fn eltanin_status(agent: &FakeAgent) -> std::process::Output {
 fn status_reports_enforce_mode() {
     let agent = FakeAgent::start(|_| AgentResponse::Status {
         status: AgentStatusView {
-            protocol_version: 6,
+            protocol_version: 7,
             enforcement_mode: EnforcementMode::Enforce,
             session_required: false,
             approval_required: false,
@@ -42,7 +42,7 @@ fn status_reports_enforce_mode() {
 fn status_reports_shadow_mode_with_an_unenforced_warning() {
     let agent = FakeAgent::start(|_| AgentResponse::Status {
         status: AgentStatusView {
-            protocol_version: 6,
+            protocol_version: 7,
             enforcement_mode: EnforcementMode::Shadow,
             session_required: false,
             approval_required: false,
@@ -63,7 +63,7 @@ fn status_reports_shadow_mode_with_an_unenforced_warning() {
 fn status_discloses_every_gate_not_required_by_default() {
     let agent = FakeAgent::start(|_| AgentResponse::Status {
         status: AgentStatusView {
-            protocol_version: 6,
+            protocol_version: 7,
             enforcement_mode: EnforcementMode::Enforce,
             session_required: false,
             approval_required: false,
@@ -85,7 +85,7 @@ fn status_discloses_every_gate_not_required_by_default() {
 fn status_discloses_every_gate_when_required() {
     let agent = FakeAgent::start(|_| AgentResponse::Status {
         status: AgentStatusView {
-            protocol_version: 6,
+            protocol_version: 7,
             enforcement_mode: EnforcementMode::Enforce,
             session_required: true,
             approval_required: true,

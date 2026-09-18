@@ -51,7 +51,7 @@ mkdir -p ~/.config/eltanin/profiles
 
 ```json
 {
-  "version": 6,
+  "version": 7,
   "payload": {
     "resource": {
       "vendor": "fake",
