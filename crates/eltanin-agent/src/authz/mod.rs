@@ -105,6 +105,7 @@ pub mod audit;
 mod delegation;
 mod delegation_state;
 pub mod event;
+pub mod gate_config;
 mod risk;
 pub mod session;
 mod session_state;
