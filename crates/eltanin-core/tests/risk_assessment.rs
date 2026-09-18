@@ -212,7 +212,9 @@ fn privilege_escalation_to_root_requires_both_transition_and_observed_root() {
 #[test]
 fn not_member_fires_detached_execution() {
     let ctx = context(1000, "/usr/bin/tool");
-    let verdict_membership = MembershipVerdict::NotMember;
+    let verdict_membership = MembershipVerdict::NotMember {
+        reason: eltanin_core::session::NotMemberReason::KeyMismatch,
+    };
     let verdicts = GateVerdicts {
         membership: &verdict_membership,
         recall: &[],
