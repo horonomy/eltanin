@@ -78,6 +78,8 @@ fn status_entry(pid: u32) -> AuditEntry {
                 session_required: false,
                 approval_required: false,
                 revocation_required: false,
+                delegation_configured: false,
+                step_up_configured: false,
             },
         },
         mode: RecordedEnforcementMode::Enforce,

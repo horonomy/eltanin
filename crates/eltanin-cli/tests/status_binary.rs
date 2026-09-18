@@ -26,6 +26,8 @@ fn status_reports_enforce_mode() {
             session_required: false,
             approval_required: false,
             revocation_required: false,
+            delegation_configured: false,
+            step_up_configured: false,
         },
     });
 
@@ -45,6 +47,8 @@ fn status_reports_shadow_mode_with_an_unenforced_warning() {
             session_required: false,
             approval_required: false,
             revocation_required: false,
+            delegation_configured: false,
+            step_up_configured: false,
         },
     });
 
@@ -64,6 +68,8 @@ fn status_discloses_every_gate_not_required_by_default() {
             session_required: false,
             approval_required: false,
             revocation_required: false,
+            delegation_configured: false,
+            step_up_configured: false,
         },
     });
 
@@ -84,6 +90,8 @@ fn status_discloses_every_gate_when_required() {
             session_required: true,
             approval_required: true,
             revocation_required: true,
+            delegation_configured: false,
+            step_up_configured: false,
         },
     });
 

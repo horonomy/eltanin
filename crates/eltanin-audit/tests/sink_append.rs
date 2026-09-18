@@ -30,6 +30,8 @@ fn status_entry() -> AuditEntry {
                 session_required: false,
                 approval_required: false,
                 revocation_required: false,
+                delegation_configured: false,
+                step_up_configured: false,
             },
         },
         mode: RecordedEnforcementMode::Enforce,
@@ -137,24 +139,25 @@ fn a_failed_write_still_advances_the_sequence_leaving_a_detectable_gap() {
 
 #[test]
 fn rotation_triggers_at_the_configured_byte_threshold() {
-    // One serialized status_entry() line is 964 bytes (HORO-797 prep
-    // grew `AgentStatusView` by three more fields — `session_required`/
-    // `approval_required`/`revocation_required` — on top of HORO-796
-    // subtask 3's `enforcement_mode`) and its `AuditLogRotated` marker
-    // line is 237 bytes. `3000` fits exactly 3 decision lines in the
-    // first generation (3 × 964 = 2892 ≤ 3000, but 4 × 964 = 3856 >
-    // 3000) — so the 4th of these 5 appends triggers exactly one
-    // rotation, and the second generation's marker plus the 2 remaining
-    // decision lines (237 + 2 × 964 = 2165 ≤ 3000) fits with room to
-    // spare, guaranteeing no second rotation — so every appended record
-    // must still be present (nothing has been discarded yet, since a
-    // generation is only ever discarded by a *second* rotation). See
-    // `tests/retention.rs`'s identical `MAX_BYTES` constant for the same
-    // byte-math worked out for a 6-append, two-rotation sequence.
+    // One serialized status_entry() line is 1021 bytes (HORO-1278 grew
+    // `AgentStatusView` by two more fields — `delegation_configured`/
+    // `step_up_configured` — on top of HORO-797 prep's three, which were
+    // on top of HORO-796 subtask 3's `enforcement_mode`) and its
+    // `AuditLogRotated` marker line is 237 bytes. `3200` fits exactly 3
+    // decision lines in the first generation (3 × 1021 = 3063 ≤ 3200,
+    // but 4 × 1021 = 4084 > 3200) — so the 4th of these 5 appends
+    // triggers exactly one rotation, and the second generation's marker
+    // plus the 2 remaining decision lines (237 + 2 × 1021 = 2279 ≤ 3200)
+    // fits with room to spare, guaranteeing no second rotation — so
+    // every appended record must still be present (nothing has been
+    // discarded yet, since a generation is only ever discarded by a
+    // *second* rotation). See `tests/retention.rs`'s identical
+    // `MAX_BYTES` constant for the same byte-math worked out for a
+    // 6-append, two-rotation sequence.
     let path = temp_log_path("rotate-threshold");
     let sink = AuditFileSink::open(&path, IssuerInstanceId::new("i"))
         .unwrap()
-        .with_max_bytes(3000);
+        .with_max_bytes(3200);
 
     assert!(
         !rotated_path(&path).exists(),

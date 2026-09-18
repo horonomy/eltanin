@@ -128,6 +128,7 @@ dependencies = [
  "eltanin-macos",
  "eltanin-protocol",
  "rustix",
+ "serde",
  "serde_json",
  "signal-hook",
  "thiserror",

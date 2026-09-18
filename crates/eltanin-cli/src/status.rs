@@ -12,10 +12,13 @@
 //! `revocation_required` gate flags (HORO-797 prep) so an operator can
 //! confirm which of `eltanin session start`/`eltanin approve`/
 //! revocation-capability gating are actually active, rather than
-//! inferring a silently-permissive posture from side effects — this
-//! module reports exactly what the wire type exposes and nothing more,
-//! deliberately not inventing a richer view the agent does not actually
-//! expose.
+//! inferring a silently-permissive posture from side effects. Also
+//! surfaces `delegation_configured`/`step_up_configured` (HORO-1278) so
+//! an operator can confirm whether bounded compute delegation
+//! (F-M2-003) and risk-based step-up (F-M2-004) are active without
+//! inspecting the agent's own configuration — this module reports
+//! exactly what the wire type exposes and nothing more, deliberately
+//! not inventing a richer view the agent does not actually expose.
 
 use eltanin_protocol::request::ClientRequest;
 use eltanin_protocol::response::{AgentResponse, AgentStatusView, EnforcementMode, ErrorCode};
@@ -103,5 +106,18 @@ fn describe_gates(status: AgentStatusView) -> String {
         "revocation required: NO — this agent does not require DeviceRevoke support to lease a \
          resource"
     };
-    format!("{session}\n{approval}\n{revocation}")
+    let delegation = if status.delegation_configured {
+        "delegation configured: yes (a descendant of an already-admitted requester may be \
+         silently admitted under a matching delegation grant)"
+    } else {
+        "delegation configured: NO — this agent does not admit any request via bounded compute \
+         delegation"
+    };
+    let step_up = if status.step_up_configured {
+        "step-up configured: yes (an approval/delegation refusal may be classified into a \
+         step-up-required or risk-denied response)"
+    } else {
+        "step-up configured: NO — this agent does not classify refusals with risk-based step-up"
+    };
+    format!("{session}\n{approval}\n{revocation}\n{delegation}\n{step_up}")
 }

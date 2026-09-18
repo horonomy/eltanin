@@ -143,6 +143,8 @@ fn responses_eltanin_run_never_sends_a_request_for_classify_to_an_agent_error_no
             session_required: false,
             approval_required: false,
             revocation_required: false,
+            delegation_configured: false,
+            step_up_configured: false,
         },
     };
     assert!(classify_response(&status).is_some());

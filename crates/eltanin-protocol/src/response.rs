@@ -199,6 +199,12 @@ pub enum ShadowVerdict {
 /// include the agent's [`eltanin_core::lease::IssuerInstanceId`] — not
 /// secret, but there is no MVP 1.0 caller that needs it and no reason to
 /// hand it out.
+// Five independent, per-gate boolean disclosures — not a state machine
+// with mutually exclusive states (clippy's suggested alternative): each
+// flag names a distinct, independently-configurable admission gate, and
+// every combination of them is a valid deployment (HORO-1278 grew this
+// from three bools to five, crossing clippy's default threshold of 3).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentStatusView {
     pub protocol_version: u16,
@@ -230,6 +236,22 @@ pub struct AgentStatusView {
     /// HORO-797 prep). See `session_required`'s doc for why this is a
     /// plain `bool`.
     pub revocation_required: bool,
+    /// Whether this deployment has bounded compute delegation configured
+    /// (F-M2-003, HORO-793; operator-configurable via
+    /// `ELTANIN_AGENT_GATE_CONFIG`, HORO-1278). See `session_required`'s
+    /// doc for why this is a plain `bool` — the rich detail (bounds,
+    /// exceeded dimensions) lives in the audit trail only, never on the
+    /// wire. Does not bump `DOMAIN_SCHEMA_VERSION` — additive wire
+    /// disclosure, following the same precedent
+    /// `session_required`/`approval_required`/`revocation_required`
+    /// themselves set when they were added.
+    pub delegation_configured: bool,
+    /// Whether this deployment has risk-based step-up classification
+    /// configured (F-M2-004, HORO-794; operator-configurable via
+    /// `ELTANIN_AGENT_GATE_CONFIG`, HORO-1278). See
+    /// `delegation_configured`'s doc for the same rationale and the same
+    /// no-schema-bump precedent.
+    pub step_up_configured: bool,
 }
 
 /// A closed set of protocol-level error codes. Deliberately has **no**

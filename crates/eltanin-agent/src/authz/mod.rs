@@ -105,6 +105,7 @@ pub mod audit;
 mod delegation;
 mod delegation_state;
 pub mod event;
+pub mod gate_config;
 mod risk;
 pub mod session;
 mod session_state;
@@ -788,6 +789,8 @@ impl AuthorizationHandler {
                         self.revocation_requirement,
                         RevocationRequirement::Required
                     ),
+                    delegation_configured: self.delegation.is_some(),
+                    step_up_configured: self.step_up.is_some(),
                 },
             },
         )
