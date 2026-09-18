@@ -230,6 +230,22 @@ pub struct AgentStatusView {
     /// HORO-797 prep). See `session_required`'s doc for why this is a
     /// plain `bool`.
     pub revocation_required: bool,
+    /// Whether this deployment has bounded compute delegation configured
+    /// (F-M2-003, HORO-793; operator-configurable via
+    /// `ELTANIN_AGENT_GATE_CONFIG`, HORO-1278). See `session_required`'s
+    /// doc for why this is a plain `bool` — the rich detail (bounds,
+    /// exceeded dimensions) lives in the audit trail only, never on the
+    /// wire. Does not bump `DOMAIN_SCHEMA_VERSION` — additive wire
+    /// disclosure, following the same precedent
+    /// `session_required`/`approval_required`/`revocation_required`
+    /// themselves set when they were added.
+    pub delegation_configured: bool,
+    /// Whether this deployment has risk-based step-up classification
+    /// configured (F-M2-004, HORO-794; operator-configurable via
+    /// `ELTANIN_AGENT_GATE_CONFIG`, HORO-1278). See
+    /// `delegation_configured`'s doc for the same rationale and the same
+    /// no-schema-bump precedent.
+    pub step_up_configured: bool,
 }
 
 /// A closed set of protocol-level error codes. Deliberately has **no**
