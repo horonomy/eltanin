@@ -355,7 +355,7 @@ pub fn assess(
 
     if matches!(
         verdicts.membership,
-        MembershipVerdict::NotMember | MembershipVerdict::Indeterminate { .. }
+        MembershipVerdict::NotMember { .. } | MembershipVerdict::Indeterminate { .. }
     ) {
         signals.insert(RiskSignal::DetachedExecution);
     }

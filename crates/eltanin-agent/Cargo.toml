@@ -46,9 +46,13 @@ eltanin-macos = { path = "../eltanin-macos", version = "0.1.0" }
 # at #![forbid(unsafe_code)] instead of a hand-written unsafe libc call
 # (see crates/eltanin-linux/Cargo.toml's identical rationale and ADR
 # 0004). Scoped to `cfg(unix)` since the socket listener itself is
-# Unix-only.
+# Unix-only. "system" (added HORO-1278/F-M2-001) gates `rustix::system::uname`,
+# used by `authz::session::collect_host_id` for Trusted Compute Session
+# cross-host-reuse rejection — a safe (non-`unsafe`) call in this pinned
+# rustix version, preserving this crate's #![forbid(unsafe_code)] the
+# same way "process"/"std" already do above.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "system"] }
 
 # SIGTERM/SIGINT -> ShutdownHandle::shutdown() wiring (HORO-840, founder
 # decision: signal-hook over hand-written unsafe libc sigaction, same
