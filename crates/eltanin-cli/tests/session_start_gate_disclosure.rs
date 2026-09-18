@@ -50,6 +50,8 @@ fn status_with(session_required: bool) -> AgentResponse {
             session_required,
             approval_required: false,
             revocation_required: false,
+            delegation_configured: false,
+            step_up_configured: false,
         },
     }
 }
