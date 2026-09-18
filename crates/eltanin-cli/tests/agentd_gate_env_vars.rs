@@ -97,6 +97,20 @@ struct GateEnv<'a> {
     approval_required: Option<&'a str>,
     approval_store: Option<&'a Path>,
     revocation_required: Option<&'a str>,
+    /// `ELTANIN_AGENT_GATE_CONFIG` (HORO-1278) — delegation/step-up.
+    gate_config: Option<&'a Path>,
+}
+
+/// Write a `Versioned<GateConfigDocument>` JSON file (HORO-1278) to
+/// `dir` and return its path. `body` is the raw `payload` object
+/// contents (e.g. `{"delegation": {...}}`) — callers supply exactly the
+/// JSON `eltanin-agent::authz::gate_config::load_gate_config` expects,
+/// without this test file depending on that crate's DTOs directly.
+fn write_gate_config(dir: &Path, body: &str) -> PathBuf {
+    let path = dir.join("gate-config.json");
+    let contents = format!(r#"{{"version": 6, "payload": {body}}}"#);
+    fs::write(&path, contents).expect("write gate config fixture");
+    path
 }
 
 impl Agentd {
@@ -130,6 +144,9 @@ impl Agentd {
         }
         if let Some(value) = gates.revocation_required {
             command.env("ELTANIN_AGENT_REVOCATION_REQUIRED", value);
+        }
+        if let Some(path) = gates.gate_config {
+            command.env("ELTANIN_AGENT_GATE_CONFIG", path);
         }
 
         let child = command.spawn().expect("spawn eltanin-agentd");
@@ -191,6 +208,9 @@ impl Agentd {
         if let Some(value) = gates.revocation_required {
             command.env("ELTANIN_AGENT_REVOCATION_REQUIRED", value);
         }
+        if let Some(path) = gates.gate_config {
+            command.env("ELTANIN_AGENT_GATE_CONFIG", path);
+        }
 
         let output = command.output().expect("run eltanin-agentd");
         assert!(
@@ -245,6 +265,11 @@ fn no_gate_env_vars_set_reports_every_gate_not_required() {
     assert!(stdout.contains("session required: NO"), "got: {stdout}");
     assert!(stdout.contains("approval required: NO"), "got: {stdout}");
     assert!(stdout.contains("revocation required: NO"), "got: {stdout}");
+    // Byte-identical-default guard (HORO-1278): a deployment that never
+    // heard of ELTANIN_AGENT_GATE_CONFIG must report both new flags as
+    // not-configured, exactly like every other gate above.
+    assert!(stdout.contains("delegation configured: NO"), "got: {stdout}");
+    assert!(stdout.contains("step-up configured: NO"), "got: {stdout}");
 }
 
 #[test]
@@ -336,6 +361,228 @@ fn an_unrecognized_boolean_flag_value_refuses_to_start() {
     );
     assert!(
         stderr.contains("ELTANIN_AGENT_REVOCATION_REQUIRED"),
+        "got: {stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// ELTANIN_AGENT_GATE_CONFIG (HORO-1278) — delegation/step-up exposure.
+// ---------------------------------------------------------------------
+
+const DELEGATION_ONLY_CONFIG: &str = r#"{
+    "delegation": {
+        "max_depth": 2,
+        "max_child_ttl_secs": 60,
+        "min_remaining_secs": 5,
+        "delegable_actions": ["compute"],
+        "transition_markers": [],
+        "require_same_session": true,
+        "require_same_cgroup": false
+    }
+}"#;
+
+const STEP_UP_ONLY_CONFIG: &str = r#"{
+    "step_up": {
+        "dispositions": {"unknown_launcher": "step_up"},
+        "untrusted_path_prefixes": ["/tmp/"]
+    }
+}"#;
+
+const BOTH_SECTIONS_CONFIG: &str = r#"{
+    "delegation": {
+        "max_depth": 2,
+        "max_child_ttl_secs": 60,
+        "min_remaining_secs": 5,
+        "delegable_actions": ["compute"],
+        "transition_markers": [],
+        "require_same_session": true,
+        "require_same_cgroup": false
+    },
+    "step_up": {
+        "dispositions": {"unknown_launcher": "step_up"},
+        "untrusted_path_prefixes": ["/tmp/"]
+    }
+}"#;
+
+#[test]
+fn gate_config_with_both_sections_reaches_authorization_config() {
+    let dir = scenario_dir("gate-both");
+    let store_path = dir.join("approvals.json");
+    let gate_config_path = write_gate_config(&dir, BOTH_SECTIONS_CONFIG);
+    let agent = Agentd::start(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    let stdout = eltanin_status(&agent);
+    assert!(stdout.contains("delegation configured: yes"), "got: {stdout}");
+    assert!(stdout.contains("step-up configured: yes"), "got: {stdout}");
+}
+
+#[test]
+fn delegation_only_gate_config_leaves_step_up_unconfigured() {
+    let dir = scenario_dir("gate-deleg");
+    let store_path = dir.join("approvals.json");
+    let gate_config_path = write_gate_config(&dir, DELEGATION_ONLY_CONFIG);
+    let agent = Agentd::start(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    let stdout = eltanin_status(&agent);
+    assert!(stdout.contains("delegation configured: yes"), "got: {stdout}");
+    assert!(stdout.contains("step-up configured: NO"), "got: {stdout}");
+}
+
+#[test]
+fn step_up_only_gate_config_leaves_delegation_unconfigured() {
+    let dir = scenario_dir("gate-stepup");
+    let store_path = dir.join("approvals.json");
+    let gate_config_path = write_gate_config(&dir, STEP_UP_ONLY_CONFIG);
+    let agent = Agentd::start(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    let stdout = eltanin_status(&agent);
+    assert!(stdout.contains("delegation configured: NO"), "got: {stdout}");
+    assert!(stdout.contains("step-up configured: yes"), "got: {stdout}");
+}
+
+#[test]
+fn gate_config_without_approval_pairing_refuses_to_start() {
+    let dir = scenario_dir("gate-no-approval-pairing");
+    let gate_config_path = write_gate_config(&dir, DELEGATION_ONLY_CONFIG);
+    let stderr = Agentd::expect_startup_failure(
+        &dir,
+        &GateEnv {
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    assert!(
+        stderr.contains("ELTANIN_AGENT_APPROVAL_REQUIRED"),
+        "got: {stderr}"
+    );
+    assert!(
+        stderr.contains("ELTANIN_AGENT_APPROVAL_STORE"),
+        "got: {stderr}"
+    );
+}
+
+#[test]
+fn malformed_gate_config_json_refuses_to_start() {
+    let dir = scenario_dir("gate-malformed-json");
+    let store_path = dir.join("approvals.json");
+    let gate_config_path = dir.join("gate-config.json");
+    fs::write(&gate_config_path, "not valid json").expect("write malformed fixture");
+    let stderr = Agentd::expect_startup_failure(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    assert!(
+        stderr.contains(&gate_config_path.display().to_string()),
+        "got: {stderr}"
+    );
+}
+
+#[test]
+fn step_up_config_denying_untrusted_execution_path_refuses_to_start() {
+    let dir = scenario_dir("gate-path-signal-deny");
+    let store_path = dir.join("approvals.json");
+    let gate_config_path = write_gate_config(
+        &dir,
+        r#"{
+            "step_up": {
+                "dispositions": {"untrusted_execution_path": "deny"},
+                "untrusted_path_prefixes": ["/tmp/"]
+            }
+        }"#,
+    );
+    let stderr = Agentd::expect_startup_failure(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    assert!(
+        stderr.to_lowercase().contains("pathsignalcannotdeny")
+            || stderr.to_lowercase().contains("cannot be mapped to"),
+        "got: {stderr}"
+    );
+}
+
+#[test]
+fn delegation_config_exceeding_max_depth_refuses_to_start() {
+    let dir = scenario_dir("gate-depth-exceeded");
+    let store_path = dir.join("approvals.json");
+    // `MAX_ANCESTRY_DEPTH` (`eltanin_core::delegation`) is 32 — 200 is
+    // comfortably over it regardless of that constant drifting slightly.
+    let gate_config_path = write_gate_config(
+        &dir,
+        r#"{
+            "delegation": {
+                "max_depth": 200,
+                "max_child_ttl_secs": 60,
+                "min_remaining_secs": 5,
+                "delegable_actions": ["compute"],
+                "transition_markers": [],
+                "require_same_session": false,
+                "require_same_cgroup": false
+            }
+        }"#,
+    );
+    let stderr = Agentd::expect_startup_failure(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&gate_config_path),
+            ..GateEnv::default()
+        },
+    );
+    assert!(
+        stderr.to_lowercase().contains("depth"),
+        "got: {stderr}"
+    );
+}
+
+#[test]
+fn gate_config_naming_a_nonexistent_file_refuses_to_start() {
+    let dir = scenario_dir("gate-missing-file");
+    let store_path = dir.join("approvals.json");
+    let missing_path = dir.join("does-not-exist.json");
+    let stderr = Agentd::expect_startup_failure(
+        &dir,
+        &GateEnv {
+            approval_required: Some("true"),
+            approval_store: Some(&store_path),
+            gate_config: Some(&missing_path),
+            ..GateEnv::default()
+        },
+    );
+    assert!(
+        stderr.contains(&missing_path.display().to_string()),
         "got: {stderr}"
     );
 }
