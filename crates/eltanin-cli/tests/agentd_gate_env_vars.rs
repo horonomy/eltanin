@@ -268,7 +268,10 @@ fn no_gate_env_vars_set_reports_every_gate_not_required() {
     // Byte-identical-default guard (HORO-1278): a deployment that never
     // heard of ELTANIN_AGENT_GATE_CONFIG must report both new flags as
     // not-configured, exactly like every other gate above.
-    assert!(stdout.contains("delegation configured: NO"), "got: {stdout}");
+    assert!(
+        stdout.contains("delegation configured: NO"),
+        "got: {stdout}"
+    );
     assert!(stdout.contains("step-up configured: NO"), "got: {stdout}");
 }
 
@@ -419,7 +422,10 @@ fn gate_config_with_both_sections_reaches_authorization_config() {
         },
     );
     let stdout = eltanin_status(&agent);
-    assert!(stdout.contains("delegation configured: yes"), "got: {stdout}");
+    assert!(
+        stdout.contains("delegation configured: yes"),
+        "got: {stdout}"
+    );
     assert!(stdout.contains("step-up configured: yes"), "got: {stdout}");
 }
 
@@ -438,7 +444,10 @@ fn delegation_only_gate_config_leaves_step_up_unconfigured() {
         },
     );
     let stdout = eltanin_status(&agent);
-    assert!(stdout.contains("delegation configured: yes"), "got: {stdout}");
+    assert!(
+        stdout.contains("delegation configured: yes"),
+        "got: {stdout}"
+    );
     assert!(stdout.contains("step-up configured: NO"), "got: {stdout}");
 }
 
@@ -457,7 +466,10 @@ fn step_up_only_gate_config_leaves_delegation_unconfigured() {
         },
     );
     let stdout = eltanin_status(&agent);
-    assert!(stdout.contains("delegation configured: NO"), "got: {stdout}");
+    assert!(
+        stdout.contains("delegation configured: NO"),
+        "got: {stdout}"
+    );
     assert!(stdout.contains("step-up configured: yes"), "got: {stdout}");
 }
 
@@ -561,10 +573,7 @@ fn delegation_config_exceeding_max_depth_refuses_to_start() {
             ..GateEnv::default()
         },
     );
-    assert!(
-        stderr.to_lowercase().contains("depth"),
-        "got: {stderr}"
-    );
+    assert!(stderr.to_lowercase().contains("depth"), "got: {stderr}");
 }
 
 #[test]

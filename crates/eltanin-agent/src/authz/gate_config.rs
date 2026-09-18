@@ -188,7 +188,10 @@ pub fn load_gate_config(path: &Path) -> Result<GateConfig, GateConfigLoadError> 
         .map(|s| StepUpPolicy::new(s.dispositions, s.untrusted_path_prefixes))
         .transpose()?;
 
-    Ok(GateConfig { delegation, step_up })
+    Ok(GateConfig {
+        delegation,
+        step_up,
+    })
 }
 
 #[cfg(test)]
@@ -302,8 +305,7 @@ mod tests {
             serde_json::to_string(&Versioned::current(document)).expect("serialize envelope"),
         )
         .expect("write fixture");
-        let err =
-            load_gate_config(&path).expect_err("PathSignalCannotDeny must not be bypassable");
+        let err = load_gate_config(&path).expect_err("PathSignalCannotDeny must not be bypassable");
         assert!(matches!(err, GateConfigLoadError::StepUp(_)));
     }
 }

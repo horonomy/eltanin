@@ -92,34 +92,31 @@ fn configure_gates(mut config: AuthorizationConfig) -> Result<AuthorizationConfi
     // the delegation/step-up gate-config wiring below can reuse the
     // operator's own store path — never a store path from the
     // gate-config file itself, which deliberately has no such field.
-    let resolved_approval_store: Option<PathBuf> = match (approval_required, approval_store) {
-        (true, None) => {
-            return Err(
+    let resolved_approval_store: Option<PathBuf> =
+        match (approval_required, approval_store) {
+            (true, None) => return Err(
                 "ELTANIN_AGENT_APPROVAL_REQUIRED is set but ELTANIN_AGENT_APPROVAL_STORE is not \
                  — a durable approval store path is required to enable this gate"
                     .to_string(),
-            )
-        }
-        (false, Some(_)) => {
-            return Err(
+            ),
+            (false, Some(_)) => return Err(
                 "ELTANIN_AGENT_APPROVAL_STORE is set but ELTANIN_AGENT_APPROVAL_REQUIRED is not \
                  — approvals cannot be enabled without requiring them"
                     .to_string(),
-            )
-        }
-        (true, Some(path)) => {
-            let path = path.into_string().map_err(|raw| {
-                format!(
-                    "ELTANIN_AGENT_APPROVAL_STORE is set but not valid UTF-8: {}",
-                    raw.to_string_lossy()
-                )
-            })?;
-            let path = PathBuf::from(path);
-            config = config.with_approval_store(path.clone());
-            Some(path)
-        }
-        (false, None) => None,
-    };
+            ),
+            (true, Some(path)) => {
+                let path = path.into_string().map_err(|raw| {
+                    format!(
+                        "ELTANIN_AGENT_APPROVAL_STORE is set but not valid UTF-8: {}",
+                        raw.to_string_lossy()
+                    )
+                })?;
+                let path = PathBuf::from(path);
+                config = config.with_approval_store(path.clone());
+                Some(path)
+            }
+            (false, None) => None,
+        };
 
     // `ELTANIN_AGENT_GATE_CONFIG` (HORO-1278) exposes the bounded
     // compute delegation (F-M2-003) and risk-based step-up (F-M2-004)
