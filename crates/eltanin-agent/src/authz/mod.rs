@@ -85,7 +85,7 @@ use eltanin_core::provenance::ProvenanceRecord;
 use eltanin_core::resource::{Capability, ComputeRequest, EnforcementResult};
 use eltanin_core::session::{
     membership, HostId, IntentProof, LeaderCorroboration, LocalSessionAnchor, MembershipVerdict,
-    SessionAssurance, SessionAuthority, SessionId, SessionScope,
+    NotMemberReason, SessionAssurance, SessionAuthority, SessionId, SessionScope, SessionValidity,
 };
 use eltanin_protocol::request::{
     provenance_for, ApproveRequest, ClientRequest, CreateSessionRequest, ForgetApprovalRequest,
@@ -482,6 +482,51 @@ fn denial_reason_for(reason: &DecisionReason) -> DenialReason {
     }
 }
 
+/// Recover a [`MembershipVerdict`] for a session `SessionState::reap`
+/// just evicted, when that eviction is what actually explains "no
+/// session found for this peer's key" (HORO-1278) — see
+/// `AuthorizationHandler::membership_for_peer`'s own comment on why
+/// `reap` and `membership` share the exact same fresh evidence, so a
+/// session `membership` would have denied for expiry/host-mismatch/
+/// anchor-recycling is always reaped first and never reaches
+/// `membership` at all.
+fn recorded_reason_for_reaped_validity(validity: &SessionValidity) -> MembershipVerdict {
+    match validity {
+        SessionValidity::Expired { expired_at } => MembershipVerdict::NotMember {
+            reason: NotMemberReason::Expired {
+                expired_at: *expired_at,
+            },
+        },
+        SessionValidity::HostMismatch => MembershipVerdict::NotMember {
+            reason: NotMemberReason::HostMismatch,
+        },
+        SessionValidity::AnchorRecycled => MembershipVerdict::NotMember {
+            reason: NotMemberReason::AnchorRecycled,
+        },
+        // `Terminated`/`ForeignIssuer` have no `NotMemberReason`
+        // equivalent, and are not actually reachable here in practice:
+        // an explicit `TerminateSession` removes the session from this
+        // store immediately (see `handle_terminate_session`), so `reap`
+        // never observes one as `Terminated`; `ForeignIssuer` requires a
+        // session minted by a different `SessionAuthority` instance,
+        // which this handler's own in-memory `SessionState` never
+        // stores (a restart starts a fresh, empty store — see AC4).
+        // Handled defensively and honestly rather than assumed
+        // impossible, mirroring `recorded_session_refusal`'s own
+        // never-panic discipline in `authz::audit`.
+        SessionValidity::Terminated | SessionValidity::ForeignIssuer { .. } => {
+            MembershipVerdict::Indeterminate {
+                reason: format!("session was reaped as administratively invalid: {validity:?}"),
+            }
+        }
+        // Structurally unreachable — `SessionState::reap` only returns
+        // entries for which `validate` was *not* `Valid`.
+        SessionValidity::Valid { .. } => MembershipVerdict::Indeterminate {
+            reason: "internal invariant violated: a reaped session reported Valid".to_string(),
+        },
+    }
+}
+
 /// The result of [`AuthorizationHandler::approval_admission`] — the
 /// approval-gate counterpart to `IssueFailure`/`MembershipVerdict`.
 enum ApprovalAdmission {
@@ -843,6 +888,27 @@ impl AuthorizationHandler {
         });
         drop(sessions);
 
+        // Audit fidelity (HORO-1278): `reap` (just above) and
+        // `membership` (just above, when a live candidate is found) are
+        // computed from the *same* fresh evidence (`host`, and a
+        // `collect_workload_identity` re-observation keyed off the same
+        // sid) — so a session that would have been denied by
+        // `membership` for expiry, host mismatch, or anchor recycling is
+        // always reaped first and never reaches `find_by_key` at all.
+        // Without this lookup, every one of those cases would collapse
+        // into the same generic "no session found" `Indeterminate` this
+        // function used to report unconditionally — silently discarding
+        // exactly the fidelity this ticket exists to add. `reaped_reason`
+        // recovers it by checking whether the reap sweep just evicted a
+        // session whose key matches this peer's own key.
+        let reaped_reason = match &peer_key {
+            Evidence::Present { value, .. } => reaped
+                .iter()
+                .find(|(_, key, ..)| key == value)
+                .map(|(_, _, validity, _)| recorded_reason_for_reaped_validity(validity)),
+            Evidence::Missing { .. } | Evidence::Unsupported => None,
+        };
+
         // Bug fix (HORO-795): a session reaped just above — by EXPIRY or
         // ANCHOR-LEADER DEATH, as opposed to an explicit
         // `TerminateSession` (whose own cascade already handled this
@@ -851,7 +917,7 @@ impl AuthorizationHandler {
         // `eltanin run` process's device-level access outlives its own
         // now-dead session indefinitely. See `SessionState::reap`'s doc
         // comment.
-        for (_, lease_ids) in reaped {
+        for (_, _, _, lease_ids) in reaped {
             self.cascade_revoke_leases(lease_ids);
         }
 
@@ -859,9 +925,9 @@ impl AuthorizationHandler {
             Some((matched, verdict)) => (matched, verdict, peer_key),
             None => (
                 None,
-                MembershipVerdict::Indeterminate {
+                reaped_reason.unwrap_or(MembershipVerdict::Indeterminate {
                     reason: "no session found for this peer's session key".to_string(),
-                },
+                }),
                 peer_key,
             ),
         }
@@ -1994,7 +2060,7 @@ impl AuthorizationHandler {
         // Bug fix (HORO-795): see `membership_for_peer`'s identical
         // cascade — this lazy-reaping call site discarded `reap`'s
         // return value entirely before this fix.
-        for (_, lease_ids) in reaped {
+        for (_, _, _, lease_ids) in reaped {
             self.cascade_revoke_leases(lease_ids);
         }
 
@@ -2333,5 +2399,68 @@ impl RequestHandler for AuthorizationHandler {
         });
 
         response
+    }
+}
+
+#[cfg(test)]
+mod recorded_reason_for_reaped_validity_tests {
+    use super::*;
+
+    /// Every `SessionValidity` variant `SessionAuthority::validate` can
+    /// actually report converts to the correct `MembershipVerdict`
+    /// (HORO-1278) — this is the recovery `membership_for_peer` relies
+    /// on to avoid collapsing an expiry/host-mismatch/anchor-recycling
+    /// eviction into a generic "no session found" `Indeterminate`.
+    #[test]
+    fn maps_every_reachable_session_validity_variant() {
+        let expired_at = MonotonicTime::from_nanos(60_000_000_000);
+        assert_eq!(
+            recorded_reason_for_reaped_validity(&SessionValidity::Expired { expired_at }),
+            MembershipVerdict::NotMember {
+                reason: NotMemberReason::Expired { expired_at }
+            }
+        );
+        assert_eq!(
+            recorded_reason_for_reaped_validity(&SessionValidity::HostMismatch),
+            MembershipVerdict::NotMember {
+                reason: NotMemberReason::HostMismatch
+            }
+        );
+        assert_eq!(
+            recorded_reason_for_reaped_validity(&SessionValidity::AnchorRecycled),
+            MembershipVerdict::NotMember {
+                reason: NotMemberReason::AnchorRecycled
+            }
+        );
+    }
+
+    /// `Terminated`/`ForeignIssuer` have no `NotMemberReason` equivalent
+    /// and are not reachable via `reap` in practice (see this function's
+    /// own doc comment) — they must still convert to something honest
+    /// (`Indeterminate`), never panic and never a fabricated `NotMember`.
+    #[test]
+    fn falls_back_to_indeterminate_for_reasons_with_no_not_member_equivalent() {
+        assert!(matches!(
+            recorded_reason_for_reaped_validity(&SessionValidity::Terminated),
+            MembershipVerdict::Indeterminate { .. }
+        ));
+        assert!(matches!(
+            recorded_reason_for_reaped_validity(&SessionValidity::ForeignIssuer {
+                issued_by: IssuerInstanceId::new("some-other-instance")
+            }),
+            MembershipVerdict::Indeterminate { .. }
+        ));
+    }
+
+    /// Defensive fallback: a structurally unreachable `Valid` input (
+    /// `reap` never returns one) must still convert without panicking.
+    #[test]
+    fn never_panics_on_a_structurally_unreachable_valid_input() {
+        assert!(matches!(
+            recorded_reason_for_reaped_validity(&SessionValidity::Valid {
+                remaining: Duration::from_secs(1)
+            }),
+            MembershipVerdict::Indeterminate { .. }
+        ));
     }
 }

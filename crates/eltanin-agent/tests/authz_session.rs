@@ -1105,25 +1105,23 @@ mod session_threading {
 
     /// HORO-1278: an audit-observability regression test proving an
     /// expired session's refusal reaches the audit log with real
-    /// fidelity — but the fidelity it proves is `Indeterminate`, not
-    /// `NotMemberReason::Expired`. That is not a gap in this ticket's
-    /// wiring: `AuthorizationHandler::membership_for_peer` calls
+    /// fidelity, specifically `NotMemberReason::Expired`, not a generic
+    /// `SessionRequired`/`Indeterminate`.
+    ///
+    /// This is non-trivial precisely because
+    /// `AuthorizationHandler::membership_for_peer` calls
     /// `SessionState::reap` (which itself calls
     /// `SessionAuthority::validate`, reporting `Expired` and evicting the
-    /// session) *before* `find_by_key` ever runs, so by the time
+    /// session) *before* `find_by_key` ever runs — so by the time
     /// `membership()` would be called, the expired session is already
-    /// gone — `find_by_key` finds nothing, and `membership_for_peer`
-    /// reports its own `Indeterminate { reason: "no session found for
-    /// this peer's session key" }`. `NotMemberReason::Expired` is
-    /// reachable only by calling `membership()` directly against a
-    /// session that was never registered with a `SessionState`'s own
-    /// reap sweep — exactly what
-    /// `horo1278_an_expired_session_is_refused_by_membership_itself`
-    /// above already does, and exactly why that test's own doc comment
-    /// says "no `SessionState`, and therefore no `reap` call anywhere in
-    /// this test." This test proves the handler-reachable case; that one
-    /// proves the `membership()`-internal one; together they are the
-    /// full expiry story, not a gap in either.
+    /// gone from the store, and `find_by_key` finds nothing. Without
+    /// `membership_for_peer` recovering the evicting `SessionValidity`
+    /// for a reaped session whose key matches this peer's own key (see
+    /// `recorded_reason_for_reaped_validity`), this would report the
+    /// same generic `Indeterminate { reason: "no session found..." }`
+    /// every other never-established-a-session case reports —
+    /// indistinguishable from a peer that never called `CreateSession`
+    /// at all. This test pins that recovery.
     #[test]
     fn session_required_reports_the_expired_reason_to_the_audit_log() {
         let sink = Arc::new(CapturingSessionSink::default());
@@ -1154,19 +1152,39 @@ mod session_threading {
         let (outcome, _session) = sink.last();
         match outcome {
             AuthorizationOutcome::SessionRequired { verdict } => {
-                assert_eq!(
-                    verdict,
-                    MembershipVerdict::Indeterminate {
-                        reason: "no session found for this peer's session key".to_string()
-                    },
-                    "an expired session is reaped before membership() ever runs, so the \
-                     handler-reachable audit fidelity here is Indeterminate, not \
-                     NotMemberReason::Expired — see this test's own doc comment"
+                assert!(
+                    matches!(
+                        verdict,
+                        MembershipVerdict::NotMember {
+                            reason: NotMemberReason::Expired { .. }
+                        }
+                    ),
+                    "expected an Expired NotMemberReason on the audit-facing outcome, got \
+                     {verdict:?}"
                 );
             }
             other => panic!("expected AuthorizationOutcome::SessionRequired, got {other:?}"),
         }
     }
+
+    // Note (HORO-1278): `NotMemberReason::HostMismatch`/`AnchorRecycled`
+    // are covered only at the conversion level, in
+    // `eltanin-agent::authz::audit`'s own unit tests
+    // (`recorded_session_refusal_covers_every_not_member_reason`) and
+    // `eltanin-audit`'s golden tests, not end-to-end through a real
+    // `AuthorizationHandler` here. `membership_for_peer`'s reaped-session
+    // recovery (`recorded_reason_for_reaped_validity`) uses the exact
+    // same code path for every `SessionValidity` variant regardless of
+    // which one fires, so the expiry test above already exercises that
+    // recovery mechanism itself — what's missing for `HostMismatch`/
+    // `AnchorRecycled` specifically is only a way to make
+    // `SessionAuthority::validate` actually report them from this test
+    // file: every peer here is a real pid observed through the real
+    // platform collector (see the module docs), and there is no
+    // injectable seam to fake "the host changed since establishment" or
+    // "a different live process now occupies this sid" without either a
+    // second real host or a genuine PID-reuse race, neither of which a
+    // portable test can construct deterministically.
 
     /// HORO-1278: same audit-observability regression as above, for
     /// `NotMemberReason::OwnerUidMismatch` — the scenario is exactly

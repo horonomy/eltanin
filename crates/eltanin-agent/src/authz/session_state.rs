@@ -137,9 +137,10 @@ impl SessionState {
 
     /// Drop every stored session whose [`SessionAuthority::validate`]
     /// (re-observing the sid's current occupant via `observe_leader`) is
-    /// not [`SessionValidity::Valid`]. Returns each reaped session's id
-    /// and its associated lease ids, for the caller to revoke at the
-    /// backend/lease-state layer — this module owns no
+    /// not [`SessionValidity::Valid`]. Returns each reaped session's id,
+    /// its [`SessionKey`], the [`SessionValidity`] that caused its
+    /// eviction, and its associated lease ids, for the caller to revoke
+    /// at the backend/lease-state layer — this module owns no
     /// `ComputeBackend`/`LeaseState` reference itself, staying a pure
     /// session store. `#[must_use]` (HORO-795 bug fix): both call sites
     /// in `authz/mod.rs` used to discard this return value entirely, so
@@ -147,6 +148,16 @@ impl SessionState {
     /// an explicit `TerminateSession`, whose own cascade already
     /// consumed this correctly) never had its leases revoked at the
     /// backend layer at all.
+    ///
+    /// The `SessionKey`/`SessionValidity` pair (HORO-1278) exists so
+    /// `AuthorizationHandler::membership_for_peer` can recover *why* a
+    /// session it can no longer find by key was refused — `reap` and
+    /// `membership` are computed from the exact same fresh evidence, so
+    /// a session `membership` would have denied for expiry, host
+    /// mismatch, or anchor recycling is always reaped here first and
+    /// never actually reaches `membership` at all. Without this, that
+    /// refusal reason would be lost the moment it happened, collapsing
+    /// into a generic "no session found."
     ///
     /// `observe_leader` is keyed off the session's own sid
     /// (`anchor().key.0`, HORO-1278) — **not** a `leader.pid` field, which
@@ -162,8 +173,8 @@ impl SessionState {
         now: MonotonicTime,
         host: &Evidence<HostId>,
         mut observe_leader: impl FnMut(u32) -> WorkloadIdentity,
-    ) -> Vec<(SessionId, BTreeSet<LeaseId>)> {
-        let stale: Vec<SessionId> = self
+    ) -> Vec<(SessionId, SessionKey, SessionValidity, BTreeSet<LeaseId>)> {
+        let stale: Vec<(SessionId, SessionValidity)> = self
             .sessions
             .values()
             .filter_map(|session| {
@@ -171,15 +182,16 @@ impl SessionState {
                 let leader = observe_leader(sid_pid);
                 match self.authority.validate(session, host, &leader, now) {
                     SessionValidity::Valid { .. } => None,
-                    _ => Some(session.id().clone()),
+                    validity => Some((session.id().clone(), validity)),
                 }
             })
             .collect();
         stale
             .into_iter()
-            .filter_map(|id| {
-                self.remove(&id)
-                    .map(|(session, leases)| (session.id().clone(), leases))
+            .filter_map(|(id, validity)| {
+                self.remove(&id).map(|(session, leases)| {
+                    (session.id().clone(), session.anchor().key, validity, leases)
+                })
             })
             .collect()
     }
