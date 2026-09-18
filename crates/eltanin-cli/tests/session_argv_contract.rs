@@ -3,6 +3,9 @@
 //! `argv_contract.rs` — nothing here touches it.
 
 use std::ffi::OsString;
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use eltanin_cli::args::{parse, parse_session, Invocation, SessionInvocation, UsageError};
@@ -213,4 +216,97 @@ fn missing_session_subcommand_is_rejected() {
         result,
         Err(UsageError::NotSessionSubcommand { .. })
     ));
+}
+
+/// Recursively list every path under `dir`, sorted, for a before/after
+/// filesystem-side-effect comparison — used by
+/// `session_start_persists_no_client_side_credential` below.
+fn snapshot_dir(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut entries = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(read_dir) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path.clone());
+            }
+            entries.push(path);
+        }
+    }
+    entries.sort();
+    entries
+}
+
+/// Machine-asserts HORO-1278's core design decision: `eltanin session
+/// start` is byte-for-byte unchanged at the CLI layer — no new flag, no
+/// persisted file/token/env var. `HOME`/every `XDG_*` directory/`TMPDIR`
+/// are all pointed at one empty, private scratch directory, so *any*
+/// client-side write this command might make (a credential file, a
+/// cache, a lockfile) would land somewhere under it — this asserts the
+/// directory tree is byte-identical before and after the command runs,
+/// and that stdout carries no token/credential-shaped value. Does not
+/// require a running `eltanin-agentd` — the command is expected to fail
+/// with `AgentUnavailable`/`ProfileUnresolved` in this hermetic
+/// environment; the assertion is about filesystem side effects and
+/// stdout shape, not about the command's exit status.
+#[test]
+fn session_start_persists_no_client_side_credential() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let real_tmp = fs::canonicalize("/tmp").unwrap_or_else(|_| PathBuf::from("/tmp"));
+    let scratch = real_tmp.join(format!(
+        "eltanin-cli-session-start-no-credential-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&scratch).expect("create scratch dir");
+    fs::set_permissions(&scratch, fs::Permissions::from_mode(0o700))
+        .expect("chmod scratch dir private");
+
+    let before = snapshot_dir(&scratch);
+    assert!(
+        before.is_empty(),
+        "expected a freshly created scratch dir to start empty, got {before:?}"
+    );
+
+    let eltanin = PathBuf::from(env!("CARGO_BIN_EXE_eltanin"));
+    let output = Command::new(&eltanin)
+        .env("HOME", &scratch)
+        .env("XDG_CONFIG_HOME", &scratch)
+        .env("XDG_DATA_HOME", &scratch)
+        .env("XDG_STATE_HOME", &scratch)
+        .env("XDG_CACHE_HOME", &scratch)
+        .env("TMPDIR", &scratch)
+        .env_remove("ELTANIN_PROFILE_DIR")
+        .env_remove("ELTANIN_AGENT_SOCKET")
+        .args([
+            "session",
+            "start",
+            "--profile",
+            "no-such-profile",
+            "--ttl",
+            "1h",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("run `eltanin session start`");
+
+    let after = snapshot_dir(&scratch);
+    assert_eq!(
+        before, after,
+        "[HORO-1278] `eltanin session start` must persist no client-side file of any kind — \
+         the entire fix is agent-side; no client-held session credential exists by design. \
+         Directory contents changed: before={before:?} after={after:?}"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lower = stdout.to_lowercase();
+    assert!(
+        !lower.contains("token") && !lower.contains("credential") && !lower.contains("secret"),
+        "[HORO-1278] `eltanin session start`'s stdout must never carry a token/credential-shaped \
+         value — got: {stdout:?}"
+    );
 }

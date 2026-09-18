@@ -215,7 +215,11 @@ struct Agentd {
 }
 
 impl Agentd {
-    fn start(dir: &Path, allow_uid: u32, approval_store: &Path, audit_log: Option<&Path>) -> Self {
+    /// Common setup shared by every `Agentd` constructor: a fresh policy
+    /// fixture, a socket path short enough for `sun_path`, and the
+    /// baseline env every configuration needs. Returns the not-yet-spawned
+    /// `Command` and the socket path it will bind.
+    fn base_command(dir: &Path, allow_uid: u32) -> (Command, PathBuf) {
         let policy_path = write_policy(dir, allow_uid);
         let socket_path = dir.join("agent.sock");
         assert!(
@@ -230,20 +234,41 @@ impl Agentd {
             .env("ELTANIN_AGENT_SOCKET_MODE", "0600")
             .env("ELTANIN_AGENT_POLICY", &policy_path)
             .env("ELTANIN_AGENT_LEASE_TTL_SECS", "60")
-            .env("ELTANIN_AGENT_APPROVAL_REQUIRED", "1")
-            .env("ELTANIN_AGENT_APPROVAL_STORE", approval_store)
-            .env("ELTANIN_AGENT_REVOCATION_REQUIRED", "1")
+            .env_remove("ELTANIN_AGENT_SESSION_REQUIRED")
+            .env_remove("ELTANIN_AGENT_APPROVAL_REQUIRED")
+            .env_remove("ELTANIN_AGENT_APPROVAL_STORE")
+            .env_remove("ELTANIN_AGENT_REVOCATION_REQUIRED")
+            .env_remove("ELTANIN_AUDIT_LOG")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        match audit_log {
-            Some(log) => {
-                command.env("ELTANIN_AUDIT_LOG", log);
-            }
-            None => {
-                command.env_remove("ELTANIN_AUDIT_LOG");
-            }
+        (command, socket_path)
+    }
+
+    fn start(dir: &Path, allow_uid: u32, approval_store: &Path, audit_log: Option<&Path>) -> Self {
+        let (mut command, socket_path) = Self::base_command(dir, allow_uid);
+        command
+            .env("ELTANIN_AGENT_APPROVAL_REQUIRED", "1")
+            .env("ELTANIN_AGENT_APPROVAL_STORE", approval_store)
+            .env("ELTANIN_AGENT_REVOCATION_REQUIRED", "1");
+        if let Some(log) = audit_log {
+            command.env("ELTANIN_AUDIT_LOG", log);
         }
 
+        let child = command.spawn().expect("spawn eltanin-agentd");
+        Self { child, socket_path }.wait_for_socket()
+    }
+
+    /// A running `eltanin-agentd` configured with **only** F-M2-001's
+    /// session gate required (`ELTANIN_AGENT_SESSION_REQUIRED=1`) —
+    /// deliberately no approval/revocation gate, so a denial in the
+    /// ground-truth regression tests below can only mean the session
+    /// gate itself, never a different, unrelated gate this scenario
+    /// isn't testing. This is the constructor that actually exercises
+    /// the real product bug HORO-1278 fixes — see this file's module
+    /// docs for why the plain `start` above never sets this env var.
+    fn start_session_required(dir: &Path, allow_uid: u32) -> Self {
+        let (mut command, socket_path) = Self::base_command(dir, allow_uid);
+        command.env("ELTANIN_AGENT_SESSION_REQUIRED", "1");
         let child = command.spawn().expect("spawn eltanin-agentd");
         Self { child, socket_path }.wait_for_socket()
     }
@@ -571,5 +596,219 @@ fn assert_denial_is_explainable_via_audit_and_explain(
         audit_stdout.contains("RequestLease") && audit_stdout.contains("Approve"),
         "[{SCENARIO_ID}] `eltanin audit` must show this journey's real operations (at least an \
          Approve and a RequestLease entry) — got: {audit_stdout:?}",
+    );
+}
+
+// HORO-1278 ground-truth regression tests — ADDITIONAL to `SCENARIO_ID`/
+// `COVERS` above, not a replacement for either. These tests do NOT
+// change this file's `COVERS` const (docs/qa/e2e/README.md's manifest
+// and the Track B scenario record are updated by a later PR in this
+// ticket's decomposition, per `.claude/CLAUDE.md`'s Docs Impact Gate —
+// out of scope here) and do not touch the module docs above describing
+// why F-M2-001 was previously excluded from Track B: that history is
+// accurate as a record of the bug this ticket fixes. What follows is
+// the machine-asserted proof that the fix actually closes the gap that
+// history describes — every `eltanin` invocation below is spawned as a
+// genuinely separate process and `.wait()`ed to completion before the
+// next one runs, so no invocation's own process ever stays alive to
+// paper over the exact anchoring bug HORO-1278 exists to fix.
+
+const SESSION_PROFILE_TTL: &str = "1h";
+
+fn session_start(launcher: &Path, agent: &Agentd, profile_dir: &Path) -> std::process::Output {
+    eltanin_command(
+        launcher,
+        agent,
+        profile_dir,
+        &[
+            "session",
+            "start",
+            "--profile",
+            PROFILE_NAME,
+            "--ttl",
+            SESSION_PROFILE_TTL,
+        ],
+    )
+    .spawn()
+    .expect("spawn `eltanin session start`")
+    .wait_with_output()
+    .expect("wait for `eltanin session start`")
+}
+
+fn session_list(launcher: &Path, agent: &Agentd, profile_dir: &Path) -> std::process::Output {
+    eltanin_command(launcher, agent, profile_dir, &["session", "list"])
+        .spawn()
+        .expect("spawn `eltanin session list`")
+        .wait_with_output()
+        .expect("wait for `eltanin session list`")
+}
+
+fn session_end(launcher: &Path, agent: &Agentd, profile_dir: &Path) -> std::process::Output {
+    eltanin_command(launcher, agent, profile_dir, &["session", "end"])
+        .spawn()
+        .expect("spawn `eltanin session end`")
+        .wait_with_output()
+        .expect("wait for `eltanin session end`")
+}
+
+/// #3 (HORO-1278 ground truth): a Trusted Compute Session established by
+/// one, short-lived `eltanin session start` process — which exits the
+/// moment it prints its result, exactly like the real CLI always does —
+/// must be honored by every *later, separate* `eltanin` invocation in
+/// the same POSIX session (this test process's own session, which every
+/// child below inherits by ordinary fork/exec, never `setsid()`). Before
+/// HORO-1278's fix, `eltanin-agentd` anchored the session to the
+/// connecting peer's own identity — i.e. `eltanin session start`'s own
+/// pid — so this exact scenario denied every later invocation outright;
+/// this test is the one that must have failed against the unmodified
+/// pre-fix code (confirmed manually before implementing the fix; see
+/// this PR's own description/commit history for that record) and must
+/// pass now.
+#[test]
+fn f_m2_001_a_session_established_by_one_process_is_honored_by_later_separate_invocations() {
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+
+    let dir = scenario_dir("f-m2-001-session-survives");
+    let agent = Agentd::start_session_required(&dir, uid);
+    let profile_dir = write_profile_dir(&dir);
+    let launcher = copy_launcher(&dir, "eltanin-launcher");
+
+    let start = session_start(&launcher, &agent, &profile_dir);
+    assert!(
+        start.status.success(),
+        "[{SCENARIO_ID}] `eltanin session start` must succeed — stderr={:?}",
+        String::from_utf8_lossy(&start.stderr),
+    );
+
+    let list = session_list(&launcher, &agent, &profile_dir);
+    assert!(
+        list.status.success(),
+        "[{SCENARIO_ID}] `eltanin session list` must succeed — stderr={:?}",
+        String::from_utf8_lossy(&list.stderr),
+    );
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        !list_stdout.contains("no active Trusted Compute Session"),
+        "[{SCENARIO_ID}] a session established by a now-exited separate process must be \
+         reported by a later, separate `eltanin session list` invocation — got: {list_stdout:?}",
+    );
+
+    for (n, sentinel) in ["run-one", "run-two"].iter().enumerate() {
+        let run = run_workload(&launcher, &agent, &profile_dir, sentinel);
+        assert!(
+            run.status.success(),
+            "[{SCENARIO_ID}] run #{n} ({sentinel}) through a separate process in the \
+             session-established POSIX session must be granted — got exit {:?}, stderr={:?}",
+            run.status.code(),
+            String::from_utf8_lossy(&run.stderr),
+        );
+        assert!(
+            String::from_utf8_lossy(&run.stdout).contains(sentinel),
+            "[{SCENARIO_ID}] the authorized workload's own stdout must pass through verbatim, \
+             got: {:?}",
+            String::from_utf8_lossy(&run.stdout),
+        );
+    }
+}
+
+/// #4 (HORO-1278): `eltanin session end`, itself run as yet another
+/// separate process, must fail closed — a run after it must be denied,
+/// never silently still-granted because some stale in-process state
+/// survived.
+#[test]
+fn f_m2_001_session_end_from_a_later_separate_process_fails_closed() {
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+
+    let dir = scenario_dir("f-m2-001-session-end");
+    let agent = Agentd::start_session_required(&dir, uid);
+    let profile_dir = write_profile_dir(&dir);
+    let launcher = copy_launcher(&dir, "eltanin-launcher");
+
+    let start = session_start(&launcher, &agent, &profile_dir);
+    assert!(
+        start.status.success(),
+        "`eltanin session start` must succeed"
+    );
+
+    let before = run_workload(&launcher, &agent, &profile_dir, "before-end");
+    assert!(
+        before.status.success(),
+        "[{SCENARIO_ID}] a run before `session end` must be granted — stderr={:?}",
+        String::from_utf8_lossy(&before.stderr),
+    );
+
+    let end = session_end(&launcher, &agent, &profile_dir);
+    assert!(
+        end.status.success(),
+        "[{SCENARIO_ID}] `eltanin session end` must succeed — stderr={:?}",
+        String::from_utf8_lossy(&end.stderr),
+    );
+
+    let after = run_workload(&launcher, &agent, &profile_dir, "after-end");
+    assert_eq!(
+        after.status.code(),
+        Some(77),
+        "[{SCENARIO_ID}] a run after `eltanin session end` (a separate process) must be denied \
+         — got exit {:?}, stderr={:?}",
+        after.status.code(),
+        String::from_utf8_lossy(&after.stderr),
+    );
+}
+
+/// #5 (HORO-1278): a session established with a short TTL must deny a
+/// later, separate `eltanin run` once it has genuinely expired, and
+/// `eltanin session list` must honestly report no active session — not
+/// merely "the establishing process is still observable," which is
+/// exactly the wrong signal this ticket removes from the trust
+/// decision.
+#[test]
+fn f_m2_001_an_expired_session_denies_a_later_separate_run() {
+    let uid = real_euid();
+    assert_non_root_precondition(uid);
+
+    let dir = scenario_dir("f-m2-001-session-expiry");
+    let agent = Agentd::start_session_required(&dir, uid);
+    let profile_dir = write_profile_dir(&dir);
+    let launcher = copy_launcher(&dir, "eltanin-launcher");
+
+    let start = eltanin_command(
+        &launcher,
+        &agent,
+        &profile_dir,
+        &["session", "start", "--profile", PROFILE_NAME, "--ttl", "1"],
+    )
+    .spawn()
+    .expect("spawn `eltanin session start`")
+    .wait_with_output()
+    .expect("wait for `eltanin session start`");
+    assert!(
+        start.status.success(),
+        "[{SCENARIO_ID}] `eltanin session start --ttl 1` must succeed — stderr={:?}",
+        String::from_utf8_lossy(&start.stderr),
+    );
+
+    // Sleep past the 1-second TTL. Nothing here re-uses the establishing
+    // process — it has already exited by the time this sleep starts.
+    std::thread::sleep(Duration::from_millis(1500));
+
+    let run = run_workload(&launcher, &agent, &profile_dir, "after-expiry");
+    assert_eq!(
+        run.status.code(),
+        Some(77),
+        "[{SCENARIO_ID}] a run after the session's own TTL has elapsed (a separate process) \
+         must be denied — got exit {:?}, stderr={:?}",
+        run.status.code(),
+        String::from_utf8_lossy(&run.stderr),
+    );
+
+    let list = session_list(&launcher, &agent, &profile_dir);
+    assert!(list.status.success(), "`eltanin session list` must succeed");
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("no active Trusted Compute Session"),
+        "[{SCENARIO_ID}] an expired session must be honestly reported as gone, not just denied \
+         at the run gate — got: {list_stdout:?}",
     );
 }
