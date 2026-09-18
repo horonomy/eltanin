@@ -362,26 +362,30 @@ eltanin status
   Each is `NO` unless the matching env var below is set; a `NO` is
   printed loudly (uppercase, with an explanation), mirroring shadow
   mode's own "state an unenforced/weak posture, don't leave it silent"
-  convention.
+  convention. It also prints `delegation_configured`/`step_up_configured`
+  (HORO-1278) the same way — whether bounded compute delegation
+  (F-M2-003) or risk-based step-up (F-M2-004) is active.
 - Takes no arguments. No new exit codes — an unreachable agent still
   exits 69, an `Error{code}` response still exits 70, exactly like every
   other subcommand's use of `crate::client::AgentClient`.
 - `AgentStatusView` carries `protocol_version`, `enforcement_mode`, and
-  the three gate-requirement booleans above — there is no richer
-  shadow-specific state on the wire (e.g. a running tally of
-  would-grant/would-deny counts) for this command to surface. Adding one
-  is additive, out of this subtask's scope.
+  the five gate booleans above — there is no richer shadow-specific
+  state on the wire (e.g. a running tally of would-grant/would-deny
+  counts) for this command to surface. Adding one is additive, out of
+  this subtask's scope.
 
-### `eltanin-agentd` gate-configuration environment variables (HORO-797 prep)
+### `eltanin-agentd` gate-configuration environment variables (HORO-797 prep, HORO-1278)
 
-Before this ticket's prep work, `eltanin-agentd` built its
+Before HORO-797's prep work, `eltanin-agentd` built its
 `AuthorizationConfig` with only lease ttl and `enforcement_mode`
 operator-configurable — Trusted Compute Session (F-M2-001), remembered
 approval (F-M2-002), and revocation-capability (F-M2-005) gates were
 reachable only by a caller embedding `eltanin-agent` as a library, never
-by an operator of the real binary. The following env vars close that
-gap; delegation and risk-based step-up remain library-only (see
-`docs/product/SECURITY_MODEL.md`'s corresponding sections for why).
+by an operator of the real binary. HORO-797's env vars closed that gap
+for those three; HORO-1278 closes the remaining one, for bounded compute
+delegation (F-M2-003) and risk-based step-up (F-M2-004) — both were
+fully implemented and Track-A-tested but, until this ticket, reachable
+only by a library caller as well.
 
 - `ELTANIN_AGENT_SESSION_REQUIRED` — `"1"` or `"true"` enables
   `SessionRequirement::Required`; unset (or absent) leaves it
@@ -398,9 +402,74 @@ gap; delegation and risk-based step-up remain library-only (see
   `RevocationRequirement::Required`; unset leaves it `NotRequired`, the
   pre-existing default. Any other set value is a startup-time
   configuration error.
+- `ELTANIN_AGENT_GATE_CONFIG` (HORO-1278) — names a JSON file configuring
+  delegation and/or risk-based step-up. **Requires
+  `ELTANIN_AGENT_APPROVAL_REQUIRED` + `ELTANIN_AGENT_APPROVAL_STORE` to
+  already be set**: `AuthorizationConfig::with_delegation`/`with_step_up`
+  both also set `approval_requirement`/`approval_store_path` as a side
+  effect, and this binary always uses the operator's own
+  `ELTANIN_AGENT_APPROVAL_STORE` path for that — never a path from the
+  gate-config file, which has no such field — so a gate-config file
+  named without the approval pair is a startup-time configuration error,
+  not a silent implicit approval-gate enablement. A missing file, a
+  malformed JSON body, or a document that fails
+  `DelegationBounds::new`/`StepUpPolicy::new`'s own validation (e.g.
+  `max_depth` above the collector-verifiable maximum, or mapping
+  `untrusted_execution_path` to `deny`) are each a startup-time
+  configuration error naming the file path.
+
+  The file is a `Versioned<GateConfigDocument>` envelope, matching every
+  other JSON config this binary reads (e.g. `ELTANIN_AGENT_POLICY`):
+
+  ```json
+  {
+    "version": 6,
+    "payload": {
+      "delegation": {
+        "max_depth": 2,
+        "max_child_ttl_secs": 300,
+        "min_remaining_secs": 30,
+        "delegable_actions": ["compute"],
+        "transition_markers": ["python"],
+        "require_same_session": true,
+        "require_same_cgroup": false
+      },
+      "step_up": {
+        "dispositions": {
+          "unknown_launcher": "step_up",
+          "privilege_escalation_to_root": "deny"
+        },
+        "untrusted_path_prefixes": ["/tmp/", "/var/tmp/"]
+      }
+    }
+  }
+  ```
+
+  `delegation` and `step_up` are independently optional — a document may
+  set either one alone, or both — but at least one is required (an empty
+  document is a configuration error, since setting
+  `ELTANIN_AGENT_GATE_CONFIG` at all clearly signals intent to configure
+  something). Unknown fields anywhere in the document (including an
+  unrecognized signal name in `dispositions`) are rejected, not silently
+  ignored.
+
+  | `delegation` field | Type | Meaning |
+  |---|---|---|
+  | `max_depth` | `u8` | Maximum delegation-chain depth; must not exceed the collector-verifiable maximum (`MAX_ANCESTRY_DEPTH`, 32). |
+  | `max_child_ttl_secs` | `u64` | Maximum TTL a delegated lease may carry, in seconds. |
+  | `min_remaining_secs` | `u64` | Minimum remaining parent-lease time required to delegate at all, in seconds; must be non-zero. |
+  | `delegable_actions` | array of action strings (e.g. `"compute"`) | Which `Action`s may be delegated; an unrecognized action name is rejected. |
+  | `transition_markers` | array of strings | Interpreter/launcher path markers that mark a legitimate trust transition. |
+  | `require_same_session` | `bool` | Whether the descendant must belong to the same Trusted Compute Session as its parent. |
+  | `require_same_cgroup` | `bool` | Whether the descendant must share its parent's cgroup (Linux-only in practice — see `SECURITY_MODEL.md`). |
+
+  | `step_up` field | Type | Meaning |
+  |---|---|---|
+  | `dispositions` | object mapping a `RiskSignal` name to `"informational"`/`"step_up"`/`"deny"` | Per-signal classification; an unnamed signal defaults to `informational`. Mapping `untrusted_execution_path` to `"deny"` is rejected — see `SECURITY_MODEL.md`'s Risk-Based Step-Up section for why. |
+  | `untrusted_path_prefixes` | array of strings | Executable-path prefixes that fire `RiskSignal::UntrustedExecutionPath`. |
 
 Every one of these is opt-in: a deployment that sets none of them
-behaves byte-identically to before this ticket.
+behaves byte-identically to before HORO-797/HORO-1278.
 
 ## `eltanin explain` — audit-log decision explanation (F-M2-006, HORO-796 subtask 4)
 

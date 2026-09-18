@@ -573,13 +573,18 @@ which made none); every bump invalidates every pre-existing durable
 
 **Every MVP 2.0 Feature is a pre-policy admission gate, additive and
 default-off** — `PolicySet::evaluate` is unmodified by any of the six
-ADRs. Session, approval, delegation, and revocation-requirement config
-are library-reachable (constructible via `AuthorizationConfig`, and
-exercised by every integration test the MVP 2.0 test plan cites) but
-**not yet operator-configurable via `eltanin-agentd`** — that binary's
-only MVP 2.0-era environment variable is `ELTANIN_AGENT_MODE`
-(enforce/shadow, F-M2-006). Closing that gap (an "agentd config
-exposure" ticket) has not merged into `next/mvp-2.0` as of this writing.
+ADRs. Session, approval, delegation, revocation-requirement, and
+risk-based step-up config are library-reachable (constructible via
+`AuthorizationConfig`, and exercised by every integration test the MVP
+2.0 test plan cites) and **all are now operator-configurable via
+`eltanin-agentd`** — HORO-797's release-readiness prep work exposed
+`ELTANIN_AGENT_SESSION_REQUIRED`/`ELTANIN_AGENT_APPROVAL_REQUIRED`+
+`ELTANIN_AGENT_APPROVAL_STORE`/`ELTANIN_AGENT_REVOCATION_REQUIRED`
+(alongside the pre-existing `ELTANIN_AGENT_MODE`, F-M2-006), and
+HORO-1278 closed the remaining gap with `ELTANIN_AGENT_GATE_CONFIG` (a
+JSON file configuring delegation and/or step-up) — see
+`docs/product/CLI_CONTRACT.md`'s `eltanin-agentd` gate-configuration
+section for the full env var contract.
 
 **HORO-797 (MVP 2.0 READY release-readiness gate) is in progress.** Its
 12-scenario adversarial matrix has landed (PR #63,
