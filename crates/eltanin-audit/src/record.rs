@@ -245,6 +245,46 @@ pub enum RecordedLeaseValidity {
     Expired { expired_at: MonotonicTime },
 }
 
+/// Mirror of `eltanin_core::session::NotMemberReason`/
+/// `MembershipVerdict::Indeterminate`, flattened to one enum (HORO-1278)
+/// — `RecordedOutcome::SessionRequired` is only ever constructed from a
+/// `MembershipVerdict` that is already known not to be `Member` (see
+/// `eltanin_agent::authz::mod`'s pre-policy session-admission gate), so
+/// there is no `Member` case to mirror here. `Indeterminate` covers
+/// every case `membership()` could not confirm at all — including "no
+/// session exists for this peer's key," which is not a distinct
+/// `NotMemberReason` variant in `eltanin-core` but a `MembershipVerdict::
+/// Indeterminate` produced by `membership_for_peer` itself when no
+/// candidate session is found for the peer's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Tagged on `"kind"`, not `"reason"` — the `Indeterminate` variant below
+// has its own field named `reason`, and serde rejects a variant field
+// name colliding with the enum's own internal tag key (same discipline
+// `RecordedOutcome::SessionTerminated` already follows for the same
+// structural reason, see that variant's own comment).
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum RecordedSessionRefusal {
+    /// The peer's freshly collected session key does not equal the
+    /// session's anchor key.
+    KeyMismatch,
+    /// The peer's freshly collected uid does not equal the session's
+    /// recorded owner uid.
+    OwnerUidMismatch,
+    /// A freshly observed host does not equal the session's recorded
+    /// host.
+    HostMismatch,
+    /// The session's TTL has elapsed.
+    Expired { expired_at: MonotonicTime },
+    /// The session's anchor sid is now observably occupied by a
+    /// different, live process than the one recorded at establishment
+    /// time.
+    AnchorRecycled,
+    /// Membership could not be confirmed at all — self-asserted or
+    /// missing/unsupported evidence, or no session found for the peer's
+    /// key in the first place.
+    Indeterminate { reason: String },
+}
+
 /// Mirror of `eltanin_agent::authz::session::SessionAdmissionError`
 /// (which itself wraps `eltanin_core::session::SessionError` and
 /// `eltanin_core::session::EmptyScope`, neither of which has serde
