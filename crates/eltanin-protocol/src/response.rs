@@ -199,6 +199,12 @@ pub enum ShadowVerdict {
 /// include the agent's [`eltanin_core::lease::IssuerInstanceId`] — not
 /// secret, but there is no MVP 1.0 caller that needs it and no reason to
 /// hand it out.
+// Five independent, per-gate boolean disclosures — not a state machine
+// with mutually exclusive states (clippy's suggested alternative): each
+// flag names a distinct, independently-configurable admission gate, and
+// every combination of them is a valid deployment (HORO-1278 grew this
+// from three bools to five, crossing clippy's default threshold of 3).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentStatusView {
     pub protocol_version: u16,
