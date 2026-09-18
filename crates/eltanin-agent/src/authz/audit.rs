@@ -434,3 +434,79 @@ impl EventSink for AuditEventSink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eltanin_core::lease::MonotonicTime;
+
+    /// Every `NotMemberReason` variant `eltanin-core::session` can
+    /// actually produce must convert to its own distinct
+    /// `RecordedSessionRefusal` variant (HORO-1278) — a regression test
+    /// for exactly the fidelity gap this ticket closes: before this
+    /// change, every one of these collapsed to the same unit
+    /// `RecordedOutcome::SessionRequired`.
+    #[test]
+    fn recorded_session_refusal_covers_every_not_member_reason() {
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::KeyMismatch
+            }),
+            RecordedSessionRefusal::KeyMismatch
+        );
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::OwnerUidMismatch
+            }),
+            RecordedSessionRefusal::OwnerUidMismatch
+        );
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::HostMismatch
+            }),
+            RecordedSessionRefusal::HostMismatch
+        );
+        let expired_at = MonotonicTime::from_nanos(60_000_000_000);
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::Expired { expired_at }
+            }),
+            RecordedSessionRefusal::Expired { expired_at }
+        );
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::NotMember {
+                reason: NotMemberReason::AnchorRecycled
+            }),
+            RecordedSessionRefusal::AnchorRecycled
+        );
+    }
+
+    /// `MembershipVerdict::Indeterminate` — including the "no session
+    /// found for this peer's key" case `membership_for_peer` produces
+    /// when `find_by_key` finds no candidate at all — must convert to
+    /// `RecordedSessionRefusal::Indeterminate` carrying the same reason
+    /// string, never silently dropped or collapsed into a `NotMember`
+    /// variant it doesn't actually match.
+    #[test]
+    fn recorded_session_refusal_carries_indeterminate_reason_through() {
+        assert_eq!(
+            recorded_session_refusal(&MembershipVerdict::Indeterminate {
+                reason: "no session found for this peer's session key".to_string()
+            }),
+            RecordedSessionRefusal::Indeterminate {
+                reason: "no session found for this peer's session key".to_string()
+            }
+        );
+    }
+
+    /// Defensive fallback: `recorded_session_refusal` must never panic,
+    /// even on a `Member` verdict it should structurally never receive at
+    /// its one real call site (see that function's own doc comment).
+    #[test]
+    fn recorded_session_refusal_never_panics_on_a_member_verdict() {
+        assert!(matches!(
+            recorded_session_refusal(&MembershipVerdict::Member),
+            RecordedSessionRefusal::Indeterminate { .. }
+        ));
+    }
+}

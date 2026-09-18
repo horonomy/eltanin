@@ -9,7 +9,8 @@ use std::time::Duration;
 use eltanin_audit::record::{
     AgentEventRecord, AuditEventId, AuditRecord, LogEntry, RecordedAgentEvent, RecordedDelegation,
     RecordedEnforcementMode, RecordedOperation, RecordedOutcome, RecordedPeer,
-    RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, WallClockTime,
+    RecordedPeerConsistency, RecordedPeerCredential, RecordedRequest, RecordedSessionRefusal,
+    WallClockTime,
 };
 use eltanin_core::delegation::ExceededBound;
 use eltanin_core::envelope::Versioned;
@@ -428,4 +429,111 @@ fn would_grant_outcome_has_a_stable_golden_shape() {
     );
     let decoded: RecordedOutcome = serde_json::from_value(json).unwrap();
     assert_eq!(decoded, outcome);
+}
+
+/// HORO-1278: `RecordedOutcome::SessionRequired` gained a `refusal`
+/// field carrying the actual session-membership refusal reason — this
+/// pins its serialized shape, one `RecordedSessionRefusal` variant at a
+/// time, exactly like `would_grant_outcome_has_a_stable_golden_shape`
+/// above pins `WouldGrant`'s.
+#[test]
+fn session_required_outcome_has_a_stable_golden_shape_per_refusal_reason() {
+    let cases = [
+        (
+            RecordedSessionRefusal::KeyMismatch,
+            serde_json::json!({"kind": "key_mismatch"}),
+        ),
+        (
+            RecordedSessionRefusal::OwnerUidMismatch,
+            serde_json::json!({"kind": "owner_uid_mismatch"}),
+        ),
+        (
+            RecordedSessionRefusal::HostMismatch,
+            serde_json::json!({"kind": "host_mismatch"}),
+        ),
+        (
+            RecordedSessionRefusal::Expired {
+                expired_at: MonotonicTime::from_nanos(60_000_000_000),
+            },
+            serde_json::json!({"kind": "expired", "expired_at": 60_000_000_000u64}),
+        ),
+        (
+            RecordedSessionRefusal::AnchorRecycled,
+            serde_json::json!({"kind": "anchor_recycled"}),
+        ),
+        (
+            RecordedSessionRefusal::Indeterminate {
+                reason: "no session found for this peer's session key".to_string(),
+            },
+            serde_json::json!({
+                "kind": "indeterminate",
+                "reason": "no session found for this peer's session key"
+            }),
+        ),
+    ];
+
+    for (refusal, expected_refusal_json) in cases {
+        let outcome = RecordedOutcome::SessionRequired {
+            refusal: refusal.clone(),
+        };
+        let json = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "outcome": "session_required",
+                "refusal": expected_refusal_json
+            }),
+            "unexpected wire shape for {refusal:?}"
+        );
+        let decoded: RecordedOutcome = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, outcome);
+    }
+}
+
+/// A full `AuditRecord` carrying `SessionRequired` round-trips through
+/// `Versioned<LogEntry>` JSON exactly like every other outcome already
+/// covered above — proving the new field composes correctly inside the
+/// full record shape, not just in isolation.
+#[test]
+fn a_session_required_record_round_trips_through_json() {
+    let record = AuditRecord {
+        event_id: AuditEventId {
+            instance: IssuerInstanceId::new("agent-pid-1-start-1"),
+            sequence: 0,
+        },
+        recorded_at: WallClockTime {
+            unix_secs: 1_700_000_000,
+            nanos: 0,
+        },
+        operation: RecordedOperation::RequestLease,
+        requested: RecordedRequest::RequestLease {
+            resource: resource(),
+            action: Action::Compute,
+        },
+        peer: RecordedPeer {
+            credential: RecordedPeerCredential {
+                pid: 4242,
+                effective_uid: 1000,
+                effective_gid: 1000,
+            },
+            consistency: RecordedPeerConsistency::Consistent,
+            observed: observed(),
+        },
+        outcome: RecordedOutcome::SessionRequired {
+            refusal: RecordedSessionRefusal::Expired {
+                expired_at: MonotonicTime::from_nanos(60_000_000_000),
+            },
+        },
+        response: AgentResponse::LeaseDenied {
+            reason: DenialReason::NoTrustedSession,
+        },
+        mode: RecordedEnforcementMode::Enforce,
+        session: None,
+    };
+
+    let entry = LogEntry::Decision(record.clone());
+    let envelope = Versioned::current(entry);
+    let json = serde_json::to_string(&envelope).unwrap();
+    let decoded: Versioned<LogEntry> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.payload, LogEntry::Decision(record));
 }
