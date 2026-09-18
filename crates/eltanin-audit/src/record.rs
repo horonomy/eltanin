@@ -265,7 +265,17 @@ pub enum RecordedLeaseValidity {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum RecordedSessionRefusal {
     /// The peer's freshly collected session key does not equal the
-    /// session's anchor key.
+    /// session's anchor key. Mirrors `NotMemberReason::KeyMismatch`
+    /// faithfully, but is structurally unreachable via
+    /// `eltanin_agent::authz::AuthorizationHandler` today: its
+    /// `SessionState` looks a session up by exactly this key
+    /// (`find_by_key`, keyed by `SessionState::insert`'s own
+    /// `session.anchor().key`), so any candidate `membership()` is ever
+    /// called against already has a matching key by construction. Kept
+    /// for the same reason every other `Recorded*` mirror in this crate
+    /// is kept complete rather than pared to "what one caller happens to
+    /// produce today" — `membership()` is a public `eltanin-core`
+    /// function another caller could reach differently.
     KeyMismatch,
     /// The peer's freshly collected uid does not equal the session's
     /// recorded owner uid.
