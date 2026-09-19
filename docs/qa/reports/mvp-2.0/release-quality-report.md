@@ -203,62 +203,106 @@ see F-M2-001.md's "Known limitations" for the full list.
 
 ## Verdict
 
-**NOT DECIDED — awaiting founder judgment.**
+**READY_FOR_PRERELEASE** (MVP 2.0 Developer Preview scope only —
+this is not a production/enterprise-certified verdict; see item 3
+below for the exact, disclosed reason those are different claims).
 
-This report deliberately does not render a GO/NO-GO/CONDITIONAL
-recommendation in place of
-[`reports/TEMPLATE.md`](../TEMPLATE.md)'s "Final QA/Security
-recommendation" section — the MVP 2.0 promotion/release decision is
-reserved to the founder, per this campaign's standing instruction. What
-follows is the accumulated evidence needed to decide, not a substitute
-for deciding.
+This supersedes the prior "NOT DECIDED" verdict under an explicit
+founder policy update (2026-09-19): human dogfood is reclassified as
+non-blocking UX evidence for a prerelease unless it would expose a
+concrete, otherwise-untestable security/correctness invariant, and E3
+hardware evidence gates only claims that actually depend on it. Applying
+that policy to this report's own accumulated evidence (below) resolves
+every item the prior verdict left open.
 
-**What's needed to decide, concretely:**
+**Basis for READY_FOR_PRERELEASE:**
 
-1. **Resolution of Critical blocker (1) above — DONE.** The F-M2-001
-   session-anchor defect is resolved (HORO-1278/ADR 0015, PRs #70–#74).
-   The flagship "Trusted Compute Session" feature this milestone is
-   named for now works over the real CLI, machine-proven by
+1. **Resolution of Critical blocker (1) above — DONE**, as already
+   recorded: the F-M2-001 session-anchor defect is resolved
+   (HORO-1278/ADR 0015, PRs #70–#74), machine-proven by
    `horo1278_a_session_survives_the_establishing_peer_process_exiting`
-   and Track B's `B-M2-DEVFLOW-v2`. This closes the single largest open
-   item from the prior version of this report.
-2. **A real human multi-hour developer dogfood session** — **still
-   entirely outstanding.** Resolving blocker (1) removes the reason this
-   could not *meaningfully* happen before, but produces no dogfood
-   evidence itself: no human session has run, using
-   `docs/qa/dogfood/mvp-2.0-developer-session.md` and
-   `scripts/dogfood-metrics.sh`, populating
-   `docs/qa/dogfood/mvp-2.0-results.md`. Do not read (1)'s resolution as
-   progress toward this evidence — it only removes a prerequisite
-   blocker; the session itself has not been scheduled or run.
-3. **E3 hardware evidence** — still entirely absent, tracked separately,
-   not newly introduced by this report, unaffected by HORO-1278.
-4. **A definitional call this report surfaces but does not resolve —
-   narrowed, not closed, by HORO-1278**: `docs/qa/README.md`'s
-   release-gate contract requires every required Feature to be QA status
-   **PASS** (item 2) and hardware evidence only for Features whose claim
-   depends on physical enforcement (item 5). Every MVP 2.0 Feature is
-   decision-layer only, so one reading says E3 does not gate this
-   milestone at all. The competing reading — that "Trusted Compute
-   Session" as a *product* claim implies real enforceability — no longer
-   has blocker (1) as supporting evidence that it currently lacks that:
-   F-M2-001 now demonstrably works over the real CLI at the decision
-   layer. The underlying E3-gating question is unchanged and still
-   unresolved by this report; it no longer has a live counter-example
-   backing the "real enforceability" reading, but neither reading is
-   settled here. Separately: does the release-gate contract's PASS
-   requirement admit a Feature that is implemented and Track-A-tested
-   but not operator-enableable at all? PR #71 closed the operator-surface
-   gap for F-M2-003/004 specifically (both now have an
-   `ELTANIN_AGENT_GATE_CONFIG` surface), so no MVP 2.0 Feature currently
-   presents this case — but the contract's own semantics on this
-   question are unchanged and unresolved by this report; PR #71 removed
-   this milestone's instance of the question, not the question itself.
-   Neither question is decided by this report; both are stated so the
-   founder can decide with the actual evidence in view, not a
-   pre-selected framing.
+   and Track B's `B-M2-DEVFLOW-v2`. No other unresolved Critical/High
+   Feature-level blocker exists (see "Critical/High blockers" above).
+2. **E3 hardware evidence — resolved as Category B, non-blocking for
+   this milestone.** Auditing HORO-790 (the canonical E3 definition)
+   directly: E3 is defined entirely in terms of an NVIDIA
+   discovery/enforcement backend (F-M1-002/HORO-785) and a Linux
+   cgroup/eBPF device-guard (F-M1-007/HORO-789) — both status **To
+   Do**, meaning no NVIDIA or Linux enforcement code exists anywhere in
+   this codebase, on any hardware. HORO-790 is explicitly an **MVP
+   1.0** ticket ("[MVP 1.0 READY]"), gating a different Fix Version
+   than HORO-797. No F-M2-\* Feature's Acceptance Criteria, ADR, or
+   Feature Verification Record claims physical device-level
+   enforcement — this report's own "Feature inventory" section above
+   states every MVP 2.0 Feature is decision-layer only and
+   `UNVERIFIED_ON_BARE_METAL` by design, not by omission. Applying the
+   founder's decision rule directly: E3 is not "a core security claim
+   the prerelease itself depends on," so it does not block MVP 2.0's
+   Developer Preview/prerelease. It remains, unchanged and correctly
+   still open, the gate for MVP 1.0's own separate HORO-790 READY
+   determination — that gate is not touched, weakened, or waived by
+   this report. It would also gate any future claim of
+   "production-certified" or "enterprise bare-metal-verified" support
+   for MVP 2.0, which this release does not make (see "Environment /
+   hardware" above and `docs/product/` for the disclosed scope).
+3. **Automated real-machine dogfood evidence now exists**, replacing
+   the "entirely outstanding" state of the prior verdict for every
+   objectively-automatable item: real `eltanin-agentd`/`eltanin`
+   binaries, a real Unix-domain-socket daemon, real process spawn/kill,
+   exercised via [`scripts/automated-dogfood-session.sh`](../../../../scripts/automated-dogfood-session.sh),
+   with results recorded in
+   [`docs/qa/dogfood/automated-session-results.md`](../../dogfood/automated-session-results.md).
+   Summary: 50/50 repeated real invocations succeeded once approved (no
+   session drift); the false-block probe passed (a request the
+   configured policy explicitly allows was in fact admitted); a seeded
+   launcher-identity change (F-M2-002's `LauncherDigest` mechanism) was
+   correctly refused and correctly recovered via re-approval — no false
+   negative; killing the agent process (`kill -9`) produced fail-closed
+   behavior, not fail-open, and a fresh agent process resumed
+   enforcement correctly after restart; the raw audit log recorded
+   every decision with zero unreadable/malformed lines. Two honest,
+   non-blocking findings were also produced (real UX/performance
+   friction, not a correctness or security defect): `eltanin run`
+   carries roughly 900ms of overhead versus a ~23ms direct exec in this
+   environment, and `eltanin session end` issued against an agent that
+   restarted mid-session (and so lost its in-memory session state)
+   returns an unhelpful generic error rather than a specific
+   "no such session" message. Neither violates a stated correctness or
+   security requirement, so per the founder's policy neither blocks
+   this verdict — both are recorded here for a future UX/performance
+   ticket. What remains genuinely unautomatable and still open (a
+   developer's own subjective judgment of whether a denial was
+   surprising or friction excessive; a self-reported bypass attempt,
+   which by definition may leave no trace in the audit log) is recorded
+   as open, non-blocking UX evidence in
+   `docs/qa/dogfood/mvp-2.0-results.md` (still correctly UNPOPULATED —
+   this report does not fabricate that evidence) rather than as a
+   release blocker.
+4. **The definitional call the prior verdict left open is now
+   resolved** by the founder's own policy, applied above: E3 does not
+   gate a decision-layer-only milestone whose Features never claimed
+   physical enforcement. The competing "does 'Trusted Compute Session'
+   as a product name imply real enforceability" reading is answered by
+   this report's explicit, repeated scope disclosure
+   (`UNVERIFIED_ON_BARE_METAL`, "Environment / hardware" above) — MVP
+   2.0 has never claimed that enforceability, so nothing about this
+   release's actual claims depends on E3.
 
-This report does not authorize merging `next/mvp-2.0` into `main`, does
-not mark HORO-797 Done, and does not weaken any release threshold in
-[`docs/qa/README.md`](../../README.md)'s release-gate contract to make
-the evidence above look more favorable than it is.
+**What this verdict does NOT authorize:** it does not by itself
+constitute a merge of `next/mvp-2.0` into `main`. A separate,
+genuinely founder-level question was surfaced while preparing that
+promotion and is reported to the founder alongside this verdict (see
+the accompanying report) rather than decided here: this repository's
+`main` branch is documented (`docs/development/campaign-state.md`,
+`CONTRIBUTING.md`) as the canonical MVP 1.0 mainline, PR-only, branch
+protection enabled, and its starting SHA is pinned to the beginning of
+MVP 1.0 implementation — MVP 1.0's own HORO-790 gate remains correctly
+BLOCKED, not Done, on hardware. Promoting 161 commits of MVP 2.0 work
+onto that branch is a release-topology decision (does `main` become
+"MVP 1.0 + MVP 2.0 Developer Preview," or does MVP 2.0 tag/release from
+a separate lineage) that this report deliberately does not make
+unilaterally, per this repo's own `.claude/CLAUDE.md` §5 escalation
+rule (scope/architecture decisions outside an already-accepted design).
+This report does not mark HORO-797 Done and does not weaken any release
+threshold in [`docs/qa/README.md`](../../README.md)'s release-gate
+contract to make the evidence above look more favorable than it is.
