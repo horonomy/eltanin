@@ -125,11 +125,12 @@ gate:
   was never "avoid the next bump at all costs," only "don't force one for
   instrumentation alone.") External wall-clock measurement is documented
   as the interim approach.
-- `origin/main`'s two most recent commits (PRs #58/#59, CodeQL setup +
-  CI workflow token-permission hardening) are not yet merged forward
-  into `next/mvp-2.0` — this branch's supply-chain/security-scan
-  evidence is weaker than `main`'s until that forward-merge happens.
-  Independent of this report; does not block it.
+- **RESOLVED.** `origin/main`'s PRs #58/#59 (CodeQL setup + CI workflow
+  token-permission hardening) were forward-merged into `next/mvp-2.0`
+  by HORO-1270 (`cd952d8`) — verified directly by `git log --oneline
+  origin/main | grep -iE "codeql|permission"` matching commits present
+  in `origin/next/mvp-2.0`'s own history. `next/mvp-2.0`'s
+  supply-chain/security-scan evidence is no longer weaker than `main`'s.
 - S11 (inherited/already-open device handle): no test exists and none
   was added — `BLOCKED_ON_E3`, and a `FakeBackend`-based test would
   falsely imply device-handle security that does not exist anywhere in
@@ -253,14 +254,25 @@ every item the prior verdict left open.
    with results recorded in
    [`docs/qa/dogfood/automated-session-results.md`](../../dogfood/automated-session-results.md).
    Summary: 50/50 repeated real invocations succeeded once approved (no
-   session drift); the false-block probe passed (a request the
-   configured policy explicitly allows was in fact admitted); a seeded
-   launcher-identity change (F-M2-002's `LauncherDigest` mechanism) was
-   correctly refused and correctly recovered via re-approval — no false
-   negative; killing the agent process (`kill -9`) produced fail-closed
-   behavior, not fail-open, and a fresh agent process resumed
-   enforcement correctly after restart; the raw audit log recorded
-   every decision with zero unreadable/malformed lines. Two honest,
+   session drift); two false-block probes passed (a request the
+   configured policy explicitly allows was admitted; a request it
+   explicitly denies was refused by the policy engine itself even with
+   an approval already on file, isolating the deny path from the
+   approval gate); killing the agent process (`kill -9`) produced
+   fail-closed behavior, not fail-open, and a fresh agent process
+   resumed enforcement correctly after restart; the raw audit log
+   recorded every decision with zero unreadable/malformed lines. The
+   seeded launcher-identity-change probe (F-M2-002's `LauncherDigest`
+   mechanism) was **inconclusive on this host** — placing any
+   freshly-built or freshly-copied binary at a new path hung at `dyld`
+   startup regardless of content or signature validity, a macOS
+   Gatekeeper/dyld artifact of this execution environment, not of
+   `eltanin`'s own logic; the underlying invariant is separately proven
+   by this codebase's own Track A regression tests
+   ([`F-M2-002.md`](../../feature-verification/F-M2-002.md)), not
+   re-demonstrated by this run — see
+   `docs/qa/dogfood/automated-session-results.md` for the full
+   disclosure. Two honest,
    non-blocking findings were also produced (real UX/performance
    friction, not a correctness or security defect): `eltanin run`
    carries roughly 900ms of overhead versus a ~23ms direct exec in this

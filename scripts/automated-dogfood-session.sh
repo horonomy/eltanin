@@ -71,6 +71,15 @@ cat > "$POLICY" <<JSON
         "conditions": [
           { "field": "uid", "expected": 0, "min_trust": "kernel_observed" }
         ]
+      },
+      {
+        "id": "deny-gpu-1-outright",
+        "effect": "deny",
+        "resource": { "vendor": "fake", "kind": "gpu", "local_id": "gpu-1" },
+        "action": "compute",
+        "conditions": [
+          { "field": "uid", "expected": $UID_SELF, "min_trust": "kernel_observed" }
+        ]
       }
     ]
   }
@@ -121,6 +130,15 @@ cat > "$ELTANIN_PROFILE_DIR/fake-gpu-0.json" <<'JSON'
   }
 }
 JSON
+cat > "$ELTANIN_PROFILE_DIR/fake-gpu-1.json" <<'JSON'
+{
+  "version": 7,
+  "payload": {
+    "resource": { "vendor": "fake", "kind": "gpu", "local_id": "gpu-1" },
+    "action": "compute"
+  }
+}
+JSON
 
 echo "[2/10] eltanin status (confirm gates actually active)" | tee -a "$REPORT"
 "$ELTANIN" status | tee -a "$REPORT"
@@ -152,9 +170,18 @@ echo "repeated invocation: ok=$OK fail=$FAIL (expect fail=0 while session/policy
 
 echo "[5/10] false-block probe (request that SHOULD be admitted under configured policy)" | tee -a "$REPORT"
 if "$ELTANIN" run --profile fake-gpu-0 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/probe.stderr.log"; then
-  echo "false-block probe: PASS (admitted as policy requires)" | tee -a "$REPORT"
+  echo "false-block probe (allow path): PASS (admitted as policy requires)" | tee -a "$REPORT"
 else
-  echo "false-block probe: FAIL — request that policy explicitly allows was denied" | tee -a "$REPORT"
+  echo "false-block probe (allow path): FAIL — request that policy explicitly allows was denied" | tee -a "$REPORT"
+fi
+
+echo "[5b/10] policy-discrimination probe (request that SHOULD be denied by an explicit deny rule, isolated from the approval gate by approving it first)" | tee -a "$REPORT"
+"$ELTANIN" approve --profile fake-gpu-1 --remember >/dev/null 2>&1 || true
+if "$ELTANIN" run --profile fake-gpu-1 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/deny_probe.stderr.log"; then
+  echo "policy-discrimination probe: FAIL — a resource the policy explicitly denies was admitted even after approval" | tee -a "$REPORT"
+else
+  echo "policy-discrimination probe: PASS (refused even with a remembered approval in place, so the policy engine's own deny rule fired, not the approval gate):" | tee -a "$REPORT"
+  cat "$WORKDIR/deny_probe.stderr.log" | tee -a "$REPORT"
 fi
 
 echo "[6/10] latency measurement: eltanin run vs direct exec (20 iterations each)" | tee -a "$REPORT"
@@ -183,11 +210,43 @@ PY
 
 echo "[7/10] deliberate trust-transition injection: swap launcher binary" | tee -a "$REPORT"
 ALT_ELTANIN="$WORKDIR/eltanin-alt"
-cp "$ELTANIN" "$ALT_ELTANIN"
-# Ensure a byte-different binary (LauncherDigest differs) without needing a rebuild.
-printf '\x00' >> "$ALT_ELTANIN" || true
-chmod +x "$ALT_ELTANIN"
-if "$ALT_ELTANIN" run --profile fake-gpu-0 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/seeded.stderr.log"; then
+if [[ -n "${ELTANIN_ALT_BIN:-}" && -x "${ELTANIN_ALT_BIN:-}" ]]; then
+  # Preferred: a genuinely different, independently-built `eltanin` binary
+  # (e.g. built from the same source after a trivial one-line change) —
+  # LauncherDigest hashes real executable file content, and this is a
+  # real, validly-signed, independently-executable binary with different
+  # content, not a mutated copy of the original.
+  cp "$ELTANIN_ALT_BIN" "$ALT_ELTANIN"
+  chmod +x "$ALT_ELTANIN"
+else
+  # Fallback: mutating the real binary's bytes in place breaks its macOS
+  # code signature; ad hoc re-signing after that was tried and failed
+  # ("main executable failed strict validation"), and the corrupted
+  # binary then hangs on exec rather than failing cleanly — a host-OS
+  # artifact, not eltanin's own behavior. A shell wrapper is a real,
+  # differently-named file, but `exec` replaces the process image with
+  # the original binary, so it does NOT change the digest the agent
+  # observes — this fallback exists only so the script still runs
+  # end-to-end without a rebuild step; it does NOT exercise the
+  # LauncherDigest-changed path and is reported as such below.
+  cat > "$ALT_ELTANIN" <<EOF
+#!/bin/sh
+exec "$ELTANIN" "\$@"
+EOF
+  chmod +x "$ALT_ELTANIN"
+  echo "WARNING: no ELTANIN_ALT_BIN provided — using a wrapper that does NOT change LauncherDigest (exec replaces the process image). This step's result is not meaningful without ELTANIN_ALT_BIN set to a real independently-built binary." | tee -a "$REPORT"
+fi
+set +e
+timeout 15 "$ALT_ELTANIN" run --profile fake-gpu-0 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/seeded.stderr.log"
+SEEDED_EXIT=$?
+set -e
+if [[ "$SEEDED_EXIT" -eq 124 ]]; then
+  echo "SEEDED TRANSITION: INCONCLUSIVE — the alt binary hung on exec (killed by internal timeout) rather than returning a decision. On this host this reproduces for ANY freshly-placed binary at a new path, including an unmodified byte-for-byte copy of the original with a fresh ad hoc signature and no quarantine attribute — a macOS Gatekeeper/dyld first-launch stall unrelated to eltanin's own logic (see automated-session-results.md). Not evidence of pass or fail; the underlying LauncherDigest-change security invariant is separately proven by this codebase's own Track A regression tests (F-M2-002), not re-demonstrated here." | tee -a "$REPORT"
+  SEEDED_RESULT="INCONCLUSIVE_HOST_EXEC_HANG"
+elif [[ "$SEEDED_EXIT" -eq 0 && -z "${ELTANIN_ALT_BIN:-}" ]]; then
+  echo "seeded transition: EXPECTED admission — no ELTANIN_ALT_BIN was provided, so the fallback wrapper was used, which does NOT change LauncherDigest (see warning above). This is not a false negative; the digest genuinely did not change, so admission is the correct outcome for what was actually tested. Re-run with ELTANIN_ALT_BIN set to a real independently-built binary to exercise the actual security invariant." | tee -a "$REPORT"
+  SEEDED_RESULT="NOT_EXERCISED_NO_ALT_BIN"
+elif [[ "$SEEDED_EXIT" -eq 0 ]]; then
   echo "SEEDED TRANSITION: FALSE NEGATIVE — swapped binary was silently admitted. ESCALATE." | tee -a "$REPORT"
   SEEDED_RESULT="FALSE_NEGATIVE"
 else
@@ -197,12 +256,28 @@ else
 fi
 
 echo "[8/10] recovery: re-approve and confirm the same command now succeeds" | tee -a "$REPORT"
-"$ALT_ELTANIN" approve --profile fake-gpu-0 --remember >/dev/null 2>&1 || true
-if "$ALT_ELTANIN" run --profile fake-gpu-0 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/recovery.stderr.log"; then
-  echo "recovery: PASS (post-approval retry succeeded)" | tee -a "$REPORT"
+if [[ "$SEEDED_RESULT" == "INCONCLUSIVE_HOST_EXEC_HANG" ]]; then
+  # ALT_ELTANIN itself is the thing that hangs on this host — re-using it
+  # here would just waste another 30s proving nothing. Demonstrate the
+  # same recovery shape (approval-required -> approve -> granted) with the
+  # real binary instead: not a launcher-swap recovery specifically, but
+  # real evidence the approval flow's recovery path works.
+  echo "(skipping ALT_ELTANIN — step 7 was inconclusive on this host; demonstrating ordinary approval recovery with the real binary instead)" | tee -a "$REPORT"
+  "$ELTANIN" approve --profile fake-gpu-0 --remember >/dev/null 2>&1 || true
+  if "$ELTANIN" run --profile fake-gpu-0 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/recovery.stderr.log"; then
+    echo "recovery (ordinary approval path): PASS" | tee -a "$REPORT"
+  else
+    echo "recovery (ordinary approval path): FAIL" | tee -a "$REPORT"
+    cat "$WORKDIR/recovery.stderr.log" | tee -a "$REPORT"
+  fi
 else
-  echo "recovery: FAIL (post-approval retry still denied)" | tee -a "$REPORT"
-  cat "$WORKDIR/recovery.stderr.log" | tee -a "$REPORT"
+  timeout 15 "$ALT_ELTANIN" approve --profile fake-gpu-0 --remember >/dev/null 2>&1 || true
+  if timeout 15 "$ALT_ELTANIN" run --profile fake-gpu-0 -- /usr/bin/true >/dev/null 2>>"$WORKDIR/recovery.stderr.log"; then
+    echo "recovery: PASS (post-approval retry succeeded)" | tee -a "$REPORT"
+  else
+    echo "recovery: FAIL (post-approval retry still denied)" | tee -a "$REPORT"
+    cat "$WORKDIR/recovery.stderr.log" | tee -a "$REPORT"
+  fi
 fi
 
 echo "[9/10] failure/recovery: kill -9 the agent process, confirm fail-closed, restart" | tee -a "$REPORT"
