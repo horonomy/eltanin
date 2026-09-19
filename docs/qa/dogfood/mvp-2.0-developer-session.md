@@ -27,43 +27,49 @@ allow/deny outcome that surprised the person running it.
 Read this before starting — it changes what "seeded event" (§4) can
 actually mean in this session.
 
-`eltanin-agentd`'s environment-variable configuration surface (see
-`crates/eltanin-agent/src/bin/eltanin-agentd.rs`'s `configure_gates`,
-merged as of this ticket's PR-0) wires exactly three gates:
-`ELTANIN_AGENT_SESSION_REQUIRED` (F-M2-001), `ELTANIN_AGENT_APPROVAL_REQUIRED`
-+ `ELTANIN_AGENT_APPROVAL_STORE` (F-M2-002), and
-`ELTANIN_AGENT_REVOCATION_REQUIRED` (part of F-M2-005). **It does not
-wire F-M2-003 (Bounded Compute Delegation) or F-M2-004 (Risk-Based
-Step-Up)** — `AuthorizationConfig::with_delegation`/`with_step_up` exist
-in the library and are exercised by integration tests, but this binary
-has no env var or config file that reaches them (confirmed by reading
-`configure_gates` in full — it constructs `AuthorizationConfig` from
-only the four gates above and never calls `with_delegation`/
-`with_step_up`). `docs/development/campaign-state.md` names this same
-gap.
+**Updated by HORO-1278.** Two things changed since this document was
+first written, and both matter to this session:
 
-**Practical consequence for this session**: a launcher-identity change
-(§4) will surface as a plain `ApprovalRequired`/`ApprovalDenied`
-refusal (the F-M2-002 remembered-approval mismatch), re-approved via
-`eltanin approve`. It will **not** surface as `StepUpRequired` or
-`RiskDenied` — those RecordedOutcome variants exist in the schema
-(`crates/eltanin-audit/src/record.rs`) and this session's instrumentation
-script tallies them, but they cannot fire against the real
-`eltanin-agentd` binary today because nothing in this binary's
-configuration surface can turn on the risk layer. Do not read a zero
-count for `step_up_required`/`risk_denied` in this session's results as
-"the risk layer never triggered" — read it as "the risk layer cannot be
-enabled through the shipped binary yet." Record this explicitly in
-`mvp-2.0-results.md` rather than treating it as a session outcome.
+1. **The Trusted Compute Session bug that would have broken this
+   session outright is fixed.** `eltanin session start` used to anchor
+   the session to its own short-lived process, so it died the instant
+   that process exited — every later `eltanin run`/`session list` in
+   this same procedure would have seen no active session, making
+   `ELTANIN_AGENT_SESSION_REQUIRED=1` a deny-all. This is now fixed
+   (session identity is resolved from the terminal's own POSIX session
+   id, never the connecting CLI peer — see
+   [ADR 0015](../adr/0015-trusted-compute-session-anchor-and-binding.md)).
+   §1/§2's instructions below already describe the correct, now-real
+   behavior.
+2. **F-M2-003 (Bounded Compute Delegation) and F-M2-004 (Risk-Based
+   Step-Up) are now operator-configurable**, closed as part of
+   HORO-1278's scope: `eltanin-agentd`'s `configure_gates` (see
+   `crates/eltanin-agent/src/bin/eltanin-agentd.rs`) now also reads
+   `ELTANIN_AGENT_GATE_CONFIG`, a JSON file naming a `delegation` and/or
+   `step_up` section (see `crates/eltanin-agent/src/authz/gate_config.rs`
+   and `docs/product/CLI_CONTRACT.md` for the exact schema). §1's
+   startup command below includes it. **This does require the approval
+   pairing** (`ELTANIN_AGENT_APPROVAL_REQUIRED` + `_APPROVAL_STORE`,
+   both already part of this session's setup) — delegation/step-up
+   cannot be enabled independently of approvals.
 
-Delegation (F-M2-003) is exercised the same way: no seeded event in
-this session can trigger `delegation_refused`/`granted_by_delegation`
-against the real binary, for the identical reason.
+**Practical consequence for this session, now that all six Features are
+reachable**: a launcher-identity change (§4) can now genuinely surface
+as `StepUpRequired`/`RiskDenied` if the seeded event matches a
+configured risk signal (e.g. an untrusted execution path), not only as
+a plain `ApprovalRequired` refusal — which of the two you actually see
+depends on exactly which signal your seeded event trips and how
+`gate-config.json` (§1) maps it. Read the real `eltanin explain --chain`
+output for the seeded event rather than assuming which path fired.
+Delegation (F-M2-003) is exercisable too if the session's workload
+spawns a bounded descendant process through `eltanin run` — see §3's
+workload guidance.
 
-If closing this gap before the session matters to the founder, that is
-a separate, out-of-scope implementation ticket
-("agentd delegation/step-up config exposure") — not something to
-work around inside this procedure.
+If your `gate-config.json` leaves `step_up`/`delegation` unconfigured
+(a valid choice — they're optional sections), the old caveat still
+applies for that section only: its `RecordedOutcome` variants will
+correctly read zero, and that's a configuration choice, not a defect.
+Record in `mvp-2.0-results.md` exactly which sections you configured.
 
 ## 1. Environment setup
 
@@ -84,6 +90,24 @@ wired to a real backend — see `docs/qa/feature-verification/F-M1-010.md`
 for the Apple Silicon path, or `POLICY_EXAMPLES.md` for `FakeBackend`
 if you don't).
 
+(Optional but recommended, now that HORO-1278 closed the config gap)
+write a `gate-config.json` to exercise F-M2-003/004 as well — see
+`docs/product/CLI_CONTRACT.md`'s `ELTANIN_AGENT_GATE_CONFIG` section for
+the exact schema; a minimal example enabling step-up on an untrusted
+path prefix:
+
+```json
+{
+  "version": 7,
+  "payload": {
+    "step_up": {
+      "dispositions": { "untrusted_execution_path": "step_up" },
+      "untrusted_path_prefixes": ["/tmp/", "/var/tmp/"]
+    }
+  }
+}
+```
+
 Start the agent with the full MVP 2.0 trust boundary turned on — this is
 the point of the session, so do not skip any of these:
 
@@ -97,8 +121,13 @@ ELTANIN_AGENT_SESSION_REQUIRED=1 \
 ELTANIN_AGENT_APPROVAL_REQUIRED=1 \
 ELTANIN_AGENT_APPROVAL_STORE=$HOME/eltanin-dogfood/approvals.json \
 ELTANIN_AGENT_REVOCATION_REQUIRED=1 \
+ELTANIN_AGENT_GATE_CONFIG=$HOME/eltanin-dogfood/gate-config.json \
 eltanin-agentd
 ```
+
+(Omit the `ELTANIN_AGENT_GATE_CONFIG` line entirely if you don't want to
+exercise F-M2-003/004 this session — it's optional, not required for a
+valid run.)
 
 Notes:
 
@@ -197,11 +226,12 @@ documented:
    approval store remembers.
 3. Run the same profile/command you had previously `--remember`-approved.
 
-**Expected reaction** (see §0 for why this is `ApprovalRequired`/
-denial, not a risk step-up, on the real binary today): the request is
-refused, `eltanin explain --pid <pid>` names the refusal, and the raw
-audit log records an `ApprovalRequired` or `ApprovalDenied`
-`RecordedOutcome` for it. If instead the swapped binary is silently
+**Expected reaction**: the request is refused — `ApprovalRequired`/
+`ApprovalDenied` if you left `step_up` unconfigured, or possibly
+`StepUpRequired`/`RiskDenied` if your `gate-config.json` (§1) maps this
+launcher's changed path/identity to a configured risk signal (see §0).
+`eltanin explain --pid <pid>` names which one actually fired, and the
+raw audit log records the corresponding `RecordedOutcome` for it. If instead the swapped binary is silently
 admitted, that is a **false negative** — the single most important
 possible finding of this whole session — stop, do not continue the
 session normally, and escalate to the founder/security review
@@ -277,9 +307,9 @@ running scratch note open throughout §3 for exactly this purpose.
 
 | Metric | Surface that captures it | Machine-derivable via `dogfood-metrics.sh`? |
 |---|---|---|
-| Count of approval prompts / step-ups seen | Raw audit log `RecordedOutcome::ApprovalRequired`/`StepUpRequired` | **Yes** (step-up will read 0 today — see §0) |
-| Count of risk-denials | Raw audit log `RecordedOutcome::RiskDenied` | **Yes** (will read 0 today — see §0) |
-| Count of delegation refusals | Raw audit log `RecordedOutcome::DelegationRefused`/`DelegationIndeterminate` | **Yes** (will read 0 today — see §0) |
+| Count of approval prompts / step-ups seen | Raw audit log `RecordedOutcome::ApprovalRequired`/`StepUpRequired` | **Yes** (step-up reads 0 only if `gate-config.json`'s `step_up` section was left unconfigured — see §0) |
+| Count of risk-denials | Raw audit log `RecordedOutcome::RiskDenied` | **Yes** (0 only if `step_up` unconfigured or no seeded signal mapped to `deny`) |
+| Count of delegation refusals | Raw audit log `RecordedOutcome::DelegationRefused`/`DelegationIndeterminate` | **Yes** (0 only if `gate-config.json`'s `delegation` section was left unconfigured, or no bounded-descendant workload was run — see §0/§3) |
 | Count of grants (ordinary + delegated) | Raw audit log `RecordedOutcome::Granted`/`GrantedByDelegation` | **Yes** |
 | Session wall-clock duration | Raw audit log first/last `recorded_at` | **Yes** |
 | False-block count, and *why* each was judged false | A denial the developer determined, after reading `eltanin explain`, should not have been denied | **No — human judgment required.** The log can tell you a denial happened and its `RecordedDecisionReason`/`RecordedOutcome`; it cannot tell you whether the policy/config that produced it was *wrong*. Tally by hand during/after the session. |
@@ -290,15 +320,16 @@ running scratch note open throughout §3 for exactly this purpose.
 
 ### Deferred: no built-in latency instrumentation
 
-This session's audit schema (`DOMAIN_SCHEMA_VERSION` 6) does not carry a
-latency/overhead field, and none was added for this ticket. Adding one
-to `AuditRecord` would bump `DOMAIN_SCHEMA_VERSION` to 7 — a real schema
-change that invalidates every durable `Approval` on disk (ADR 0010's
-`recall()` schema-version check, the same effect every one of the six
-MVP 2.0 Features' schema bumps already had) — which is a product
-decision for a future ticket, not something QA instrumentation should
-smuggle in as a side effect of this dogfood session. Measure
-latency/overhead externally instead:
+This session's audit schema (`DOMAIN_SCHEMA_VERSION` 7 as of HORO-1278's
+session-refusal audit-fidelity bump) does not carry a latency/overhead
+field, and none was added for this ticket. Adding one to `AuditRecord`
+would bump `DOMAIN_SCHEMA_VERSION` again — a real schema change that
+invalidates every durable `Approval` on disk (ADR 0010's `recall()`
+schema-version check, the same effect every one of this campaign's
+schema bumps already had) — which is a product decision for a future
+ticket, not something QA instrumentation should smuggle in as a side
+effect of this dogfood session. Measure latency/overhead externally
+instead:
 
 ```sh
 time eltanin run --profile <name> -- <command>
