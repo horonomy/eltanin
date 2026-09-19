@@ -597,12 +597,29 @@ test plan and F-M2-001..006 Feature Verification Records (this PR), the
 Developer Dogfood Scenario (prompt/false-block/latency metrics, not yet
 run), and the MVP 2.0 Release Quality Report.
 
-**Known gap**: `origin/main` carries two commits (PR #58 CodeQL setup,
-PR #59 CI `GITHUB_TOKEN` permission hardening, both HORO-1270) that
-landed on `main` after `next/mvp-2.0` branched and have not been
-forward-merged — `next/mvp-2.0`'s CI does not yet run CodeQL and has not
-yet had its default token scope restricted. A forward-merge from `main`
-closes this; it is not new implementation work.
+**Known gap — CLOSED**: `origin/main`'s PR #58 (CodeQL setup) and PR #59
+(CI `GITHUB_TOKEN` permission hardening, both HORO-1270) are now both
+ancestors of `origin/next/mvp-2.0` (verified via `git merge-base
+--is-ancestor`) — `next/mvp-2.0`'s CI runs CodeQL and carries the
+hardened token scope.
+
+**HORO-1278 (session-anchor redesign, release blocker for HORO-797) is
+fully merged as of this writing** — 5 PRs (#70–#74) on `next/mvp-2.0`:
+the session anchor is now resolved from the caller's real POSIX session
+leader rather than the connecting CLI peer, closing the defect HORO-797's
+Track B pass found (a Trusted Compute Session did not survive real
+multi-invocation CLI usage); a second real defect (`owner_uid` stored but
+never compared) was closed in the same pass; the 12-scenario adversarial
+matrix was re-run against the new model; `DOMAIN_SCHEMA_VERSION` bumped
+6→7; F-M2-003/004's operator-config gap was also closed
+(`ELTANIN_AGENT_GATE_CONFIG`, mentioned above); and `B-M2-DEVFLOW` was
+bumped to v2 to cover F-M2-001. Full design record:
+[ADR 0015](../adr/0015-trusted-compute-session-anchor-and-binding.md).
+This reconciliation PR updates ADR 0009 (in-place amendment), the
+F-M2-001 Feature Verification Record, the MVP 2.0 test plan, and the
+MVP 2.0 Release Quality Report to match. The dogfood scenario remains
+not yet run — HORO-1278 removes the reason it could not meaningfully
+happen, it does not itself produce that evidence.
 
 A fresh session resuming MVP 2.0 work should: (1) check Jira/`git
 worktree list` for HORO-797's current subtask before starting, (2) not

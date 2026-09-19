@@ -244,6 +244,15 @@ that ordering — not `membership`'s own logic — is what keeps an expired
 session from ever being admitted. No code path changed; only the
 documentation of an already-correct property was corrected.
 
+**Superseded (2026-09, ADR 0015/HORO-1278)**: this correction's own
+claim is no longer current. `membership()` now takes `now` directly and
+checks expiry structurally, inside itself, independent of whether any
+`reap` has run first — see
+[ADR 0015](0015-trusted-compute-session-anchor-and-binding.md)'s
+"Decision — expiry is now structural inside `membership`" section. The
+correction above is left as written for historical accuracy; a reader
+should follow ADR 0015 for the current mechanism.
+
 ## Decision — rejected alternatives
 
 - **A renewal counter, chain-anchor state, or a new `RiskSignal`
