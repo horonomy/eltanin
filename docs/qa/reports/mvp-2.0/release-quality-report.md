@@ -1,13 +1,13 @@
 # Release Quality Report — Eltanin MVP 2.0 (HORO-797)
 
-**Commit/tag tested**: `062194c841cf8b35ca04fe302d21363464b44457` (`origin/next/mvp-2.0` tip
-immediately before this report's own PR). This is an integration-branch
-evaluation, not a `main` release — per the standing MVP 2.0 development
-strategy, `next/mvp-2.0` never merges to `main` except at an explicit
-promotion boundary, which this report does not authorize (see "Verdict"
-below).
+**Commit/tag tested**: `e315725c78d1f7a306707ff36a04aa1200cf31a0` (`origin/next/mvp-2.0`
+tip immediately before this report's own PR — PR #74's merge commit).
+This is an integration-branch evaluation, not a `main` release — per the
+standing MVP 2.0 development strategy, `next/mvp-2.0` never merges to
+`main` except at an explicit promotion boundary, which this report does
+not authorize (see "Verdict" below).
 **Test plan revision**: [`docs/qa/test-plans/mvp-2.0.md`](../../test-plans/mvp-2.0.md).
-**Report date**: 2026-09-18.
+**Report date**: 2026-09-19.
 
 ## Feature inventory and per-Feature QA verdict
 
@@ -17,7 +17,7 @@ are not re-derived here, only summarized.
 
 | Feature | Feature Verification Record | QA status |
 |---|---|---|
-| F-M2-001 — Trusted Compute Session | [`F-M2-001.md`](../../feature-verification/F-M2-001.md) | PASS (decision-layer/library scope) / **BLOCKED for real multi-invocation CLI usage** — see "Critical/High blockers" |
+| F-M2-001 — Trusted Compute Session | [`F-M2-001.md`](../../feature-verification/F-M2-001.md) | PASS (decision-layer scope) — the real multi-invocation-CLI defect below is now RESOLVED (HORO-1278/ADR 0015); see "Critical/High blockers" for the resolution history |
 | F-M2-002 — Remembered Authorization Intent | [`F-M2-002.md`](../../feature-verification/F-M2-002.md) | PASS (decision-layer scope; AC4 partially met — interpreter/script re-evaluation structurally out of reach, disclosed) |
 | F-M2-003 — Bounded Compute Delegation | [`F-M2-003.md`](../../feature-verification/F-M2-003.md) | PASS (decision-layer scope; admission-side only; library-reachable only, no operator env-var surface) |
 | F-M2-004 — Risk-Based Step-Up | [`F-M2-004.md`](../../feature-verification/F-M2-004.md) | PASS (decision-layer scope; classification layer, not a fourth gate; library-reachable only) |
@@ -60,17 +60,39 @@ merge:
 | [#65](https://github.com/horonomy/eltanin/pull/65) | HORO-797 prep (D1 fix) | `eltanin-agentd` gate-configuration exposure (`ELTANIN_AGENT_SESSION_REQUIRED`, `_APPROVAL_REQUIRED`+`_APPROVAL_STORE`, `_REVOCATION_REQUIRED`); 632 tests passed, 5 pre-existing ignored |
 | [#66](https://github.com/horonomy/eltanin/pull/66) | HORO-797 dogfood prep | Dogfood procedure, `scripts/dogfood-metrics.sh` (validated against real generated audit logs including rotation/malformed-line edge cases), unpopulated results template |
 | [#67](https://github.com/horonomy/eltanin/pull/67) | HORO-797 Track B scenario | `B-M2-DEVFLOW-v1` (`mvp2_dev_flow_e2e.rs`); 644 tests passed, 5 ignored; **found the F-M2-001 session-anchor defect below** |
+| [#70](https://github.com/horonomy/eltanin/pull/70) | HORO-1278 core redesign | Session anchor resolved from the POSIX session leader, not the connecting peer; `LeaderCorroboration` (reject-only); `HostId`/`SessionNonce`; `membership()` extended with uid/host checks; `NotMemberReason::{KeyMismatch,OwnerUidMismatch,HostMismatch,Expired,AnchorRecycled}`; second real defect closed (`owner_uid` never compared); CLI byte-for-byte unchanged |
+| [#71](https://github.com/horonomy/eltanin/pull/71) | HORO-1278 operator config | F-M2-003/F-M2-004 (delegation/step-up) made operator-configurable via `ELTANIN_AGENT_GATE_CONFIG` |
+| [#72](https://github.com/horonomy/eltanin/pull/72) | HORO-1278 adversarial re-run | Full 12-scenario matrix re-run against the redesigned session model; S1 defense mechanism changed, S8 split into S8a/S8b/new-S8c, S3/S12 confirmed unaffected |
+| [#73](https://github.com/horonomy/eltanin/pull/73) | HORO-1278 audit fidelity | `RecordedOutcome::SessionRequired` carries a real `RecordedSessionRefusal`; `DOMAIN_SCHEMA_VERSION` 6→7; a real bug found and fixed mid-implementation (`SessionState::reap` was evicting sessions using the same fresh evidence `membership()` needed) |
+| [#74](https://github.com/horonomy/eltanin/pull/74) | HORO-1278 Track B v2 | `B-M2-DEVFLOW-v2`; `COVERS` now includes F-M2-001 alongside F-M2-002/005/006 (F-M2-003/004 still correctly excluded — library-only via config file, not this scenario's env vars) |
 
-`cargo test --workspace` at `062194c` (from PR #65's and #67's own
-pre-merge runs, the two most recent full-workspace runs in this
-sequence): 644 passed, 5 ignored, 0 failed.
+`cargo test --workspace` at `e315725`: a full run was attempted while
+assembling this report and terminated early in this environment,
+completing only `eltanin-agent`'s unit-test and architecture-guard
+targets (15 tests, all passing) before stopping — it did not reach
+`eltanin-agent`'s own integration suites (`authz_session.rs` included),
+`eltanin-core`, `eltanin-audit`, or `eltanin-cli` at all. That partial
+result is not evidence of workspace health and is not presented as
+such; it is disclosed here as a real, unresolved gap in this report's
+own evidence rather than papered over with the PR-reported numbers
+below standing in for it. The individual PR-reported counts remain
+useful as a record of what each PR's own pre-merge run showed, cited
+per-PR, not combined into a new workspace total this report cannot
+itself confirm: PR #65 (632 tests passed, 5 pre-existing ignored), PR
+#67 (644 passed, 5 ignored), and PRs #70–#74's own merge-summary counts
+(112/676/685 across different scopes — not directly comparable to a
+`--workspace` total and not asserted as one here). The one clean,
+complete, independently-run check this report itself performed is `cargo
+test -p eltanin-cli --test qa_governance_sync --test docs_sync` (the
+mechanical doc-consistency checks this reconciliation PR is required to
+pass): 18 passed, 0 failed, 2 suites, run twice with identical results.
 
 Feature-level Track A evidence is cited per-Feature in each Feature
 Verification Record's "Subtasks and evidence" table, not re-derived
 here. Track B evidence: `crates/eltanin-cli/tests/canonical_e2e.rs`
-(MVP 1.0, pre-existing) plus the new `mvp2_dev_flow_e2e.rs` (MVP 2.0,
-`B-M2-DEVFLOW-v1`, covering F-M2-002/005/006 — F-M2-001 explicitly
-excluded, F-M2-003/004 explicitly not exercised, both disclosed in
+(MVP 1.0, pre-existing) plus `mvp2_dev_flow_e2e.rs` (MVP 2.0, now
+`B-M2-DEVFLOW-v2` per PR #74 — covers F-M2-001/002/005/006; F-M2-003/004
+still explicitly not exercised by this scenario, both disclosed in
 `docs/qa/e2e/B-M2-DEVFLOW.md`'s "Named limitations").
 
 ## Manual checks
@@ -95,10 +117,14 @@ gate:
   exists with a real migration consequence across 5 schema bumps this
   milestone; no coverage exists yet).
 - Latency/overhead instrumentation: deferred by explicit design choice
-  — adding a latency field to the audit schema would force a 7th
+  — adding a latency field to the audit schema would force a further
   `DOMAIN_SCHEMA_VERSION` bump, invalidating every durable approval
-  again, for QA instrumentation rather than a product need. External
-  wall-clock measurement is documented as the interim approach.
+  again, for QA instrumentation rather than a product need. (The 7th
+  bump has since happened anyway, for HORO-1278's unrelated session-anchor
+  redesign — that does not change this deferral's own reasoning, which
+  was never "avoid the next bump at all costs," only "don't force one for
+  instrumentation alone.") External wall-clock measurement is documented
+  as the interim approach.
 - `origin/main`'s two most recent commits (PRs #58/#59, CodeQL setup +
   CI workflow token-permission hardening) are not yet merged forward
   into `next/mvp-2.0` — this branch's supply-chain/security-scan
@@ -111,12 +137,13 @@ gate:
 
 ## Known risks
 
-- **F-M2-003 (delegation) and F-M2-004 (step-up) have no operator-facing
-  configuration surface.** `eltanin-agentd`'s `configure_gates` (added
-  by PR #65) exposes session/approval/revocation only — both take
-  structured multi-field configuration (`DelegationBounds`,
-  `StepUpPolicy`) with no scalar env-var story, deliberately left
-  library-only. A real deployment cannot enable either today.
+- **F-M2-003 (delegation) and F-M2-004 (step-up) had no operator-facing
+  configuration surface — RESOLVED by HORO-1278 (PR #71).**
+  `eltanin-agentd`'s `configure_gates` (added by PR #65) originally
+  exposed session/approval/revocation only; PR #71 added
+  `ELTANIN_AGENT_GATE_CONFIG`, a JSON-file-configured surface reusing
+  `DelegationBounds::new`/`StepUpPolicy::new` for validation, closing
+  this gap for both Features. A real deployment can now enable either.
 - **The dogfood evidence gap is total, not partial.** No human
   multi-hour developer session has been run. The procedure,
   instrumentation, and an explicitly-unpopulated results template exist
@@ -129,33 +156,50 @@ gate:
 
 ## Critical/High blockers
 
-1. **[Critical] F-M2-001 (Trusted Compute Session) does not survive real
-   multi-invocation CLI usage.** `eltanin-agentd` anchors a session's
-   trust to the exact process identity of the `eltanin session start`
-   invocation that created it — a process that exits immediately after
-   printing its result. Every subsequent CLI invocation
-   (`eltanin session list`, `eltanin run`, etc.) is a *different*
-   process and cannot be recognized as the same session, so
-   `ELTANIN_AGENT_SESSION_REQUIRED=1` behaves as a deny-all switch for
-   any real usage, not the "prove intent once per terminal" gate
-   ADR 0009 describes. Found by HORO-797's Track B scenario (PR #67,
-   `docs/qa/e2e/B-M2-DEVFLOW.md`), missed by F-M2-001's own Track A
-   suite because its test harness never lets the anchor process die
-   mid-test. **Resolving this requires a founder decision**: it means
-   changing which identity dimension session trust anchors to (e.g. the
-   real POSIX session leader instead of the connecting peer), which
-   per this repo's `.claude/CLAUDE.md` §5 needs an ADR 0009 amendment,
-   not a QA-scenario workaround. Not fixed as part of this pass —
-   deliberately, per that same escalation rule.
-2. **[High] No operator-facing dogfood evidence exists.** Distinct from
-   (1): even once (1) is resolved, no real human session has validated
-   the low-friction product claim. Procedure and instrumentation are
-   ready (PR #66); the session itself has not run.
+1. **[Critical, RESOLVED by HORO-1278] F-M2-001 (Trusted Compute
+   Session) did not survive real multi-invocation CLI usage.**
+   `eltanin-agentd` anchored a session's trust to the exact process
+   identity of the `eltanin session start` invocation that created it —
+   a process that exits immediately after printing its result. Every
+   subsequent CLI invocation (`eltanin session list`, `eltanin run`,
+   etc.) was a *different* process and could not be recognized as the
+   same session, so `ELTANIN_AGENT_SESSION_REQUIRED=1` behaved as a
+   deny-all switch for any real usage, not the "prove intent once per
+   terminal" gate ADR 0009 describes. Found by HORO-797's Track B
+   scenario (PR #67, `docs/qa/e2e/B-M2-DEVFLOW.md`), missed by
+   F-M2-001's own Track A suite because its test harness never let the
+   anchor process die mid-test. This required a founder decision (it
+   meant changing which identity dimension session trust anchors to),
+   escalated per this repo's `.claude/CLAUDE.md` §5 rather than fixed as
+   a QA-scenario workaround — that decision was made, and the fix
+   shipped across five PRs (#70–#74, HORO-1278) landing the redesign
+   recorded in [ADR 0015](../../adr/0015-trusted-compute-session-anchor-and-binding.md):
+   the session anchor is now resolved from the caller's POSIX session
+   leader itself, never the connecting CLI peer, proven end-to-end by
+   `crates/eltanin-agent/tests/authz_session.rs::horo1278_a_session_survives_the_establishing_peer_process_exiting`
+   (a real establishing-peer process is spawned, killed, and waited on,
+   then a later request from a different live process in the same
+   session is confirmed granted) and by Track B's own updated
+   `B-M2-DEVFLOW-v2` scenario (PR #74), which now covers F-M2-001
+   directly. A second, independent real defect (`owner_uid` stored but
+   never compared by `membership()`) was found and closed in the same
+   pass. This blocker is closed; kept in this report's history rather
+   than deleted, per this campaign's evidence-preservation convention.
+2. **[High] No operator-facing dogfood evidence exists.** Unchanged by
+   HORO-1278 — a real human multi-hour developer session still has not
+   run. What HORO-1278 changes is the premise: the session-required gate
+   this dogfood session depends on is now unblocked, not merely
+   documented-as-ready. Procedure and instrumentation remain as PR #66
+   left them (unrun).
 
 No other unresolved Critical/High Feature-level blocker exists as of
 this report — F-M2-002 through F-M2-006's disclosed limitations are
 accepted, documented trade-offs (see each record's own "Known
-limitations"), not open blockers.
+limitations"), not open blockers. HORO-1278/ADR 0015's own disclosed
+trade-offs (S8c's TTL-not-terminal-lifetime bound; `HostId`'s current
+inertness; `SessionNonce`'s write-only status; the residual pid-wrap
+false-negative) are likewise accepted, documented, and not blockers —
+see F-M2-001.md's "Known limitations" for the full list.
 
 ## Verdict
 
@@ -171,31 +215,48 @@ for deciding.
 
 **What's needed to decide, concretely:**
 
-1. **Resolution of Critical blocker (1) above** — the F-M2-001 session-
-   anchor defect. This is the single largest open item: as shipped
-   today, the flagship "Trusted Compute Session" feature this milestone
-   is named for does not work over the real CLI.
-2. **A real human multi-hour developer dogfood session**, using
+1. **Resolution of Critical blocker (1) above — DONE.** The F-M2-001
+   session-anchor defect is resolved (HORO-1278/ADR 0015, PRs #70–#74).
+   The flagship "Trusted Compute Session" feature this milestone is
+   named for now works over the real CLI, machine-proven by
+   `horo1278_a_session_survives_the_establishing_peer_process_exiting`
+   and Track B's `B-M2-DEVFLOW-v2`. This closes the single largest open
+   item from the prior version of this report.
+2. **A real human multi-hour developer dogfood session** — **still
+   entirely outstanding.** Resolving blocker (1) removes the reason this
+   could not *meaningfully* happen before, but produces no dogfood
+   evidence itself: no human session has run, using
    `docs/qa/dogfood/mvp-2.0-developer-session.md` and
    `scripts/dogfood-metrics.sh`, populating
-   `docs/qa/dogfood/mvp-2.0-results.md` — cannot meaningfully happen
-   until (1) is resolved, since the session-required gate is the
-   product's own headline low-friction claim.
+   `docs/qa/dogfood/mvp-2.0-results.md`. Do not read (1)'s resolution as
+   progress toward this evidence — it only removes a prerequisite
+   blocker; the session itself has not been scheduled or run.
 3. **E3 hardware evidence** — still entirely absent, tracked separately,
-   not newly introduced by this report.
-4. **A definitional call this report surfaces but does not resolve**:
-   `docs/qa/README.md`'s release-gate contract requires every required
-   Feature to be QA status **PASS** (item 2) and hardware evidence only
-   for Features whose claim depends on physical enforcement (item 5).
-   Every MVP 2.0 Feature is decision-layer only, so one reading says E3
-   does not gate this milestone at all; a competing reading says
-   "Trusted Compute Session" as a *product* claim implies real
-   enforceability, which blocker (1) shows it currently lacks
-   independent of E3. Separately: does the release-gate contract's PASS
-   requirement admit a Feature (F-M2-003/004) that is implemented and
-   Track-A-tested but not operator-enableable at all? Neither question
-   is resolved by this report; both are stated so the founder can decide
-   with the actual evidence in view, not a pre-selected framing.
+   not newly introduced by this report, unaffected by HORO-1278.
+4. **A definitional call this report surfaces but does not resolve —
+   narrowed, not closed, by HORO-1278**: `docs/qa/README.md`'s
+   release-gate contract requires every required Feature to be QA status
+   **PASS** (item 2) and hardware evidence only for Features whose claim
+   depends on physical enforcement (item 5). Every MVP 2.0 Feature is
+   decision-layer only, so one reading says E3 does not gate this
+   milestone at all. The competing reading — that "Trusted Compute
+   Session" as a *product* claim implies real enforceability — no longer
+   has blocker (1) as supporting evidence that it currently lacks that:
+   F-M2-001 now demonstrably works over the real CLI at the decision
+   layer. The underlying E3-gating question is unchanged and still
+   unresolved by this report; it no longer has a live counter-example
+   backing the "real enforceability" reading, but neither reading is
+   settled here. Separately: does the release-gate contract's PASS
+   requirement admit a Feature that is implemented and Track-A-tested
+   but not operator-enableable at all? PR #71 closed the operator-surface
+   gap for F-M2-003/004 specifically (both now have an
+   `ELTANIN_AGENT_GATE_CONFIG` surface), so no MVP 2.0 Feature currently
+   presents this case — but the contract's own semantics on this
+   question are unchanged and unresolved by this report; PR #71 removed
+   this milestone's instance of the question, not the question itself.
+   Neither question is decided by this report; both are stated so the
+   founder can decide with the actual evidence in view, not a
+   pre-selected framing.
 
 This report does not authorize merging `next/mvp-2.0` into `main`, does
 not mark HORO-797 Done, and does not weaken any release threshold in
