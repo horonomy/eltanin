@@ -12,44 +12,46 @@
 //! Domain Socket, with a real on-disk policy file, a real on-disk
 //! approval store, and a real on-disk audit log.
 //!
-//! # F-M2-001 (Trusted Compute Session) is deliberately NOT covered here
+//! # F-M2-001 (Trusted Compute Session) — the gap this scenario found, and its fix
 //!
-//! A design pass for this scenario assumed `eltanin session start` (run
-//! as its own short-lived process) followed by a *later*, separate
-//! `eltanin run`/`eltanin session list` invocation would see the
-//! established session. Empirically, it does not:
-//! `eltanin-agentd`'s `session::membership_for_peer` re-collects the
+//! A design pass for this scenario originally assumed `eltanin session
+//! start` (run as its own short-lived process) followed by a *later*,
+//! separate `eltanin run`/`eltanin session list` invocation would see
+//! the established session. Empirically, it did not:
+//! `eltanin-agentd`'s `session::membership_for_peer` re-collected the
 //! *session-establishing peer's own pid*'s identity
 //! (`candidate.anchor().leader.pid`, set from `observed.workload.pid` at
 //! `CreateSession` time — see `crates/eltanin-agent/src/authz/mod.rs`'s
 //! `session_establish_inputs`) on every later session-touching
-//! operation, and compares it via `WorkloadIdentity::compare_process`,
-//! which requires the *exact same pid* to still be alive
+//! operation, and compared it via `WorkloadIdentity::compare_process`,
+//! which required the *exact same pid* to still be alive
 //! (`crates/eltanin-core/src/identity.rs::compare_process`). Since
 //! `eltanin session start` is a real, distinct process that exits the
 //! moment it prints its result (`crate::session::run`'s own doc: "establishes
-//! it and exits"), that pid is already dead by the time any subsequent
-//! `eltanin` invocation connects — confirmed live: `eltanin session
-//! start` reports `SessionEstablished`, and the very next `eltanin
+//! it and exits"), that pid was already dead by the time any subsequent
+//! `eltanin` invocation connected — confirmed live: `eltanin session
+//! start` reported `SessionEstablished`, and the very next `eltanin
 //! session list` (a separate process, same shell, same real POSIX
-//! session) reports "no active Trusted Compute Session," not the
-//! session just established. `docs/adr/0009-trusted-compute-session.md`'s
-//! own "the caller's existing terminal session is the trust anchor...
-//! inherited by everything spawned in that terminal" is not what the
-//! shipped code does across two real CLI invocations — Track A's
-//! `authz_session.rs` never catches this because its `self_peer_context()`
-//! is the *same* live test-process object for the whole test, so the
-//! leader never actually dies mid-test.
+//! session) reported "no active Trusted Compute Session," not the
+//! session just established. This is exactly the real product gap
+//! `docs/qa/e2e/B-M2-DEVFLOW.md`'s "A real product gap found while
+//! building this scenario" section (still preserved there for history)
+//! documents, and the escalation this scenario's discovery triggered.
 //!
-//! This is a real product gap, not a test-authoring mistake — see
-//! `docs/qa/e2e/B-M2-DEVFLOW.md`'s "Named limitations" for the full
-//! writeup and the escalation this scenario's discovery triggered.
-//! Changing which identity dimension a session is anchored to is a
-//! product/security design decision (`.claude/CLAUDE.md` §5), not
-//! something this Track B scenario (or its author) may silently work
-//! around or paper over — so `COVERS` below does **not** include
-//! F-M2-001, and `docs/qa/e2e/README.md`'s per-Feature table marks it
-//! `BLOCKED`, not `N/A`.
+//! **Resolved by HORO-1278.** The session anchor is no longer the
+//! connecting CLI peer's pid — `eltanin-agentd` now anchors a session to
+//! the caller's real POSIX session id (`sid`), which every process
+//! spawned in that terminal shares and which outlives any one
+//! short-lived CLI invocation, matching
+//! `docs/adr/0009-trusted-compute-session.md`'s original "the caller's
+//! existing terminal session is the trust anchor... inherited by
+//! everything spawned in that terminal" intent. The `f_m2_001_*` tests
+//! below are this scenario's own regression coverage for that fix —
+//! each proves a session established by one, now-exited process is
+//! still honored (or correctly denied on `session end`/expiry) by a
+//! later, genuinely separate `eltanin` invocation — so `COVERS` below
+//! now includes F-M2-001, and `docs/qa/e2e/README.md`'s per-Feature
+//! table cites this scenario (`B-M2-DEVFLOW-v2`) instead of `BLOCKED`.
 //!
 //! Linux and macOS (mirrors `canonical_e2e.rs`'s own file-level gate;
 //! this repo's `ubuntu-latest` and `macos-latest` CI runners). Requires
@@ -82,19 +84,21 @@ use rustix::process::{kill_process, Pid, Signal};
 /// the trailing version if this scenario's *observable behavior*
 /// changes (exit codes, commands, fixture shape) — not for a
 /// wording-only edit.
-pub const SCENARIO_ID: &str = "B-M2-DEVFLOW-v1";
+pub const SCENARIO_ID: &str = "B-M2-DEVFLOW-v2";
 
 /// Every Feature this scenario provides Track B (Product/Business E2E)
 /// evidence for, per `docs/qa/e2e/B-M2-DEVFLOW.md`'s coverage table.
 ///
-/// F-M2-001 (Trusted Compute Session) is deliberately excluded — see
-/// this file's module docs above for the real product gap found while
-/// building this scenario. F-M2-003 (bounded delegation) and F-M2-004
-/// (risk-based step-up) are excluded because `eltanin-agentd`'s
-/// `configure_gates` (as of HORO-797 prep) has no environment-variable
-/// surface for either — delegation/step-up configuration remains
-/// library-only, not operator-reachable from the real binary.
-pub const COVERS: &[&str] = &["F-M2-002", "F-M2-005", "F-M2-006"];
+/// F-M2-001 (Trusted Compute Session) is now included — see this file's
+/// module docs above for the real product gap this scenario found while
+/// being built, and the `f_m2_001_*` tests below for the HORO-1278
+/// regression coverage proving the fix. F-M2-003 (bounded delegation)
+/// and F-M2-004 (risk-based step-up) remain excluded because
+/// `eltanin-agentd`'s `configure_gates` (as of HORO-797 prep) has no
+/// environment-variable surface for either — delegation/step-up
+/// configuration remains library-only, not operator-reachable from the
+/// real binary.
+pub const COVERS: &[&str] = &["F-M2-001", "F-M2-002", "F-M2-005", "F-M2-006"];
 
 /// The name `--profile` resolves in this scenario — reuses the same
 /// published "gpu" profile/policy fixtures `canonical_e2e.rs` already
@@ -599,15 +603,16 @@ fn assert_denial_is_explainable_via_audit_and_explain(
     );
 }
 
-// HORO-1278 ground-truth regression tests — ADDITIONAL to `SCENARIO_ID`/
-// `COVERS` above, not a replacement for either. These tests do NOT
-// change this file's `COVERS` const (docs/qa/e2e/README.md's manifest
-// and the Track B scenario record are updated by a later PR in this
-// ticket's decomposition, per `.claude/CLAUDE.md`'s Docs Impact Gate —
-// out of scope here) and do not touch the module docs above describing
-// why F-M2-001 was previously excluded from Track B: that history is
-// accurate as a record of the bug this ticket fixes. What follows is
-// the machine-asserted proof that the fix actually closes the gap that
+// HORO-1278 ground-truth regression tests for F-M2-001, now folded into
+// `SCENARIO_ID`/`COVERS` above (`B-M2-DEVFLOW-v2`; this metadata/docs
+// reconciliation is the follow-up PR referenced in earlier revisions of
+// this comment). `docs/qa/e2e/README.md`'s manifest and per-Feature
+// table, and `docs/qa/e2e/B-M2-DEVFLOW.md`'s own coverage table, are
+// updated in the same PR per `.claude/CLAUDE.md`'s Docs Impact Gate.
+// The module docs above still preserve the history of why F-M2-001 was
+// originally excluded from Track B — that history remains an accurate
+// record of the bug this ticket fixes. What follows is the
+// machine-asserted proof that the fix actually closes the gap that
 // history describes — every `eltanin` invocation below is spawned as a
 // genuinely separate process and `.wait()`ed to completion before the
 // next one runs, so no invocation's own process ever stays alive to
