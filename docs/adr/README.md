@@ -21,6 +21,7 @@ links back.
 | [0012](0012-risk-based-step-up.md) | Risk-Based Step-Up on Compute Trust-Boundary Changes | Accepted |
 | [0013](0013-compute-lease-lifecycle-hardening.md) | Compute Lease Lifecycle Hardening — Renewal, Revocation, Expiry, Offline Failure | Accepted |
 | [0014](0014-lease-lifecycle-audit-durability-and-shadow-mode.md) | Lease-Lifecycle Audit Durability, Bounded Retention, and Shadow Enforcement Mode | Accepted |
+| [0015](0015-trusted-compute-session-anchor-and-binding.md) | Trusted Compute Session Anchor and Binding — POSIX-Session-Leader Redesign | Accepted (MVP 2.0 — HORO-1278, founder-reviewed) |
 
 See [`docs/product/NORTH_STAR.md`](../product/NORTH_STAR.md) for the
 locked invariants these decisions implement, and

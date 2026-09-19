@@ -108,6 +108,12 @@ original binding is gone. `compare_process`'s existing PID-reuse
 semantics (same pid, matching non-self-asserted `ProcessStartToken`) are
 what defeat a dead-leader-pid-reused-by-an-unrelated-process attack.
 
+**This section is now partially superseded — see the "Amendment" below.**
+The single-combined-signature *design principle* still holds, but the
+anchor this function's "leader" was originally compared against, its
+real parameter list, and how liveness/absence is treated all changed
+under HORO-1278.
+
 ## Decision — agent-side reaping is a memory-bound cleanup, never the security boundary
 
 `eltanin-agent`'s `SessionState::reap` runs at the top of every
@@ -121,6 +127,13 @@ session reaping has not yet noticed is dead can never be *used*, because
 `membership()` would reject it the moment anyone tried. There is no
 background sweep thread; this bounds memory, it is not what keeps
 membership honest.
+
+**Superseded — see the "Amendment" below.** ADR 0013 already corrected
+this section's precise claim once (the safety property was actually
+`membership_for_peer` calling `reap` under the same lock, not
+`membership()`'s own logic). HORO-1278 changed the underlying mechanism
+again: expiry is now checked structurally inside `membership()` itself,
+independent of whether any reap has run.
 
 ## Decision — protocol additions are additive, `DOMAIN_SCHEMA_VERSION` bumps to 2
 
@@ -254,3 +267,54 @@ this session type is layered on top of, unmodified) and ADR 0008
 (macOS platform adapter — this ADR's `eltanin-macos::collect_session_key`
 extends that adapter's existing collector, following its established
 `Evidence`/non-macOS-fallback idioms exactly).
+
+## Amendment (2026-09, ADR 0015)
+
+**A real defect in this ADR's own design was found and fixed: the
+anchor leader was compared against the connecting CLI peer, not against
+the caller's POSIX session leader.** `eltanin session start` establishes
+a session and exits almost immediately by design (see this ADR's own
+headline trade-off above); the implementation of "anchor to the caller's
+POSIX session, not a token" nonetheless recorded `session_establish_inputs`'s
+own connecting peer identity as the leader to compare against on every
+later use, which is precisely the ephemeral CLI process this ADR's whole
+design was supposed to look past. The practical consequence:
+`ELTANIN_AGENT_SESSION_REQUIRED=1` denied every real subsequent CLI
+invocation, making the feature this ADR describes a deny-all switch in
+real multi-invocation usage. Found by HORO-797's Track B scenario, not
+by this ADR's own Track A suite (whose test harness never lets the
+establishing peer process actually die mid-test) — full account in
+[ADR 0015](0015-trusted-compute-session-anchor-and-binding.md).
+
+The following statements in this document are corrected by ADR 0015 and
+should be read in its light, not as still-current:
+
+- **"Decision — `membership()` is one combined signature"** section
+  above: the real signature is now
+  `membership(session, peer_uid, peer_key, observed_host, observed_leader, now)`
+  — two additional evidence checks (`peer_uid`, `observed_host`) and an
+  explicit `now` for structural expiry, not the three-parameter form
+  originally described.
+- **"Decision — agent-side reaping is a memory-bound cleanup"** section
+  above: ADR 0013 already corrected part of this claim once (the actual
+  safety property was `membership_for_peer` calling `reap` under the
+  same lock, not `membership()`'s own logic); ADR 0015 supersedes that
+  correction too — `membership()` now checks expiry itself, structurally,
+  independent of any reap having run first.
+- **`DOMAIN_SCHEMA_VERSION` bumps to 2** (the "Decision — protocol
+  additions" section and "Consequences" above): current value is `7`
+  as of ADR 0015 (six further bumps: ADR 0010 →3, ADR 0011 →4, ADR 0012
+  →5, ADR 0014 →6, ADR 0015 →7; ADR 0013 made no bump).
+
+**What this ADR got right and ADR 0015 leaves unchanged**: the "no
+client-supplied session id is ever accepted," "a bearer token was
+rejected," and "TPM/cgroup-scoped membership are seams, not built here"
+decisions all still hold exactly as designed — ADR 0015 makes the design
+actually deliver on them for real multi-invocation usage, it does not
+revise any of them. `SessionAssurance`/`IntentProof` remain single-variant
+exactly as this ADR describes. This note is an amendment, not a rewrite:
+every section above is left as written (it was accurate to the design
+intent, if not the shipped implementation, when this ADR was accepted)
+for historical accuracy. See ADR 0015 for the full corrected design,
+the second defect it also closed (`owner_uid` stored but never
+compared), and its own AC-mapping table.
