@@ -1,0 +1,21 @@
+[package]
+name = "eltanin-dogfood"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license.workspace = true
+description = "Eltanin DogFood evidence adapter — read-only projection of the native NDJSON audit log into the frozen ADR-0012 v1 evidence event schema (HORO-1376)."
+
+[lints]
+workspace = true
+
+[dependencies]
+eltanin-core = { path = "../eltanin-core", version = "0.1.0" }
+eltanin-audit = { path = "../eltanin-audit", version = "0.1.0" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }

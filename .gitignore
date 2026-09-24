@@ -1,4 +1,5 @@
 /target/
+/target-horo1376/
 Cargo.lock.bak
 *.swp
 .DS_Store

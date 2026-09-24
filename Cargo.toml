@@ -10,6 +10,7 @@ members = [
     "crates/eltanin-cli",
     "crates/eltanin-apple",
     "crates/eltanin-macos",
+    "crates/eltanin-dogfood",
 ]
 
 # Layout and naming match the Jira Component table on HORO-772/HORO-780
@@ -41,6 +42,14 @@ members = [
 # Its nix/libproc dependencies are target-gated to `cfg(target_os =
 # "macos")` in its own Cargo.toml, kept out of any non-macOS build's
 # dependency graph, while the crate stays a normal workspace member.
+# crates/eltanin-dogfood was added by HORO-1376 (DogFood evidence
+# adapter, ADR-0012): a thin, read-only translation layer projecting
+# eltanin-audit's existing native NDJSON audit log into the frozen v1
+# DogFood evidence event schema. It depends only on eltanin-core and
+# eltanin-audit (plus serde/serde_json/sha2/thiserror, all already
+# workspace dependencies) — no networking crate, direct or transitive
+# (see its own tests/no_network_dependency.rs) — and eltanin-agent (the
+# live enforcement path) never depends on it (tests/dependency_direction.rs).
 
 [workspace.package]
 version = "0.1.0"

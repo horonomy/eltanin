@@ -175,6 +175,7 @@ version = "0.1.0"
 dependencies = [
  "eltanin-audit",
  "eltanin-core",
+ "eltanin-dogfood",
  "eltanin-protocol",
  "rustix",
  "serde",
@@ -187,6 +188,19 @@ dependencies = [
 name = "eltanin-core"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "eltanin-dogfood"
+version = "0.1.0"
+dependencies = [
+ "eltanin-audit",
+ "eltanin-core",
+ "eltanin-protocol",
  "serde",
  "serde_json",
  "sha2",

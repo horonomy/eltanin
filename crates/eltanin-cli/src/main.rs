@@ -7,6 +7,7 @@ use std::process::ExitCode as ProcessExitCode;
 use eltanin_cli::approve::{self, ApproveCliOutcome};
 use eltanin_cli::args::{parse, Invocation};
 use eltanin_cli::audit::{self, AuditCliOutcome};
+use eltanin_cli::dogfood_evidence::{self, DogfoodEvidenceCliOutcome};
 use eltanin_cli::explain::{self, ExplainCliOutcome};
 use eltanin_cli::failure::LaunchFailure;
 use eltanin_cli::launch::{self, LaunchOutcome};
@@ -52,6 +53,13 @@ fn main() -> ProcessExitCode {
                 ProcessExitCode::SUCCESS
             }
             AuditCliOutcome::Failure(failure) => report(&failure),
+        },
+        Invocation::DogfoodEvidence(invocation) => match dogfood_evidence::run(&invocation) {
+            DogfoodEvidenceCliOutcome::Ok(message) => {
+                println!("{message}");
+                ProcessExitCode::SUCCESS
+            }
+            DogfoodEvidenceCliOutcome::Failure(failure) => report(&failure),
         },
         Invocation::Status(_) => match status::run() {
             StatusCliOutcome::Ok(message) => {
