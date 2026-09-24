@@ -97,7 +97,17 @@ pub struct AuditInvocation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatusInvocation;
 
-/// Any of the six top-level subcommands this binary understands.
+/// A fully parsed `eltanin dogfood-evidence [--log <path>]` invocation
+/// (HORO-1376): a read-only projection of the audit log into the
+/// ADR-0012 v1 `DogFood` evidence schema — see `eltanin_dogfood`. Mirrors
+/// [`AuditInvocation`]'s own `--log` resolution exactly; this command
+/// takes no other argument.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DogfoodEvidenceInvocation {
+    pub log_path: Option<PathBuf>,
+}
+
+/// Any of the seven top-level subcommands this binary understands.
 /// `eltanin run`'s own argument grammar (see [`parse_run`]) is
 /// byte-for-byte unchanged by this type's introduction.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +118,7 @@ pub enum Invocation {
     Explain(ExplainInvocation),
     Audit(AuditInvocation),
     Status(StatusInvocation),
+    DogfoodEvidence(DogfoodEvidenceInvocation),
 }
 
 /// Why argv parsing rejected the invocation — always maps to
@@ -126,9 +137,11 @@ pub enum UsageError {
     NotAuditSubcommand { found: Option<OsString> },
     #[error("expected the first argument to be \"status\", got {found:?}")]
     NotStatusSubcommand { found: Option<OsString> },
+    #[error("expected the first argument to be \"dogfood-evidence\", got {found:?}")]
+    NotDogfoodEvidenceSubcommand { found: Option<OsString> },
     #[error(
         "expected the first argument to be \"run\", \"session\", \"approve\", \"explain\", \
-         \"audit\", or \"status\", got {found:?}"
+         \"audit\", \"status\", or \"dogfood-evidence\", got {found:?}"
     )]
     UnknownSubcommand { found: Option<OsString> },
     #[error("exactly one of --event, --lease, or --pid is required")]
@@ -277,6 +290,9 @@ pub fn parse(argv: impl IntoIterator<Item = OsString>) -> Result<Invocation, Usa
         Some(s) if s == OsStr::new("explain") => Ok(Invocation::Explain(parse_explain(argv)?)),
         Some(s) if s == OsStr::new("audit") => Ok(Invocation::Audit(parse_audit(argv)?)),
         Some(s) if s == OsStr::new("status") => Ok(Invocation::Status(parse_status(argv)?)),
+        Some(s) if s == OsStr::new("dogfood-evidence") => {
+            Ok(Invocation::DogfoodEvidence(parse_dogfood_evidence(argv)?))
+        }
         other => Err(UsageError::UnknownSubcommand {
             found: other.map(OsStr::to_os_string),
         }),
@@ -443,6 +459,37 @@ pub fn parse_status(
         return Err(UsageError::UnexpectedStatusArgument { found });
     }
     Ok(StatusInvocation)
+}
+
+/// Parse an `eltanin dogfood-evidence [--log <path>]` invocation
+/// (HORO-1376). `argv` starts with the `dogfood-evidence` token itself,
+/// mirroring [`parse_audit`]'s own `--log` grammar exactly — this
+/// command takes no other argument.
+///
+/// # Errors
+///
+/// Returns [`UsageError`] on any malformed invocation.
+pub fn parse_dogfood_evidence(
+    argv: impl IntoIterator<Item = OsString>,
+) -> Result<DogfoodEvidenceInvocation, UsageError> {
+    let mut argv = argv.into_iter();
+
+    let first = argv.next();
+    if first.as_deref() != Some(OsStr::new("dogfood-evidence")) {
+        return Err(UsageError::NotDogfoodEvidenceSubcommand { found: first });
+    }
+
+    let mut log_path: Option<PathBuf> = None;
+    while let Some(arg) = argv.next() {
+        if arg == OsStr::new("--log") {
+            let value = argv.next().ok_or(UsageError::LogMissingValue)?;
+            log_path = Some(PathBuf::from(value));
+            continue;
+        }
+        return Err(UsageError::UnrecognizedArgument { found: arg });
+    }
+
+    Ok(DogfoodEvidenceInvocation { log_path })
 }
 
 /// Parse an `eltanin approve ...` invocation. `argv` starts with the

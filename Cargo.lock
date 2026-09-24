@@ -175,6 +175,7 @@ version = "0.1.0"
 dependencies = [
  "eltanin-audit",
  "eltanin-core",
+ "eltanin-dogfood",
  "eltanin-protocol",
  "rustix",
  "serde",

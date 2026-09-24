@@ -528,3 +528,33 @@ eltanin audit [--limit N] [--log <path>]
   a reasonable human-facing default. Use `eltanin explain` when a
   specific record's exact position in one agent instance's own sequence
   matters.
+
+## `eltanin dogfood-evidence` — DogFood evidence projection (HORO-1376)
+
+```
+eltanin dogfood-evidence [--log <path>]
+```
+
+- Read-only: projects the existing native audit log (via
+  `eltanin_dogfood::adapter`) into the frozen ADR-0012 `schema_version: 1`
+  DogFood evidence event, printed as NDJSON (one event per line). Never
+  writes to the audit log and is never wired into any authorization/
+  enforcement path — see `crates/eltanin-dogfood/src/lib.rs`'s own crate
+  docs. `--log`/`ELTANIN_AUDIT_LOG` resolution and the "no log yet" vs.
+  "unreadable" distinction are identical to `eltanin explain`'s, above.
+- Every invocation's output leads with a fixed branch-qualification
+  notice: observe-mode authorization semantics are real only on the
+  `next/mvp-2.0` development branch, never a shipped `main` build (ADR-0012
+  §11.4) — this is never silently omitted.
+- `ELTANIN_DOGFOOD_PROFILE` (`personal` by default, exact-match
+  `corporate` to opt in) selects the evidence `profile`/`origin_profile`.
+  Personal profile can never deny, block, or kill anything — see
+  `crates/eltanin-dogfood/src/adapter.rs`'s own module docs on why this
+  holds structurally, not just by convention.
+- Almost every projected record is `eligibility = non_replayable_operation`
+  (Eltanin's authorization/session/delegation family is explicitly
+  excluded from transfer eligibility by ADR-0012 §7); the one derived
+  aggregate/coverage/gap summary record per invocation is the only
+  `eligibility = replayable_evidence` record this command ever emits.
+  This adapter has **no upload leg** by explicit product design
+  (ADR-0012 §12) — `destination` is always `local_only`.

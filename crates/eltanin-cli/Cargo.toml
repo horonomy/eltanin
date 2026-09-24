@@ -22,6 +22,10 @@ eltanin-protocol = { path = "../eltanin-protocol", version = "0.1.0" }
 # `eltanin-cli` only ever *reads* the log through this dependency; see
 # `eltanin_audit::explain`'s own module docs on why a reader crate must
 # never feed back into authorization.
+# `eltanin dogfood-evidence` (HORO-1376) reads through this crate's own
+# read-only projection — see `eltanin_dogfood`'s own crate docs for why
+# this adds no networking dependency.
+eltanin-dogfood = { path = "../eltanin-dogfood", version = "0.1.0" }
 eltanin-audit = { path = "../eltanin-audit", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }

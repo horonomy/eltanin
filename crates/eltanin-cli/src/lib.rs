@@ -29,6 +29,7 @@ pub mod args;
 pub mod audit;
 pub mod client;
 pub mod context;
+pub mod dogfood_evidence;
 pub mod exit;
 pub mod explain;
 pub mod failure;
