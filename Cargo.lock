@@ -194,6 +194,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "eltanin-dogfood"
+version = "0.1.0"
+dependencies = [
+ "eltanin-audit",
+ "eltanin-core",
+ "eltanin-protocol",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "eltanin-linux"
 version = "0.1.0"
 dependencies = [
