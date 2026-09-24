@@ -106,7 +106,7 @@ pub fn project(
 /// `authz/{session, session_state, event, risk, delegation, approval}`
 /// family") as never eligible for transfer. There is no code path in
 /// this function that can produce `replayable_evidence` — that variant
-/// is reserved for [`build_summary`]'s derived aggregate record.
+/// is reserved for `build_summary`'s derived aggregate record.
 ///
 /// # Errors
 ///
@@ -345,10 +345,10 @@ fn build_summary(
 /// a pure function of `scan` rather than a hidden field on [`Event`] so
 /// a caller (the CLI) can render it alongside the summary event without
 /// this crate smuggling an extra key into the hashed/canonicalized
-/// object. Mirrors [`build_summary`]'s own `rotation_occurred` check
-/// exactly — kept as two call sites rather than one shared private
-/// helper only because each is a two-line, trivially-inspectable
-/// computation over the same `scan.retention_floor` field.
+/// object. Kept as two call sites rather than one shared private helper
+/// only because each is a two-line, trivially-inspectable computation
+/// over the same `scan.retention_floor` field — mirrors `build_summary`'s
+/// own `rotation_occurred` check exactly.
 #[must_use]
 pub fn summary_unsupported_notes(scan: &LogScan) -> Vec<&'static str> {
     let mut notes = vec![

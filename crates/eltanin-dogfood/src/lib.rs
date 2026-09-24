@@ -24,7 +24,8 @@
 //! # No hardware/GPU claim
 //!
 //! This adapter makes no device-level enforcement claim of any kind —
-//! see `tests/no_gpu_claim.rs` and [`adapter::UNSUPPORTED_DEVICE_LEVEL_GPU_ENFORCEMENT`].
+//! see `tests/no_gpu_claim.rs` and
+//! [`event::unsupported::DEVICE_LEVEL_GPU_ENFORCEMENT`].
 //!
 //! # No networking dependency
 //!

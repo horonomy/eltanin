@@ -143,7 +143,7 @@ pub struct ContentHash {
 
 /// The frozen `schema_version: 1` `DogFood` evidence event (ADR-0012 §3).
 /// Field set is exactly §3's — no extra fields. `unsupported`/adapter
-/// health notes live in [`crate::adapter::Summary`], never here: adding a
+/// health notes live in [`crate::adapter::Projection`], never here: adding a
 /// field to this struct would silently break cross-product `content_hash`
 /// comparability (`dogfood-evidence-canonicalization-v1.md`), which §3
 /// itself gates behind a minor ADR revision.
@@ -233,7 +233,7 @@ pub fn format_timestamp_or_sentinel(time: WallClockTime) -> String {
 }
 
 /// Reasons this adapter could not populate a field the way ADR-0012 §3
-/// would ideally want, surfaced in [`crate::adapter::Summary::unsupported`]
+/// would ideally want, surfaced in [`crate::adapter::summary_unsupported_notes`]
 /// — never inside [`Event`] itself (see this module's top doc comment).
 pub mod unsupported {
     pub const INGESTED_AT_IS_PROJECTION_TIME: &str =
