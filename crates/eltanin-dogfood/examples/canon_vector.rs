@@ -29,7 +29,7 @@
 //!
 //! This example does not compare against any pin -- the calling bash
 //! driver (`scripts/dogfood-journey/eltanin_canon_vector.sh`) does the
-//! comparison and emits the DogFood conformance check row. This example
+//! comparison and emits the `DogFood` conformance check row. This example
 //! stays dumb.
 
 use std::io::Read;
@@ -218,12 +218,11 @@ fn main() {
         }
     };
 
-    let event_value = match vector.get("event") {
-        Some(event) => event.clone(),
-        None => {
-            eprintln!("FATAL: vector JSON has no \"event\" member");
-            std::process::exit(1);
-        }
+    let event_value = if let Some(event) = vector.get("event") {
+        event.clone()
+    } else {
+        eprintln!("FATAL: vector JSON has no \"event\" member");
+        std::process::exit(1);
     };
 
     let raw_event: RawEvent = match serde_json::from_value(event_value) {
