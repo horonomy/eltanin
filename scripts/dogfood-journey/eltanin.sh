@@ -550,6 +550,40 @@ else:
         rationale=f"enforce-mode events found: {len(enforce_events)}; missing scope_id on at least one",
     )
 
+# DFC-MODE-01: personal + observe on a would-deny operation never
+# actually blocks. The Shadow-mode phase above ran a real would-DENY
+# observation (fake-gpu-1, denied by the policy) alongside a real
+# would-allow one (fake-gpu-0) — both through the real agentd, not a
+# mock. This asserts, over every real observe-mode decision event whose
+# would_action was actually "deny", that actual_action never became
+# "deny" too (already-proven at the library level per
+# crates/eltanin-dogfood/tests/mode_mapping.rs:16-27 — this is new
+# coverage of the same guarantee through the real CLI path end to end).
+mode01_would_deny_events = [
+    e for e in decision_events if e.get("decision_mode") == "observe" and e.get("would_action") == "deny"
+]
+mode01_ok = bool(mode01_would_deny_events) and all(
+    e.get("actual_action") != "deny" for e in mode01_would_deny_events
+)
+if mode01_ok:
+    emit(
+        "DFC-MODE-01",
+        "PROVEN",
+        f"{len(mode01_would_deny_events)} real observe-mode decision event(s) with a real "
+        "would_action=deny (the fake-gpu-1 profile, genuinely denied by the loaded policy) "
+        "never produced actual_action=deny — personal+observe never blocks",
+    )
+else:
+    emit(
+        "DFC-MODE-01",
+        "FAILED",
+        "personal+observe on a would-deny operation never actually blocks",
+        rationale=(
+            f"real would_action=deny observe-mode events found: {len(mode01_would_deny_events)}; "
+            "expected at least one, and none of them may have actual_action=deny"
+        ),
+    )
+
 # DFC-ELIG-02: authorization/delegation record (session/lease lifecycle)
 # is classified non_replayable_operation for every real decision event.
 if decision_events and all(e.get("eligibility") == "non_replayable_operation" for e in decision_events):
