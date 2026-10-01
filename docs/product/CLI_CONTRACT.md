@@ -45,6 +45,18 @@ eltanin run --profile <name> -- <program> [args...]
   named `sh` with two literal arguments; nothing re-parses that string.
   Mechanically guarded by `crates/eltanin-cli/tests/architecture_no_shell.rs`.
 
+## `--help` / `--version` (HORO-1615)
+
+`eltanin --help`/`-h` and `eltanin --version`/`-V` are recognized as the
+first argument and exit 0, independent of `run`'s own grammar above — they
+do not require `--profile`/`--`/a command, and never launch anything.
+`--version` prints `eltanin <CARGO_PKG_VERSION>`, read from the workspace's
+single authoritative version (`[workspace.package].version` in the root
+`Cargo.toml`, inherited by `crates/eltanin-cli/Cargo.toml` via
+`version.workspace = true` — not an independently hand-maintained
+constant). Any other unrecognized first argument still falls through to
+the pre-existing `NotRunSubcommand` usage error (exit 64).
+
 ## Profiles
 
 A profile is a named, versioned document (`Versioned<ProfileDocument>`)

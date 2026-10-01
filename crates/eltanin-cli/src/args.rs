@@ -9,6 +9,32 @@ use std::ffi::{OsStr, OsString};
 
 use crate::profile::ProfileName;
 
+/// Bounded, lossy rendering of a rejected first argument for the
+/// `NotRunSubcommand` error message. Two things the raw `{:?}` (Debug)
+/// rendering got wrong (HORO-1615/ADR-0013 §5): the message length scaled
+/// directly with the argument's length with no cap (a genuinely unbounded
+/// line, independent of terminal width), and it leaked Rust's
+/// `Some("...")`/`None` Debug wrapper into user-facing text instead of
+/// showing the value itself. Lossy UTF-8 is fine here -- this is a
+/// display-only message, not the argv that gets forwarded to a child
+/// process (see the module doc's OsString-fidelity invariant above).
+const MAX_DISPLAY_LEN: usize = 60;
+
+fn display_found(found: Option<&OsString>) -> String {
+    match found {
+        None => "nothing".to_string(),
+        Some(value) => {
+            let text = value.to_string_lossy();
+            if text.chars().count() <= MAX_DISPLAY_LEN {
+                format!("\"{text}\"")
+            } else {
+                let truncated: String = text.chars().take(MAX_DISPLAY_LEN).collect();
+                format!("\"{truncated}...\"")
+            }
+        }
+    }
+}
+
 /// A fully parsed `eltanin run` invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunInvocation {
@@ -21,7 +47,10 @@ pub struct RunInvocation {
 /// [`crate::exit::ExitCode::Usage`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum UsageError {
-    #[error("expected the first argument to be \"run\", got {found:?}")]
+    #[error(
+        "expected the first argument to be \"run\", got {}",
+        display_found(found.as_ref())
+    )]
     NotRunSubcommand { found: Option<OsString> },
     #[error("--profile requires a value")]
     ProfileMissingValue,
