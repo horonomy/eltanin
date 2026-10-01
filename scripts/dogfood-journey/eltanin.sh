@@ -2,7 +2,8 @@
 # Eltanin DogFood conformance journey (HORO-1381 sub-ticket 3).
 #
 # Implements tools/dogfood-conformance/JOURNEY-CONTRACT.md
-# (horonomy/internal-docs, commit 797cb46c) against the real eltanin /
+# (horonomy/internal-docs, schema 1.2.0, commit 747b23d2) against the
+# real eltanin /
 # eltanin-agentd binaries on this branch (next/mvp-2.0 — the DogFood
 # adapter and observe-mode authz are not on `main`; see ADR-0012 §11.4).
 #
@@ -11,7 +12,8 @@
 # `ELTANIN_DOGFOOD_PROFILE=personal eltanin dogfood-evidence --log <log>`
 # -> parse its real (non-pure-NDJSON) output -> independently validate
 # and canonically re-hash each real projected event -> emit NDJSON check
-# rows to stdout per the harness contract.
+# rows, plus the two journey-level metadata rows (event_counts,
+# artifact), to stdout per the harness contract.
 #
 # stdout: ONLY NDJSON check rows. Everything else -> stderr.
 #
@@ -41,6 +43,13 @@ die() { log "FATAL: $*"; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT" || die "could not cd to repo root $REPO_ROOT"
+
+# Real commit identity of this checkout, read before any work is done.
+# Empty (not a git checkout / no git on PATH) means the journey-level
+# `artifact` row is omitted entirely below -- JOURNEY-CONTRACT.md
+# explicitly allows omitting it, whereas an empty commit_sha would be a
+# hard harness error, and dying here would throw away every check row.
+COMMIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
 
 # --- 0. Resolve/build the real binaries -------------------------------
 
@@ -236,12 +245,12 @@ cargo tree -p eltanin-dogfood --no-default-features 2>"$WORKDIR/cargo-tree.stder
 
 # --- 8. Analysis + NDJSON emission (Python, stdout is ONLY check rows) -
 
-python3 - "$RAW_OUT" "$RAW_OUT_2" "$GAP_OUT" "$DEP_CHECK_OUT" <<'PYEOF'
+python3 - "$RAW_OUT" "$RAW_OUT_2" "$GAP_OUT" "$DEP_CHECK_OUT" "$AUDIT_LOG" "$COMMIT_SHA" <<'PYEOF'
 import json
 import hashlib
 import sys
 
-raw1_path, raw2_path, gap_path, dep_check_path = sys.argv[1:5]
+raw1_path, raw2_path, gap_path, dep_check_path, audit_log_path, commit_sha = sys.argv[1:7]
 
 BRANCH_NOTICE = (
     "Observe-mode authorization semantics are available on the MVP 2.0 "
@@ -395,6 +404,91 @@ decision_events = [e for e in events1 if e.get("eligibility") == "non_replayable
 summary_events = [e for e in events1 if e.get("eligibility") == "replayable_evidence"]
 
 rows = []
+
+# --- Journey-level metadata rows (JOURNEY-CONTRACT.md "Journey-level
+# metadata rows", schema 1.2.0) -----------------------------------------
+# Each kind is reported at most once. They are appended AHEAD of the check
+# rows so that if the harness's output-byte cap ever truncates this
+# journey's stdout, it eats a trailing check row rather than these.
+#
+# Stage vocabulary is the DogFood capability-matrix register's own
+# (docs/registers/dogfood-capability-matrix.md), not a second ontology.
+# Eltanin's register row reads: Capture SHIPPED, Local persistence SHIPPED
+# (append-only NDJSON), Analysis SHIPPED (CLI), Dashboard NOT SUPPORTED by
+# design, Uploader NOT SUPPORTED, Receiver NOT SUPPORTED. So the uploader
+# and receiver stages are the literal "not_applicable" sentinel -- never 0
+# (a real count asserting "we looked and found none") and never null:
+# Eltanin structurally has no transfer leg at all, which is exactly why
+# ADR-0012 section 12/section 10 rules that its records legitimately sit at
+# transport_state=pending indefinitely.
+#
+# All three real counts are in ONE unit -- a captured authorization audit
+# record -- and all are derived from THIS run's primary evidence path only.
+# Deliberately excluded:
+#   * the corrupted-fixture run (step 6): its log is a byte copy of this
+#     same audit log plus one line this script itself synthesized, so
+#     counting it would double-count every real record and book a
+#     fabricated line as captured evidence;
+#   * the second re-projection (raw2, step 5): it re-reads the very same
+#     records to prove event_id stability -- it captures nothing new.
+audit_lines = [line for line in read_text(audit_log_path).split("\n") if line.strip()]
+durable_records = 0
+for line in audit_lines:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    record_payload = record.get("payload") if isinstance(record, dict) else None
+    if isinstance(record_payload, dict) and record_payload.get("event_id") is not None:
+        durable_records += 1
+
+rows.append({
+    "journey_metadata": "event_counts",
+    # capture: authorization audit records the real eltanin-agentd actually
+    # wrote during Phase A (shadow) and Phase B (enforce) of this run.
+    "capture": len(audit_lines),
+    # local_durable_persistence: of those, the ones that re-read off disk as
+    # individually-recoverable append-only NDJSON records. Read back from
+    # the store rather than restated from the capture count, so a torn or
+    # partial append shows up here as a real shortfall instead of silently.
+    "local_durable_persistence": durable_records,
+    # local_analysis_dashboard: evidence events the real local analysis CLI
+    # (`eltanin dogfood-evidence`, the register's SHIPPED-via-CLI analysis
+    # stage) projected out of those persisted records. Legitimately lower
+    # than capture: the adapter projects authorization decisions, not every
+    # daemon operation. The derived summary event is excluded -- it is an
+    # aggregate ABOUT the captured records, not one of them. Eltanin has no
+    # dashboard; this stage name is the register's, covering both.
+    "local_analysis_dashboard": len(decision_events),
+    "eligible_uploader": "not_applicable",
+    "real_receiver": "not_applicable",
+})
+
+# Build IDENTITY, never installation proof. This journey builds the real
+# binaries with `cargo build --workspace --bins` (debug) straight out of
+# this live checkout and runs them in place; it never installs a published
+# artifact into a fresh environment, so clean_environment_verified is
+# false -- Eltanin has no clean-environment install-and-execute gate to
+# run, and publishes no binaries at all (its release notes say "build from
+# source at this tag"). digest is null for the same reason, compounded by
+# this journey existing only on next/mvp-2.0, which has never been
+# released: there is no image digest or GIT_REVISION-style label to name.
+if commit_sha:
+    rows.append({
+        "journey_metadata": "artifact",
+        "repo": "eltanin",
+        "commit_sha": commit_sha,
+        "build_mode": "debug",
+        "invocation_shape": "source-build",
+        "digest": None,
+        "clean_environment_verified": False,
+    })
+else:
+    eprint(
+        "WARNING: `git rev-parse HEAD` produced nothing for this checkout -- "
+        "omitting the journey_metadata=artifact row (JOURNEY-CONTRACT.md "
+        "allows omitting it; an empty commit_sha would be a hard error)"
+    )
 
 def emit(dfc_id, result, assertion, rationale=None, virtual_time=False):
     row = {
