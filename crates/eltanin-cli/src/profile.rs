@@ -226,3 +226,35 @@ pub fn load_profile(name: &ProfileName) -> Result<ProfileDocument, ProfileLoadEr
     let dir = profile_dir()?;
     load_profile_from_dir(&dir, name)
 }
+
+#[cfg(test)]
+mod display_home_relative_tests {
+    use std::path::Path;
+
+    use super::display_home_relative;
+
+    #[test]
+    fn replaces_a_home_prefixed_path_with_tilde() {
+        let home = std::env::var("HOME").expect("HOME must be set to run this test");
+        let path = Path::new(&home)
+            .join(".config")
+            .join("eltanin")
+            .join("profiles")
+            .join("x.json");
+        let rendered = display_home_relative(&path);
+        assert!(
+            rendered.starts_with('~'),
+            "expected a ~-relative path, got {rendered:?}"
+        );
+        assert!(
+            !rendered.contains(&home),
+            "the real $HOME value must not appear in the rendered path: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn leaves_a_path_outside_home_unchanged() {
+        let path = Path::new("/etc/eltanin/profiles/x.json");
+        assert_eq!(display_home_relative(path), "/etc/eltanin/profiles/x.json");
+    }
+}
