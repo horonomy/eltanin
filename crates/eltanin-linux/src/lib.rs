@@ -406,12 +406,13 @@ mod imp {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use eltanin_core::identity::ProcessAncestor;
 
         #[test]
         fn non_linux_build_reports_unsupported_not_a_guess() {
             let identity = collect_workload_identity(std::process::id());
             assert!(matches!(identity.process_start, Evidence::Unsupported));
-            assert!(identity.ancestry.is_empty());
+            assert_eq!(identity.ancestry, Vec::<ProcessAncestor>::new());
             let ctx = collect_execution_context(std::process::id());
             assert!(matches!(ctx.cgroup_path, Evidence::Unsupported));
         }
