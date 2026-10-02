@@ -81,7 +81,7 @@ fn exited_child_process_reports_missing_or_a_genuinely_different_process() {
     // child would be unsafe.
     let identity = collect_workload_identity(pid);
     match &identity.process_start {
-        Evidence::Missing { reason } => assert!(!reason.is_empty()),
+        Evidence::Missing { reason } => assert_ne!(reason, ""),
         Evidence::Present { .. } => {
             // PID already reused by a different real process — the
             // collector is reporting that real occupant, not the

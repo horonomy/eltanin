@@ -20,7 +20,7 @@ fn a_well_formed_invocation_parses() {
 fn a_command_with_no_extra_arguments_parses() {
     let invocation = parse_run(argv(&["run", "--profile", "dev", "--", "true"])).unwrap();
     assert_eq!(invocation.program, OsString::from("true"));
-    assert!(invocation.args.is_empty());
+    assert_eq!(invocation.args, Vec::<OsString>::new());
 }
 
 #[test]
