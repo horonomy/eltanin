@@ -116,18 +116,39 @@ pub enum ProfileLoadError {
          one can be derived"
     )]
     NoSearchDir,
-    #[error("profile {name:?} not found at {path}", path = path.display())]
+    #[error("profile {name:?} not found at {path}", path = display_home_relative(path))]
     NotFound { name: String, path: PathBuf },
-    #[error("failed to read profile at {path}: {reason}", path = path.display())]
+    #[error("failed to read profile at {path}: {reason}", path = display_home_relative(path))]
     Io { path: PathBuf, reason: String },
-    #[error("profile at {path} is not valid JSON: {reason}", path = path.display())]
+    #[error(
+        "profile at {path} is not valid JSON: {reason}",
+        path = display_home_relative(path)
+    )]
     Json { path: PathBuf, reason: String },
-    #[error("profile at {path}: {source}", path = path.display())]
+    #[error("profile at {path}: {source}", path = display_home_relative(path))]
     Version {
         path: PathBuf,
         #[source]
         source: eltanin_core::envelope::UnsupportedVersion,
     },
+}
+
+/// Render `path` with the user's `$HOME` prefix replaced by `~` (HORO-1652)
+/// — the profile search directory is normally under `$HOME/.config` or
+/// `$XDG_CONFIG_HOME`, and the full absolute path (including the local
+/// account's username in the home directory component) has no diagnostic
+/// value an operator can't get from the bare profile name already present
+/// in the same error. Falls back to the absolute path unchanged when `HOME`
+/// isn't set or the path isn't under it (e.g. an explicit
+/// `ELTANIN_PROFILE_DIR` override pointing elsewhere) — never panics, never
+/// loses information the operator would need to act on the error.
+fn display_home_relative(path: &Path) -> String {
+    if let Some(home) = env::var_os("HOME") {
+        if let Ok(rest) = path.strip_prefix(&home) {
+            return PathBuf::from("~").join(rest).display().to_string();
+        }
+    }
+    path.display().to_string()
 }
 
 /// Resolve the profile search directory: `ELTANIN_PROFILE_DIR` if set
@@ -204,4 +225,36 @@ pub fn load_profile_from_dir(
 pub fn load_profile(name: &ProfileName) -> Result<ProfileDocument, ProfileLoadError> {
     let dir = profile_dir()?;
     load_profile_from_dir(&dir, name)
+}
+
+#[cfg(test)]
+mod display_home_relative_tests {
+    use std::path::Path;
+
+    use super::display_home_relative;
+
+    #[test]
+    fn replaces_a_home_prefixed_path_with_tilde() {
+        let home = std::env::var("HOME").expect("HOME must be set to run this test");
+        let path = Path::new(&home)
+            .join(".config")
+            .join("eltanin")
+            .join("profiles")
+            .join("x.json");
+        let rendered = display_home_relative(&path);
+        assert!(
+            rendered.starts_with('~'),
+            "expected a ~-relative path, got {rendered:?}"
+        );
+        assert!(
+            !rendered.contains(&home),
+            "the real $HOME value must not appear in the rendered path: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn leaves_a_path_outside_home_unchanged() {
+        let path = Path::new("/etc/eltanin/profiles/x.json");
+        assert_eq!(display_home_relative(path), "/etc/eltanin/profiles/x.json");
+    }
 }
