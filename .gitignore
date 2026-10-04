@@ -5,3 +5,6 @@ Cargo.lock.bak
 .idea/
 .vscode/
 *.log
+
+# HORO-1702: generated human site and native verification artifacts
+/build/
