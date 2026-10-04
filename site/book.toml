@@ -1,0 +1,13 @@
+[book]
+title = "Eltanin · Evaluation guide"
+language = "en"
+src = "../build/book-src"
+[build]
+build-dir = "../build/site/docs"
+[output.html]
+site-url = "/docs/"
+git-repository-url = "https://github.com/horonomy/eltanin"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+[output.html.print]
+enable = false
