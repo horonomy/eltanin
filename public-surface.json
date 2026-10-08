@@ -1,0 +1,6 @@
+{
+  "base_url": "https://eltanin.horonom.com/",
+  "docs_url": "/docs/",
+  "required_navigation": ["/docs/", "https://github.com/horonomy/eltanin"],
+  "analytics": {"enabled": false}
+}
