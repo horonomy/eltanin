@@ -8,6 +8,8 @@ protected compute is unavailable without explicit authorization, and
 available only through a scoped, expiring authorization path — with no
 cloud dependency in the per-compute hot path.
 
+**Product page and hosted docs:** [eltanin.horonom.com](https://eltanin.horonom.com) ([docs](https://eltanin.horonom.com/docs/)) — Experimental MVP.
+
 ## Status
 
 **MVP 1.0 — Authorization Happy Path** (in progress). This is an
