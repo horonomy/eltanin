@@ -79,6 +79,10 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) and
 
 See [`SECURITY.md`](SECURITY.md) for the vulnerability reporting process.
 
+## Support Development
+
+This project is free and open source. If it is useful to you and you would like to, you can voluntarily support its development on [Ko-fi](https://ko-fi.com/chisanan232). Horonom is not yet an incorporated company: contributions go to the individual maintainer's personal Ko-fi account, not to a registered company. Support is optional, is not a charitable donation, and does not come with priority support or other benefits.
+
 ## License
 
 Apache License 2.0 — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
